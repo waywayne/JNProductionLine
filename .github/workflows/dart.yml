@@ -1,0 +1,37 @@
+name: Flutter Build Windows
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest  # Runs on the latest Windows environment
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2  # Checks out the code from the repository
+
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2  # Action to install Flutter SDK
+      with:
+        flutter-version: 'stable'  # You can specify a specific Flutter version, e.g., '2.10.0'
+
+    - name: Install dependencies
+      run: |
+        flutter doctor --verbose  # Verify if Flutter is set up correctly
+        flutter pub get  # Install the dependencies
+
+    - name: Build Windows
+      run: |
+        flutter build windows --release  # Build the app for Windows in release mode
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v2  # Upload build artifacts to GitHub Actions
+      with:
+        name: windows-build
+        path: build/windows/runner/Release/your_app_name.exe  # Replace 'your_app_name.exe' with your actual app name
