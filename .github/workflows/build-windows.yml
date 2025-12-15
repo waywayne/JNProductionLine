@@ -1,0 +1,93 @@
+name: Build Windows Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+    
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyvisa pyvisa-py pandas openpyxl
+    
+    - name: Flutter doctor
+      run: flutter doctor -v
+    
+    - name: Get Flutter dependencies
+      run: flutter pub get
+    
+    - name: Build Windows application
+      run: flutter build windows --release
+    
+    - name: Get version from pubspec
+      id: version
+      shell: pwsh
+      run: |
+        $version = (Get-Content pubspec.yaml | Select-String -Pattern 'version:\s*(.+)').Matches.Groups[1].Value
+        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+        echo "Version: $version"
+    
+    - name: Package application
+      shell: pwsh
+      run: |
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $zipName = "jn_production_line_windows_v${version}_${timestamp}.zip"
+        
+        # 创建打包目录
+        New-Item -ItemType Directory -Force -Path package
+        
+        # 复制必要文件
+        Copy-Item -Path "build/windows/runner/Release/*" -Destination "package/" -Recurse
+        Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        
+        # 创建 ZIP
+        Compress-Archive -Path "package/*" -DestinationPath $zipName
+        
+        echo "ZIP_NAME=$zipName" >> $env:GITHUB_OUTPUT
+        echo "Created: $zipName"
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-release
+        path: jn_production_line_windows_*.zip
+        retention-days: 90
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: jn_production_line_windows_*.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

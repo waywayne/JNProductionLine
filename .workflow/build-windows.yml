@@ -1,0 +1,67 @@
+# Gitee Go CI/CD 配置
+# 文档: https://gitee.com/help/articles/4378
+
+version: '1.0'
+
+name: Build Flutter Windows Application
+
+# 触发条件
+triggers:
+  push:
+    branches:
+      - master
+      - main
+
+# 构建环境
+clone:
+  depth: 1
+
+# 构建步骤
+steps:
+  # 步骤 1: 环境准备
+  - step: setup-environment@1.0
+    name: 设置构建环境
+    with:
+      os: windows
+      flutter_version: '3.24.0'
+      python_version: '3.11'
+  
+  # 步骤 2: 安装 Python 依赖
+  - step: run-command@1.0
+    name: 安装 Python 依赖
+    commands:
+      - python -m pip install --upgrade pip
+      - pip install pyvisa pyvisa-py pandas openpyxl
+  
+  # 步骤 3: 获取 Flutter 依赖
+  - step: run-command@1.0
+    name: 获取 Flutter 依赖
+    commands:
+      - flutter pub get
+  
+  # 步骤 4: 构建 Windows 应用
+  - step: run-command@1.0
+    name: 构建 Windows 应用
+    commands:
+      - flutter build windows --release
+  
+  # 步骤 5: 打包产物
+  - step: run-command@1.0
+    name: 打包构建产物
+    commands:
+      - cd build/windows/runner/Release
+      - 7z a -tzip jn_production_line_windows.zip *
+      - move jn_production_line_windows.zip ../../../../
+  
+  # 步骤 6: 上传产物
+  - step: upload-artifact@1.0
+    name: 上传构建产物
+    with:
+      path: jn_production_line_windows.zip
+      name: windows-release
+
+# 通知配置（可选）
+notifications:
+  - type: email
+    on:
+      - failure

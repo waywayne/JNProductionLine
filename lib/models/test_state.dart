@@ -1,0 +1,465 @@
+import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:typed_data';
+import '../services/serial_service.dart';
+import '../services/production_test_commands.dart';
+import 'log_state.dart';
+
+enum TestStatus {
+  waiting,
+  testing,
+  pass,
+  fail,
+  timeout,
+  error,
+}
+
+class TestItem {
+  final String name;
+  final String method;
+  final String result;
+  final Color backgroundColor;
+  final TestStatus status;
+  final String? errorMessage;
+
+  TestItem({
+    required this.name,
+    required this.method,
+    required this.result,
+    required this.backgroundColor,
+    this.status = TestStatus.waiting,
+    this.errorMessage,
+  });
+  
+  TestItem copyWith({
+    String? name,
+    String? method,
+    String? result,
+    Color? backgroundColor,
+    TestStatus? status,
+    String? errorMessage,
+  }) {
+    return TestItem(
+      name: name ?? this.name,
+      method: method ?? this.method,
+      result: result ?? this.result,
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      status: status ?? this.status,
+      errorMessage: errorMessage ?? this.errorMessage,
+    );
+  }
+}
+
+class TestGroup {
+  final String name;
+  final List<TestItem> items;
+
+  TestGroup({
+    required this.name,
+    required this.items,
+  });
+}
+
+class TestState extends ChangeNotifier {
+  String _testScriptPath = 'Choose script file path';
+  String _configFilePath = 'Choose config file path';
+  
+  final SerialService _serialService = SerialService();
+  String? _selectedPort;
+  bool _isRunningTest = false;
+  
+  // 单个测试组，默认为空
+  TestGroup? _currentTestGroup;
+  
+  // 日志状态
+  LogState? _logState;
+
+  String get testScriptPath => _testScriptPath;
+  String get configFilePath => _configFilePath;
+  TestGroup? get currentTestGroup => _currentTestGroup;
+  bool get isConnected => _serialService.isConnected;
+  String? get selectedPort => _selectedPort;
+  bool get isRunningTest => _isRunningTest;
+  
+  List<String> get availablePorts => SerialService.getAvailablePorts();
+  
+  void setLogState(LogState logState) {
+    _logState = logState;
+    _serialService.setLogState(logState);
+  }
+
+  void setTestScriptPath(String path) {
+    _testScriptPath = path;
+    notifyListeners();
+  }
+
+  void setConfigFilePath(String path) {
+    _configFilePath = path;
+    notifyListeners();
+  }
+
+  /// Connect to serial port
+  Future<bool> connectToPort(String portName) async {
+    _logState?.info('正在连接串口: $portName');
+    
+    // 直接使用 2000000 波特率连接（不使用双线UART初始化，与 WindTerm 一致）
+    _logState?.info('使用 2000000 波特率连接（与 WindTerm 配置一致）');
+    bool success = await _serialService.connect(
+      portName,
+      baudRate: 2000000,
+      useDualLineUartInit: false, // 不发送初始化数据，只监听
+    );
+    
+    if (success) {
+      _selectedPort = portName;
+      _logState?.success('串口连接成功: $portName');
+      
+      // 连接成功后只监听，不发送任何命令
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('开始监听串口数据（不发送任何命令）');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      // await _serialService.sendExitSleepMode(retries: 5);
+      
+      // 创建测试组
+      _currentTestGroup = TestGroup(
+        name: portName,
+        items: [],
+      );
+      notifyListeners();
+    } else {
+      _logState?.error('串口连接失败: $portName');
+      _logState?.error('请检查:');
+      _logState?.error('  1. 是否有其他程序（如WindTerm）正在使用该串口');
+      _logState?.error('  2. 运行: lsof | grep $portName 查看占用进程');
+      _logState?.error('  3. 运行: sudo chmod 666 $portName 修改权限');
+    }
+    return success;
+  }
+  
+  /// Disconnect from serial port
+  Future<void> disconnect() async {
+    _logState?.info('正在断开串口连接');
+    await _serialService.disconnect();
+    _selectedPort = null;
+    _currentTestGroup = null; // 断开连接时清空测试组
+    _logState?.info('串口已断开');
+    notifyListeners();
+  }
+  
+  /// Update test item with status and error message
+  void _updateTestItemWithStatus(int itemIndex, String result, Color backgroundColor, TestStatus status, {String? errorMessage}) {
+    if (_currentTestGroup == null || itemIndex >= _currentTestGroup!.items.length) return;
+    
+    final item = _currentTestGroup!.items[itemIndex];
+    
+    _currentTestGroup = TestGroup(
+      name: _currentTestGroup!.name,
+      items: List.from(_currentTestGroup!.items)..[itemIndex] = TestItem(
+        name: item.name,
+        method: item.method,
+        result: result,
+        backgroundColor: backgroundColor,
+        status: status,
+        errorMessage: errorMessage,
+      ),
+    );
+    
+    notifyListeners();
+  }
+  
+  /// Retry a specific test
+  Future<void> retryTest(int itemIndex) async {
+    if (!_serialService.isConnected) {
+      debugPrint('Please connect to a serial port first');
+      return;
+    }
+    
+    if (_isRunningTest) {
+      debugPrint('Test already running');
+      return;
+    }
+    
+    _isRunningTest = true;
+    notifyListeners();
+    
+    // Re-run tests starting from the failed item
+    await _runProductionTestSequence();
+    
+    _isRunningTest = false;
+    notifyListeners();
+  }
+  
+  /// Run production test sequence
+  Future<void> _runProductionTestSequence() async {
+    if (!_serialService.isConnected) {
+      debugPrint('Serial port not connected');
+      _logState?.error('串口未连接，无法开始测试');
+      return;
+    }
+    
+    if (_currentTestGroup == null) {
+      debugPrint('No test group available');
+      _logState?.error('没有可用的测试组');
+      return;
+    }
+    
+    try {
+      // 测试开始前先发送退出休眠命令
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('准备开始产测序列');
+      _logState?.info('发送退出休眠命令以唤醒设备...');
+      await _serialService.sendExitSleepMode(retries: 3);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Test sequence based on the specification
+      final testSequence = [
+        {'name': '产测开始', 'cmd': ProductionTestCommands.createStartTestCommand(), 'cmdCode': ProductionTestCommands.cmdStartTest},
+        {'name': '获取设备电压', 'cmd': ProductionTestCommands.createGetVoltageCommand(), 'cmdCode': ProductionTestCommands.cmdGetVoltage},
+        {'name': '获取设备电量', 'cmd': ProductionTestCommands.createGetCurrentCommand(), 'cmdCode': ProductionTestCommands.cmdGetCurrent},
+        {'name': '获取充电状态', 'cmd': ProductionTestCommands.createGetChargeStatusCommand(), 'cmdCode': ProductionTestCommands.cmdGetChargeStatus},
+        {'name': '控制WiFi', 'cmd': ProductionTestCommands.createControlWifiCommand(), 'cmdCode': ProductionTestCommands.cmdControlWifi},
+        {'name': '控制LED灯(外侧)', 'cmd': ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledOuter), 'cmdCode': ProductionTestCommands.cmdControlLED},
+        {'name': '控制LED灯(内侧)', 'cmd': ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledInner), 'cmdCode': ProductionTestCommands.cmdControlLED},
+        {'name': '控制SPK0', 'cmd': ProductionTestCommands.createControlSPKCommand(ProductionTestCommands.spk0), 'cmdCode': ProductionTestCommands.cmdControlSPK},
+        {'name': '控制SPK1', 'cmd': ProductionTestCommands.createControlSPKCommand(ProductionTestCommands.spk1), 'cmdCode': ProductionTestCommands.cmdControlSPK},
+        {'name': 'Touch左侧', 'cmd': ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchLeft), 'cmdCode': ProductionTestCommands.cmdTouch},
+        {'name': 'Touch右侧', 'cmd': ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchRight), 'cmdCode': ProductionTestCommands.cmdTouch},
+        {'name': '控制MIC0', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic0), 'cmdCode': ProductionTestCommands.cmdControlMIC},
+        {'name': '控制MIC1', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic1), 'cmdCode': ProductionTestCommands.cmdControlMIC},
+        {'name': '控制MIC2', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic2), 'cmdCode': ProductionTestCommands.cmdControlMIC},
+        {'name': 'RTC获取时间', 'cmd': ProductionTestCommands.createRTCCommand(ProductionTestCommands.rtcOptGetTime), 'cmdCode': ProductionTestCommands.cmdRTC},
+        {'name': '光敏传感器', 'cmd': ProductionTestCommands.createLightSensorCommand(), 'cmdCode': ProductionTestCommands.cmdLightSensor},
+        {'name': 'IMU数据', 'cmd': ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptGetData), 'cmdCode': ProductionTestCommands.cmdIMU},
+        {'name': '产测结束', 'cmd': ProductionTestCommands.createEndTestCommand(), 'cmdCode': ProductionTestCommands.cmdEndTest},
+      ];
+      
+      // Initialize test items for this group
+      _currentTestGroup = TestGroup(
+        name: _currentTestGroup!.name,
+        items: testSequence.map((test) => TestItem(
+          name: test['name'] as String,
+          method: 'Auto',
+          result: 'Waiting',
+          backgroundColor: Colors.grey[300]!,
+        )).toList(),
+      );
+      notifyListeners();
+      
+      // Run each test
+      for (int i = 0; i < testSequence.length; i++) {
+        final test = testSequence[i];
+        final testName = test['name'] as String;
+        final command = test['cmd'] as dynamic;
+        final cmdCode = test['cmdCode'] as int;
+        
+        debugPrint('Running test: $testName');
+        
+        // Update status to testing
+        _updateTestItemWithStatus(i, 'Testing', const Color(0xFFFFFF00), TestStatus.testing);
+        
+        // Send command and wait for response with Module ID and Message ID
+        final response = await _serialService.sendCommandAndWaitResponse(
+          command,
+          timeout: const Duration(seconds: 10),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+        
+        // Wait a bit between commands
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        if (response == null) {
+          debugPrint('Test $testName: Timeout');
+          _updateTestItemWithStatus(i, 'Timeout', const Color(0xFFFF6347), TestStatus.timeout, errorMessage: '设备响应超时');
+          break;
+        } else if (response.containsKey('error')) {
+          debugPrint('Test $testName: Error - ${response['error']}');
+          _updateTestItemWithStatus(i, 'Error', const Color(0xFFFF6347), TestStatus.error, errorMessage: response['error']);
+          break;
+        } else {
+          // Parse response based on command type
+          String result = 'Pass';
+          TestStatus status = TestStatus.pass;
+          String? errorMsg;
+          
+          try {
+            switch (cmdCode) {
+              case ProductionTestCommands.cmdGetVoltage:
+                final voltage = ProductionTestCommands.parseVoltageResponse(response['payload']);
+                result = voltage != null ? 'Pass (${voltage}mV)' : 'Fail';
+                status = voltage != null ? TestStatus.pass : TestStatus.fail;
+                if (voltage == null) errorMsg = '无法解析电压数据';
+                break;
+                
+              case ProductionTestCommands.cmdGetCurrent:
+                final current = ProductionTestCommands.parseCurrentResponse(response['payload']);
+                result = current != null ? 'Pass ($current%)' : 'Fail';
+                status = current != null ? TestStatus.pass : TestStatus.fail;
+                if (current == null) errorMsg = '无法解析电量数据';
+                break;
+                
+              case ProductionTestCommands.cmdGetChargeStatus:
+                final chargeStatus = ProductionTestCommands.parseChargeStatusResponse(response['payload']);
+                if (chargeStatus != null) {
+                  result = 'Pass (${ProductionTestCommands.getChargeModeName(chargeStatus['mode']!)})';
+                  status = TestStatus.pass;
+                } else {
+                  result = 'Fail';
+                  status = TestStatus.fail;
+                  errorMsg = '无法解析充电状态';
+                }
+                break;
+                
+              case ProductionTestCommands.cmdTouch:
+                final touchValue = ProductionTestCommands.parseTouchResponse(response['payload']);
+                result = touchValue != null ? 'Pass (CDC: $touchValue)' : 'Fail';
+                status = touchValue != null ? TestStatus.pass : TestStatus.fail;
+                if (touchValue == null) errorMsg = '无法解析Touch数据';
+                break;
+                
+              case ProductionTestCommands.cmdRTC:
+                final timestamp = ProductionTestCommands.parseRTCResponse(response['payload']);
+                if (timestamp != null) {
+                  final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+                  result = 'Pass (${dateTime.toString()})';
+                  status = TestStatus.pass;
+                } else {
+                  result = 'Fail';
+                  status = TestStatus.fail;
+                  errorMsg = '无法解析RTC时间';
+                }
+                break;
+                
+              case ProductionTestCommands.cmdLightSensor:
+                final lightValue = ProductionTestCommands.parseLightSensorResponse(response['payload']);
+                result = lightValue != null ? 'Pass (${lightValue.toStringAsFixed(2)} lux)' : 'Fail';
+                status = lightValue != null ? TestStatus.pass : TestStatus.fail;
+                if (lightValue == null) errorMsg = '无法解析光敏数据';
+                break;
+                
+              case ProductionTestCommands.cmdIMU:
+                final imuData = ProductionTestCommands.parseIMUResponse(response['payload']);
+                if (imuData != null) {
+                  result = 'Pass (Accel: ${imuData['accel_x']?.toStringAsFixed(2)}, ${imuData['accel_y']?.toStringAsFixed(2)}, ${imuData['accel_z']?.toStringAsFixed(2)})';
+                  status = TestStatus.pass;
+                } else {
+                  result = 'Fail';
+                  status = TestStatus.fail;
+                  errorMsg = '无法解析IMU数据';
+                }
+                break;
+                
+              default:
+                // For other commands, just check if we got a response
+                result = 'Pass';
+                status = TestStatus.pass;
+                break;
+            }
+          } catch (e) {
+            result = 'Error';
+            status = TestStatus.error;
+            errorMsg = '解析响应时出错: $e';
+          }
+          
+          debugPrint('Test $testName: $result');
+          _updateTestItemWithStatus(
+            i, 
+            result, 
+            status == TestStatus.pass ? const Color(0xFF4CAF50) : const Color(0xFFFF6347),
+            status,
+            errorMessage: errorMsg,
+          );
+          
+          if (status != TestStatus.pass) {
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Test error: $e');
+    }
+  }
+  
+  void startTest() async {
+    if (_isRunningTest) {
+      debugPrint('Test already running');
+      return;
+    }
+    
+    if (!_serialService.isConnected) {
+      debugPrint('Please connect to a serial port first');
+      return;
+    }
+    
+    if (_currentTestGroup == null) {
+      debugPrint('No test group available');
+      return;
+    }
+    
+    _isRunningTest = true;
+    notifyListeners();
+    
+    debugPrint('Starting test for: ${_currentTestGroup!.name}');
+    await _runProductionTestSequence();
+    
+    _isRunningTest = false;
+    notifyListeners();
+  }
+  
+  /// Run manual test for a single command (non-blocking, allows concurrent execution)
+  Future<void> runManualTest(String testName, dynamic command, {int? moduleId, int? messageId}) async {
+    if (!_serialService.isConnected) {
+      debugPrint('Serial port not connected');
+      _logState?.error('[$testName] 串口未连接', type: LogType.debug);
+      return;
+    }
+    
+    // 不再检查 _isRunningTest，允许并发执行多个手动测试
+    
+    try {
+      debugPrint('Running manual test: $testName');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔧 手动测试: $testName', type: LogType.debug);
+      _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}', type: LogType.debug);
+      
+      // Send command and wait for response
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: moduleId ?? ProductionTestCommands.moduleId,
+        messageId: messageId ?? ProductionTestCommands.messageId,
+      );
+      
+      if (response != null) {
+        if (response.containsKey('error')) {
+          debugPrint('✗ $testName error: ${response['error']}');
+          _logState?.error('❌ $testName - 错误: ${response['error']}', type: LogType.debug);
+        } else {
+          debugPrint('✓ $testName completed successfully');
+          _logState?.success('✅ $testName - 执行成功', type: LogType.debug);
+          
+          // 显示响应数据
+          if (response.containsKey('payload') && response['payload'] != null) {
+            final payload = response['payload'] as Uint8List;
+            _logState?.info('📦 响应数据 (${payload.length} bytes)', type: LogType.debug);
+          }
+        }
+      } else {
+        debugPrint('✗ $testName timeout or failed');
+        _logState?.warning('⏱️  $testName - 超时或无响应', type: LogType.debug);
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    } catch (e) {
+      debugPrint('Error running manual test: $e');
+      _logState?.error('❌ $testName - 异常: $e', type: LogType.debug);
+    }
+    // 不再设置 _isRunningTest = false，因为不再使用阻塞机制
+  }
+  
+  @override
+  void dispose() {
+    _serialService.dispose();
+    super.dispose();
+  }
+}
