@@ -1,0 +1,97 @@
+version: 1.0
+
+name: flutter-windows-build
+displayName: FlutterWindowsBuild
+
+trigger:
+  push:
+    branches:
+      - master
+      - main
+
+variables:
+  FLUTTER_VERSION: '3.24.0'
+  BUILD_TYPE: 'release'
+
+stages:
+  - stage: prepare
+    displayName: PrepareBuildEnvironment
+    jobs:
+      - job: setup
+        displayName: EnvironmentSetup
+        pool:
+          vmImage: 'windows-latest'
+        steps:
+          - task: PowerShell@2
+            displayName: CheckEnvironment
+            inputs:
+              targetType: 'inline'
+              script: |
+                $PSVersionTable.PSVersion
+                python --version
+                Get-Location
+
+  - stage: build
+    displayName: BuildApplication
+    dependsOn: prepare
+    jobs:
+      - job: build_windows
+        displayName: BuildWindowsApplication
+        pool:
+          vmImage: 'windows-latest'
+        steps:
+          - checkout: self
+            displayName: CheckoutCode
+            clean: true
+          
+          - task: PowerShell@2
+            displayName: InstallFlutterSDK
+            inputs:
+              targetType: 'inline'
+              script: |
+                Invoke-WebRequest -Uri "https://storage.flutter-io.cn/flutter_infra_release/releases/stable/windows/flutter_windows_$(FLUTTER_VERSION)-stable.zip" -OutFile "flutter.zip"
+                Expand-Archive -Path "flutter.zip" -DestinationPath "."
+                $env:PATH = "$PWD\flutter\bin;$env:PATH"
+                flutter --version
+                flutter doctor -v
+          
+          - task: PowerShell@2
+            displayName: InstallPythonDependencies
+            inputs:
+              targetType: 'inline'
+              script: |
+                python -m pip install --upgrade pip
+                pip install pyvisa pyvisa-py pandas openpyxl
+          
+          - task: PowerShell@2
+            displayName: GetFlutterDependencies
+            inputs:
+              targetType: 'inline'
+              script: |
+                $env:PATH = "$PWD\flutter\bin;$env:PATH"
+                flutter pub get
+          
+          - task: PowerShell@2
+            displayName: BuildWindowsApplication
+            inputs:
+              targetType: 'inline'
+              script: |
+                $env:PATH = "$PWD\flutter\bin;$env:PATH"
+                flutter build windows --$(BUILD_TYPE)
+          
+          - task: PowerShell@2
+            displayName: PackageBuildArtifacts
+            inputs:
+              targetType: 'inline'
+              script: |
+                $version = (Get-Content pubspec.yaml | Select-String -Pattern 'version:\s*(.+)').Matches.Groups[1].Value
+                $zipName = "jn_production_line_windows_v${version}.zip"
+                New-Item -ItemType Directory -Force -Path package
+                Copy-Item -Path "build/windows/runner/Release/*" -Destination "package/" -Recurse
+                Compress-Archive -Path "package/*" -DestinationPath $zipName
+          
+          - task: PublishBuildArtifacts@1
+            displayName: PublishBuildArtifacts
+            inputs:
+              pathToPublish: '*.zip'
+              artifactName: 'windows-release'

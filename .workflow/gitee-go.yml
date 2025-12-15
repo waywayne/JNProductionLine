@@ -1,0 +1,105 @@
+version: '1.0'
+name: build-windows
+displayName: BuildWindowsApplication
+
+triggers:
+  trigger: auto
+
+variables:
+  FLUTTER_VERSION: 3.24.0
+
+stages:
+  - name: prepare-environment
+    displayName: PrepareEnvironment
+    strategy: naturally
+    trigger: auto
+    steps:
+      - step: script@1
+        name: check_environment
+        displayName: CheckPythonEnvironment
+        commands:
+          - python --version
+          - pip --version
+        notify: []
+        strategy:
+          retry: '0'
+
+  - name: build-application
+    displayName: BuildApplication
+    strategy: naturally
+    trigger: auto
+    steps:
+      - step: script@1
+        name: install_python_deps
+        displayName: InstallPythonDependencies
+        commands:
+          - python -m pip install --upgrade pip
+          - pip install pyvisa pyvisa-py pandas openpyxl
+        notify: []
+        strategy:
+          retry: '0'
+      
+      - step: script@1
+        name: download_flutter
+        displayName: DownloadFlutterSDK
+        commands:
+          - curl -o flutter.zip https://storage.flutter-io.cn/flutter_infra_release/releases/stable/windows/flutter_windows_3.24.0-stable.zip
+          - tar -xf flutter.zip
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: install_python_deps
+      
+      - step: script@1
+        name: configure_flutter
+        displayName: ConfigureFlutter
+        commands:
+          - set PATH=%CD%\flutter\bin;%PATH%
+          - flutter --version
+          - flutter doctor
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: download_flutter
+      
+      - step: script@1
+        name: get_dependencies
+        displayName: GetDependencies
+        commands:
+          - set PATH=%CD%\flutter\bin;%PATH%
+          - flutter pub get
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: configure_flutter
+      
+      - step: script@1
+        name: build_windows_app
+        displayName: BuildWindowsApplication
+        commands:
+          - set PATH=%CD%\flutter\bin;%PATH%
+          - flutter build windows --release
+        artifacts:
+          - name: BUILD_ARTIFACT
+            path:
+              - ./build/windows/runner/Release
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: get_dependencies
+      
+      - step: script@1
+        name: package_artifacts
+        displayName: PackageArtifacts
+        commands:
+          - cd build\windows\runner\Release
+          - tar -czf jn_production_line_windows.tar.gz *
+          - move jn_production_line_windows.tar.gz ..\..\..\..\
+        artifacts:
+          - name: WINDOWS_RELEASE
+            path:
+              - ./jn_production_line_windows.tar.gz
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: build_windows_app
