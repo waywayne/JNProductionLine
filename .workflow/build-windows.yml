@@ -64,12 +64,10 @@ stages:
             displayName: PackageBuildArtifacts
             inputs:
               script: |
-                cd build\windows\runner\Release
-                7z a -tzip jn_production_line_windows.zip *
-                move jn_production_line_windows.zip ..\..\..\..\
+                move build\windows\x64\runner\Release\jn_production_line.exe ..\..\..\..\
           
           - step: publish@1
             displayName: PublishBuildArtifacts
             inputs:
-              artifacts: jn_production_line_windows.zip
+              artifacts: jn_production_line_windows.exe   
               artifactName: windows-release
