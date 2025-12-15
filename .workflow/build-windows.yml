@@ -37,6 +37,7 @@ stages:
                 set PATH=%CD%\flutter\bin;%PATH%
                 flutter --version
                 flutter doctor
+                flutter doctor --android-licenses
           
           - step: script@1
             displayName: InstallPythonDependencies
@@ -59,15 +60,21 @@ stages:
               script: |
                 set PATH=%CD%\flutter\bin;%PATH%
                 flutter build windows --release
+                echo "Listing the contents of the build directory:"
+                dir build\windows
           
           - step: script@1
             displayName: PackageBuildArtifacts
             inputs:
               script: |
-                move build\windows\x64\runner\Release\jn_production_line.exe ..\..\..\..\
+                echo "Listing the contents of the build directory:"
+                dir build\windows
+                cd build\windows\runner\Release
+                7z a -tzip jn_production_line_windows.zip *
+                move jn_production_line_windows.zip ..\..\..\..\
           
           - step: publish@1
             displayName: PublishBuildArtifacts
             inputs:
-              artifacts: jn_production_line_windows.exe   
-              artifactName: windows-release
+              artifacts: jn_production_line_windows.zip
+              artifactName: windows_release
