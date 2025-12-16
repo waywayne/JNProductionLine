@@ -99,9 +99,15 @@ class ManualTestSection extends StatelessWidget {
               _buildMicToggleButton(context, state, 2, 'MIC2', Icons.mic_external_on),
               _buildTestButton(
                 context,
+                'RTC设置时间',
+                Icons.update,
+                () => state.setRTCTime(),
+              ),
+              _buildTestButton(
+                context,
                 'RTC获取时间',
                 Icons.access_time,
-                () => state.runManualTest('RTC获取时间', ProductionTestCommands.createRTCCommand(ProductionTestCommands.rtcOptGetTime)),
+                () => state.getRTCTime(),
               ),
               _buildTestButton(
                 context,

@@ -416,6 +416,118 @@ class TestState extends ChangeNotifier {
     notifyListeners();
   }
   
+  /// Set RTC time to current UTC time
+  Future<void> setRTCTime() async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[RTC] 串口未连接', type: LogType.debug);
+      return;
+    }
+    
+    try {
+      // 获取当前 UTC 时间戳（毫秒级，但毫秒位为0，精确到秒）
+      final now = DateTime.now().toUtc();
+      final timestampMs = (now.millisecondsSinceEpoch ~/ 1000) * 1000; // 毫秒位设为0
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🕐 RTC 设置时间', type: LogType.debug);
+      _logState?.info('📅 UTC 时间: ${now.toIso8601String()}', type: LogType.debug);
+      _logState?.info('📤 时间戳: $timestampMs ms (${timestampMs ~/ 1000} s)', type: LogType.debug);
+      _logState?.info('📤 Opt: 0x00 (设置时间)', type: LogType.debug);
+      _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createRTCCommand(
+        ProductionTestCommands.rtcOptSetTime,
+        timestamp: timestampMs,
+      );
+      
+      // 显示完整指令数据
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ RTC 时间设置成功', type: LogType.debug);
+        
+        // 显示响应数据
+        if (response.containsKey('payload') && response['payload'] != null) {
+          final payload = response['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+        }
+      } else {
+        _logState?.error('❌ RTC 时间设置失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('RTC 设置时间异常: $e', type: LogType.debug);
+    }
+  }
+  
+  /// Get RTC time from device
+  Future<void> getRTCTime() async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[RTC] 串口未连接', type: LogType.debug);
+      return;
+    }
+    
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🕐 RTC 获取时间', type: LogType.debug);
+      _logState?.info('📤 Opt: 0x01 (获取时间)', type: LogType.debug);
+      _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createRTCCommand(
+        ProductionTestCommands.rtcOptGetTime,
+      );
+      
+      // 显示完整指令数据
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ RTC 时间获取成功', type: LogType.debug);
+        
+        // 显示响应数据并解析时间戳
+        if (response.containsKey('payload') && response['payload'] != null) {
+          final payload = response['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+          
+          // 尝试解析时间戳（跳过命令字节，读取 uint64）
+          if (payload.length >= 9) { // 至少需要 1 byte cmd + 8 bytes timestamp
+            final buffer = ByteData.sublistView(payload, 1); // 跳过命令字节
+            final timestamp = buffer.getUint64(0, Endian.little);
+            final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true);
+            
+            _logState?.info('📅 设备时间戳: $timestamp ms (${timestamp ~/ 1000} s)', type: LogType.debug);
+            _logState?.info('📅 UTC 时间: ${dateTime.toIso8601String()}', type: LogType.debug);
+            _logState?.info('📅 本地时间: ${dateTime.toLocal().toString()}', type: LogType.debug);
+          }
+        }
+      } else {
+        _logState?.error('❌ RTC 时间获取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('RTC 获取时间异常: $e', type: LogType.debug);
+    }
+  }
+  
   /// Toggle MIC state (open/close)
   Future<void> toggleMicState(int micNumber) async {
     if (!_serialService.isConnected) {
