@@ -31,7 +31,7 @@ $zipName = "jn_production_line_windows_v${version}_${timestamp}.zip"
 
 # 检查构建产物
 Write-Host "[2/6] 检查构建产物..." -ForegroundColor Yellow
-$releaseDir = "build/windows/runner/Release"
+$releaseDir = "build/windows/x64/runner/Release"
 if (-not (Test-Path $releaseDir)) {
     Write-Host "错误: 未找到构建产物" -ForegroundColor Red
     Write-Host "请先运行: flutter build windows --release" -ForegroundColor Yellow

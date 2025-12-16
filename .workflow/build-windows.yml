@@ -35,10 +35,10 @@ stages:
                 curl -o flutter_windows.zip https://storage.flutter-io.cn/flutter_infra_release/releases/stable/windows/flutter_windows_3.24.0-stable.zip
                 tar -xf flutter_windows.zip
                 set PATH=%CD%\flutter\bin;%PATH%
+                flutter config --no-analytics
                 flutter --version
                 flutter doctor
-                flutter doctor --android-licenses
-          
+                          
           - step: script@1
             displayName: InstallPythonDependencies
             inputs:
@@ -60,18 +60,20 @@ stages:
               script: |
                 set PATH=%CD%\flutter\bin;%PATH%
                 flutter build windows --release
-                echo "Listing the contents of the build directory:"
-                dir build\windows
+                if not exist "build\windows\x64\runner\Release" (
+                  echo "ERROR: Build failed - Release directory not found"
+                  exit /b 1
+                )
+                echo "Build successful - listing contents:"
+                dir build\windows\x64\runner\Release
           
           - step: script@1
             displayName: PackageBuildArtifacts
             inputs:
               script: |
-                echo "Listing the contents of the build directory:"
-                dir build\windows
-                cd build\windows\runner\Release
+                cd build\windows\x64\runner\Release
                 7z a -tzip jn_production_line_windows.zip *
-                move jn_production_line_windows.zip ..\..\..\..\
+                move jn_production_line_windows.zip ..\..\..\..\..\
           
           - step: publish@1
             displayName: PublishBuildArtifacts
