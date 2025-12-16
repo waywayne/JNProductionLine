@@ -63,7 +63,7 @@ jobs:
         New-Item -ItemType Directory -Force -Path package
         
         # 复制必要文件
-        Copy-Item -Path "build/windows/runner/Release/*" -Destination "package/" -Recurse
+        Copy-Item -Path "build/windows/x64/runner/Release/*" -Destination "package/" -Recurse
         Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
