@@ -73,6 +73,13 @@ class TestState extends ChangeNotifier {
   
   // 日志状态
   LogState? _logState;
+  
+  // MIC 状态跟踪 (true = 已开启, false = 已关闭)
+  final Map<int, bool> _micStates = {
+    0: false, // MIC0
+    1: false, // MIC1
+    2: false, // MIC2
+  };
 
   String get testScriptPath => _testScriptPath;
   String get configFilePath => _configFilePath;
@@ -82,6 +89,9 @@ class TestState extends ChangeNotifier {
   bool get isRunningTest => _isRunningTest;
   
   List<String> get availablePorts => SerialService.getAvailablePorts();
+  
+  // 获取 MIC 状态
+  bool getMicState(int micNumber) => _micStates[micNumber] ?? false;
   
   void setLogState(LogState logState) {
     _logState = logState;
@@ -224,9 +234,9 @@ class TestState extends ChangeNotifier {
         {'name': '控制SPK1', 'cmd': ProductionTestCommands.createControlSPKCommand(ProductionTestCommands.spk1), 'cmdCode': ProductionTestCommands.cmdControlSPK},
         {'name': 'Touch左侧', 'cmd': ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchLeft), 'cmdCode': ProductionTestCommands.cmdTouch},
         {'name': 'Touch右侧', 'cmd': ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchRight), 'cmdCode': ProductionTestCommands.cmdTouch},
-        {'name': '控制MIC0', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic0), 'cmdCode': ProductionTestCommands.cmdControlMIC},
-        {'name': '控制MIC1', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic1), 'cmdCode': ProductionTestCommands.cmdControlMIC},
-        {'name': '控制MIC2', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic2), 'cmdCode': ProductionTestCommands.cmdControlMIC},
+        {'name': '控制MIC0', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic0, ProductionTestCommands.micControlOpen), 'cmdCode': ProductionTestCommands.cmdControlMIC},
+        {'name': '控制MIC1', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic1, ProductionTestCommands.micControlOpen), 'cmdCode': ProductionTestCommands.cmdControlMIC},
+        {'name': '控制MIC2', 'cmd': ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic2, ProductionTestCommands.micControlOpen), 'cmdCode': ProductionTestCommands.cmdControlMIC},
         {'name': 'RTC获取时间', 'cmd': ProductionTestCommands.createRTCCommand(ProductionTestCommands.rtcOptGetTime), 'cmdCode': ProductionTestCommands.cmdRTC},
         {'name': '光敏传感器', 'cmd': ProductionTestCommands.createLightSensorCommand(), 'cmdCode': ProductionTestCommands.cmdLightSensor},
         {'name': 'IMU数据', 'cmd': ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptGetData), 'cmdCode': ProductionTestCommands.cmdIMU},
@@ -404,6 +414,62 @@ class TestState extends ChangeNotifier {
     
     _isRunningTest = false;
     notifyListeners();
+  }
+  
+  /// Toggle MIC state (open/close)
+  Future<void> toggleMicState(int micNumber) async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[MIC$micNumber] 串口未连接', type: LogType.debug);
+      return;
+    }
+    
+    // 切换状态
+    final currentState = _micStates[micNumber] ?? false;
+    final newState = !currentState;
+    final control = newState ? ProductionTestCommands.micControlOpen : ProductionTestCommands.micControlClose;
+    final stateText = newState ? '开启' : '关闭';
+    
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🎤 MIC$micNumber 控制 - $stateText', type: LogType.debug);
+      _logState?.info('📊 当前状态: ${currentState ? "已开启" : "已关闭"} → 目标状态: ${newState ? "已开启" : "已关闭"}', type: LogType.debug);
+      _logState?.info('📤 MIC号: 0x${micNumber.toRadixString(16).toUpperCase().padLeft(2, '0')} ($micNumber)', type: LogType.debug);
+      _logState?.info('📤 控制字: 0x${control.toRadixString(16).toUpperCase().padLeft(2, '0')} (${control == ProductionTestCommands.micControlOpen ? "打开" : "关闭"})', type: LogType.debug);
+      _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createControlMICCommand(micNumber, control);
+      
+      // 显示完整指令数据
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        // 更新状态
+        _micStates[micNumber] = newState;
+        notifyListeners();
+        _logState?.success('✅ MIC$micNumber ${stateText}成功 - 当前状态: ${newState ? "已开启 🟢" : "已关闭 ⚫"}', type: LogType.debug);
+        
+        // 显示响应数据
+        if (response.containsKey('payload') && response['payload'] != null) {
+          final payload = response['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+        }
+      } else {
+        _logState?.error('❌ MIC$micNumber ${stateText}失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('MIC$micNumber ${stateText}异常: $e', type: LogType.debug);
+    }
   }
   
   /// Run manual test for a single command (non-blocking, allows concurrent execution)

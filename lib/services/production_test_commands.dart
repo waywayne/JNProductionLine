@@ -144,11 +144,16 @@ class ProductionTestCommands {
     return Uint8List.fromList(command);
   }
   
+  // MIC control operations
+  static const int micControlOpen = 0x00; // 打开MIC
+  static const int micControlClose = 0x01; // 关闭MIC
+  
   /// Create control MIC command (0x08)
-  /// 控制MIC录音 - 请求: MIC号
+  /// 控制MIC录音 - 请求: MIC号 + 控制
   /// [micNumber] - 0x00: MIC0, 0x01: MIC1, 0x02: MIC2
-  static Uint8List createControlMICCommand(int micNumber) {
-    return Uint8List.fromList([cmdControlMIC, micNumber]);
+  /// [control] - 0x00: 打开, 0x01: 关闭
+  static Uint8List createControlMICCommand(int micNumber, int control) {
+    return Uint8List.fromList([cmdControlMIC, micNumber, control]);
   }
   
   /// Create RTC command (0x09)

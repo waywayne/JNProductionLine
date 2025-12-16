@@ -94,24 +94,9 @@ class ManualTestSection extends StatelessWidget {
                 Icons.touch_app,
                 () => state.runManualTest('Touch右侧', ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchRight)),
               ),
-              _buildTestButton(
-                context,
-                'MIC0',
-                Icons.mic,
-                () => state.runManualTest('MIC0', ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic0)),
-              ),
-              _buildTestButton(
-                context,
-                'MIC1',
-                Icons.mic_none,
-                () => state.runManualTest('MIC1', ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic1)),
-              ),
-              _buildTestButton(
-                context,
-                'MIC2',
-                Icons.mic_external_on,
-                () => state.runManualTest('MIC2', ProductionTestCommands.createControlMICCommand(ProductionTestCommands.mic2)),
-              ),
+              _buildMicToggleButton(context, state, 0, 'MIC0', Icons.mic),
+              _buildMicToggleButton(context, state, 1, 'MIC1', Icons.mic_none),
+              _buildMicToggleButton(context, state, 2, 'MIC2', Icons.mic_external_on),
               _buildTestButton(
                 context,
                 'RTC获取时间',
@@ -176,6 +161,56 @@ class ManualTestSection extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMicToggleButton(
+    BuildContext context,
+    TestState state,
+    int micNumber,
+    String label,
+    IconData icon,
+  ) {
+    final isOn = state.getMicState(micNumber);
+    final statusText = isOn ? '已开启' : '已关闭';
+    
+    return SizedBox(
+      width: 140,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () => state.toggleMicState(micNumber),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isOn ? Colors.green[400] : Colors.grey[300],
+          foregroundColor: isOn ? Colors.white : Colors.black87,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: isOn ? BorderSide(color: Colors.green[700]!, width: 2) : BorderSide.none,
+          ),
+          padding: const EdgeInsets.all(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 28),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              statusText,
+              style: TextStyle(
+                fontSize: 9,
+                color: isOn ? Colors.white70 : Colors.black54,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
