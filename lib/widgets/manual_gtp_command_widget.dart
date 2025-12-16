@@ -14,16 +14,38 @@ class ManualGtpCommandWidget extends StatefulWidget {
 
 class _ManualGtpCommandWidgetState extends State<ManualGtpCommandWidget> {
   final TextEditingController _hexController = TextEditingController();
+  final TextEditingController _moduleIdController = TextEditingController(text: '0x0006');
+  final TextEditingController _messageIdController = TextEditingController(text: '0xFF01');
   bool _isExpanded = false;
   
-  // 固定的 Module ID 和 Message ID
-  static const int moduleId = 0x0006;  // 6
-  static const int messageId = 0xFF01; // 65281
+  // 默认的 Module ID 和 Message ID
+  static const int defaultModuleId = 0x0006;  // 6
+  static const int defaultMessageId = 0xFF01; // 65281
 
   @override
   void dispose() {
     _hexController.dispose();
+    _moduleIdController.dispose();
+    _messageIdController.dispose();
     super.dispose();
+  }
+
+  /// Parse hex or decimal string to int
+  int? _parseIdString(String idString) {
+    try {
+      String cleaned = idString.trim();
+      if (cleaned.isEmpty) return null;
+      
+      // 支持 0x 前缀的十六进制
+      if (cleaned.toLowerCase().startsWith('0x')) {
+        return int.parse(cleaned.substring(2), radix: 16);
+      }
+      
+      // 尝试解析为十进制
+      return int.parse(cleaned);
+    } catch (e) {
+      return null;
+    }
   }
 
   /// Parse hex string to Uint8List
@@ -67,7 +89,11 @@ class _ManualGtpCommandWidgetState extends State<ManualGtpCommandWidget> {
       return;
     }
 
-    // Send command with fixed module ID and message ID
+    // Parse Module ID and Message ID
+    final moduleId = _parseIdString(_moduleIdController.text) ?? defaultModuleId;
+    final messageId = _parseIdString(_messageIdController.text) ?? defaultMessageId;
+
+    // Send command with user-specified module ID and message ID
     final hexDisplay = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
     context.read<TestState>().runManualTest(
       '手动 GTP 指令',
@@ -76,7 +102,7 @@ class _ManualGtpCommandWidgetState extends State<ManualGtpCommandWidget> {
       messageId: messageId,
     );
     
-    context.read<LogState>().info('发送手动指令 (Module: 0x${moduleId.toRadixString(16).padLeft(4, "0").toUpperCase()}, Message: 0x${messageId.toRadixString(16).padLeft(4, "0").toUpperCase()}): $hexDisplay', type: LogType.debug);
+    context.read<LogState>().info('发送手动指令 (Module: 0x${moduleId.toRadixString(16).padLeft(4, "0").toUpperCase()} ($moduleId), Message: 0x${messageId.toRadixString(16).padLeft(4, "0").toUpperCase()} ($messageId)): $hexDisplay', type: LogType.debug);
   }
 
   @override
@@ -123,24 +149,41 @@ class _ManualGtpCommandWidgetState extends State<ManualGtpCommandWidget> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Fixed Module ID and Message ID display
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.blue[50],
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.blue[200]!),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.info_outline, size: 14, color: Colors.blue),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Module ID: 0x${moduleId.toRadixString(16).padLeft(4, "0").toUpperCase()} ($moduleId)  |  Message ID: 0x${messageId.toRadixString(16).padLeft(4, "0").toUpperCase()} ($messageId)',
-                          style: const TextStyle(fontSize: 9, color: Colors.blue),
+                  // Module ID and Message ID input
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _moduleIdController,
+                          decoration: const InputDecoration(
+                            labelText: 'Module ID',
+                            labelStyle: TextStyle(fontSize: 10),
+                            hintText: '0x0006 或 6',
+                            hintStyle: TextStyle(fontSize: 9),
+                            contentPadding: EdgeInsets.all(8),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          style: const TextStyle(fontSize: 10, fontFamily: 'Courier'),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextField(
+                          controller: _messageIdController,
+                          decoration: const InputDecoration(
+                            labelText: 'Message ID',
+                            labelStyle: TextStyle(fontSize: 10),
+                            hintText: '0xFF01 或 65281',
+                            hintStyle: TextStyle(fontSize: 9),
+                            contentPadding: EdgeInsets.all(8),
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                          style: const TextStyle(fontSize: 10, fontFamily: 'Courier'),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   // Hex input
@@ -182,7 +225,7 @@ class _ManualGtpCommandWidgetState extends State<ManualGtpCommandWidget> {
                   const SizedBox(height: 4),
                   // Help text
                   Text(
-                    '提示: 输入 Payload 的 Hex 数据，将使用固定的 Module ID 和 Message ID 自动封装为 GTP 协议包发送',
+                    '提示: 输入 Payload 的 Hex 数据和对应的 Module ID、Message ID，将自动封装为 GTP 协议包发送。ID 支持十六进制(0x前缀)或十进制格式。',
                     style: TextStyle(fontSize: 9, color: Colors.grey[600]),
                   ),
                 ],
