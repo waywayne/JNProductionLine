@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import '../models/log_state.dart';
 
 /// GPIB 通讯服务
@@ -241,27 +240,53 @@ except Exception as e:
       // 创建连接确认的 Completer
       final connectionCompleter = Completer<bool>();
       
+      // 监听进程退出
+      _process!.exitCode.then((exitCode) {
+        _logState?.warning('Python 桥接进程退出，退出码: $exitCode', type: LogType.gpib);
+        if (!connectionCompleter.isCompleted) {
+          connectionCompleter.complete(false);
+        }
+      });
+      
       // 监听标准输出
       _stdoutSubscription = _process!.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter())
-          .listen((line) {
-        // 检查是否是连接成功信号
-        if (line.startsWith('CONNECTED|')) {
-          if (!connectionCompleter.isCompleted) {
-            connectionCompleter.complete(true);
+          .listen(
+        (line) {
+          _logState?.debug('Python stdout: $line', type: LogType.gpib);
+          // 检查是否是连接成功信号
+          if (line.startsWith('CONNECTED|')) {
+            if (!connectionCompleter.isCompleted) {
+              _logState?.success('收到连接确认信号', type: LogType.gpib);
+              connectionCompleter.complete(true);
+            }
           }
-        }
-        _handleOutput(line);
-      });
+          _handleOutput(line);
+        },
+        onError: (error) {
+          _logState?.error('Python stdout 错误: $error', type: LogType.gpib);
+        },
+        onDone: () {
+          _logState?.debug('Python stdout 流已关闭', type: LogType.gpib);
+        },
+      );
       
       // 监听标准错误
       _stderrSubscription = _process!.stderr
           .transform(utf8.decoder)
           .transform(const LineSplitter())
-          .listen((line) {
-        _logState?.info('Python: $line', type: LogType.gpib);
-      });
+          .listen(
+        (line) {
+          _logState?.info('Python: $line', type: LogType.gpib);
+        },
+        onError: (error) {
+          _logState?.error('Python stderr 错误: $error', type: LogType.gpib);
+        },
+        onDone: () {
+          _logState?.debug('Python stderr 流已关闭', type: LogType.gpib);
+        },
+      );
       
       // 等待连接确认或超时
       _logState?.debug('等待 GPIB 设备响应...', type: LogType.gpib);
@@ -464,13 +489,22 @@ def main():
         print("CONNECTED|OK")
         sys.stdout.flush()
         
+        # 等待一小段时间确保信号被接收
+        time.sleep(0.1)
+        
         # 命令处理循环
+        print("INFO: Entering command loop", file=sys.stderr)
+        sys.stderr.flush()
+        
         while True:
             try:
+                # 使用非阻塞方式读取
                 line = sys.stdin.readline()
-                if not line:
-                    time.sleep(0.01)
-                    continue
+                
+                # 如果 readline 返回空字符串，说明 stdin 已关闭
+                if line == '':
+                    print("INFO: stdin closed, exiting", file=sys.stderr)
+                    break
                 
                 line = line.strip()
                 if not line:
