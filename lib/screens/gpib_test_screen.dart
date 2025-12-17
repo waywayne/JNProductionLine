@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/log_state.dart';
 import '../services/gpib_service.dart';
 import '../services/gpib_commands.dart';
-import '../widgets/log_console_section.dart';
+import '../widgets/gpib_log_console.dart';
 import 'dart:io';
 
 /// GPIB 测试界面
@@ -70,6 +70,38 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
   Future<void> _disconnect() async {
     await _gpibService.disconnect();
     setState(() {});
+  }
+  
+  Future<void> _checkEnvironment() async {
+    final logState = Provider.of<LogState>(context, listen: false);
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('检查 Python 环境...');
+    
+    final envCheck = await _gpibService.checkPythonEnvironment();
+    
+    if (envCheck['pythonInstalled']) {
+      logState.success('✅ Python 已安装: ${envCheck['pythonCommand']}');
+    } else {
+      logState.error('❌ Python 未安装');
+      logState.info('请下载并安装 Python 3.7+: https://www.python.org/downloads/');
+      logState.info('安装时请勾选 "Add Python to PATH"');
+    }
+    
+    if (envCheck['pyvisaInstalled']) {
+      logState.success('✅ PyVISA 已安装');
+    } else {
+      logState.warning('⚠️  PyVISA 未安装');
+      logState.info('请点击"安装 Python 依赖"按钮进行安装');
+    }
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
+  
+  Future<void> _installDependencies() async {
+    final success = await _gpibService.installPythonDependencies();
+    if (success) {
+      setState(() {});
+    }
   }
   
   Future<void> _identify() async {
@@ -199,15 +231,14 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
             ),
           ),
           
-          // 右侧日志查看器
+          // 右侧 GPIB 专用日志查看器
           Expanded(
             flex: 3,
             child: Container(
-              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 border: Border(left: BorderSide(color: Colors.grey.shade300)),
               ),
-              child: const LogConsoleSection(),
+              child: const GpibLogConsole(),
             ),
           ),
         ],
@@ -235,6 +266,34 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
                 border: OutlineInputBorder(),
               ),
               enabled: !_gpibService.isConnected,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _checkEnvironment,
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('检查环境'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _installDependencies,
+                    icon: const Icon(Icons.download),
+                    label: const Text('安装依赖'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Row(

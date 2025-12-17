@@ -35,23 +35,140 @@ class GpibService {
   /// 获取数据流
   Stream<Map<String, dynamic>> get dataStream => _dataController.stream;
   
+  /// 检查 Python 环境
+  Future<Map<String, dynamic>> checkPythonEnvironment() async {
+    final result = {
+      'pythonInstalled': false,
+      'pythonCommand': '',
+      'pyvisaInstalled': false,
+      'error': '',
+    };
+    
+    try {
+      // 尝试不同的 Python 命令
+      final pythonCommands = ['python', 'python3', 'py'];
+      
+      for (final cmd in pythonCommands) {
+        try {
+          final processResult = await Process.run(cmd, ['--version']);
+          if (processResult.exitCode == 0) {
+            result['pythonInstalled'] = true;
+            result['pythonCommand'] = cmd;
+            _logState?.info('找到 Python: ${processResult.stdout.toString().trim()} (命令: $cmd)', type: LogType.gpib);
+            break;
+          }
+        } catch (e) {
+          // 继续尝试下一个命令
+        }
+      }
+      
+      if (!(result['pythonInstalled'] as bool)) {
+        result['error'] = 'Python 未安装';
+        return result;
+      }
+      
+      // 检查 pyvisa 是否安装
+      try {
+        final pyvisaCheck = await Process.run(
+          result['pythonCommand'] as String,
+          ['-c', 'import pyvisa; print(pyvisa.__version__)'],
+        );
+        
+        if (pyvisaCheck.exitCode == 0) {
+          result['pyvisaInstalled'] = true;
+          _logState?.info('PyVISA 已安装: ${pyvisaCheck.stdout.toString().trim()}', type: LogType.gpib);
+        } else {
+          result['error'] = 'PyVISA 未安装';
+        }
+      } catch (e) {
+        result['error'] = 'PyVISA 未安装';
+      }
+      
+    } catch (e) {
+      result['error'] = '检查环境失败: $e';
+    }
+    
+    return result;
+  }
+  
+  /// 安装 Python 依赖
+  Future<bool> installPythonDependencies() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('开始安装 Python 依赖...', type: LogType.gpib);
+      
+      // 检查 Python
+      final envCheck = await checkPythonEnvironment();
+      if (!(envCheck['pythonInstalled'] as bool)) {
+        _logState?.error('❌ Python 未安装，请先安装 Python 3.7+', type: LogType.gpib);
+        _logState?.info('下载地址: https://www.python.org/downloads/', type: LogType.gpib);
+        return false;
+      }
+      
+      final pythonCmd = envCheck['pythonCommand'] as String;
+      
+      // 安装 pyvisa 和 pyvisa-py
+      _logState?.info('正在安装 PyVISA...', type: LogType.gpib);
+      final pyvisaResult = await Process.run(
+        pythonCmd,
+        ['-m', 'pip', 'install', 'pyvisa', 'pyvisa-py', '--user'],
+      );
+      
+      if (pyvisaResult.exitCode == 0) {
+        _logState?.success('✅ PyVISA 安装成功', type: LogType.gpib);
+        _logState?.debug(pyvisaResult.stdout.toString(), type: LogType.gpib);
+      } else {
+        _logState?.error('❌ PyVISA 安装失败', type: LogType.gpib);
+        _logState?.error(pyvisaResult.stderr.toString(), type: LogType.gpib);
+        return false;
+      }
+      
+      _logState?.success('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.success('Python 依赖安装完成！', type: LogType.gpib);
+      return true;
+    } catch (e) {
+      _logState?.error('安装依赖失败: $e', type: LogType.gpib);
+      return false;
+    }
+  }
+  
   /// 连接到 GPIB 设备
   /// address: GPIB 地址，格式如 "GPIB0::10::INSTR"
   Future<bool> connect(String address) async {
     try {
-      _logState?.info('开始连接 GPIB 设备: $address');
+      _logState?.info('开始连接 GPIB 设备: $address', type: LogType.gpib);
+      
+      // 检查 Python 环境
+      _logState?.debug('检查 Python 环境...', type: LogType.gpib);
+      final envCheck = await checkPythonEnvironment();
+      
+      if (!(envCheck['pythonInstalled'] as bool)) {
+        _logState?.error('❌ Python 未安装！', type: LogType.gpib);
+        _logState?.error('请先安装 Python 3.7+ 或点击"安装 Python 依赖"按钮', type: LogType.gpib);
+        _logState?.info('Python 下载: https://www.python.org/downloads/', type: LogType.gpib);
+        return false;
+      }
+      
+      if (!(envCheck['pyvisaInstalled'] as bool)) {
+        _logState?.error('❌ PyVISA 未安装！', type: LogType.gpib);
+        _logState?.error('请点击"安装 Python 依赖"按钮安装所需依赖', type: LogType.gpib);
+        return false;
+      }
+      
+      final pythonCmd = envCheck['pythonCommand'] as String;
+      _logState?.info('使用 Python 命令: $pythonCmd', type: LogType.gpib);
       
       // 断开现有连接
       await disconnect();
       
       // 启动 Python 桥接进程
-      _logState?.debug('启动 Python GPIB 桥接进程...');
+      _logState?.debug('启动 Python GPIB 桥接进程...', type: LogType.gpib);
       
       // 创建 Python 脚本来处理 GPIB 通讯
       final scriptPath = await _createGpibBridgeScript();
       
       _process = await Process.start(
-        'python3',
+        pythonCmd,
         [scriptPath, address],
         mode: ProcessStartMode.normal,
       );
@@ -69,19 +186,29 @@ class GpibService {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        _logState?.error('GPIB 错误: $line');
+        _logState?.error('GPIB 错误: $line', type: LogType.gpib);
       });
       
       // 等待连接确认
       await Future.delayed(const Duration(seconds: 2));
       
+      // 检查进程是否还在运行
+      if (_process == null || _process!.exitCode != null) {
+        _logState?.error('❌ Python 桥接进程启动失败', type: LogType.gpib);
+        return false;
+      }
+      
       _currentAddress = address;
       _isConnected = true;
-      _logState?.success('GPIB 设备连接成功: $address');
+      _logState?.success('GPIB 设备连接成功: $address', type: LogType.gpib);
       
       return true;
     } catch (e) {
-      _logState?.error('GPIB 连接失败: $e');
+      _logState?.error('GPIB 连接失败: $e', type: LogType.gpib);
+      _logState?.error('请确保：', type: LogType.gpib);
+      _logState?.error('1. Python 已正确安装', type: LogType.gpib);
+      _logState?.error('2. PyVISA 已安装 (pip install pyvisa pyvisa-py)', type: LogType.gpib);
+      _logState?.error('3. NI-VISA 驱动已安装', type: LogType.gpib);
       return false;
     }
   }
@@ -105,21 +232,21 @@ class GpibService {
       
       _currentAddress = null;
       _isConnected = false;
-      _logState?.info('GPIB 设备已断开');
+      _logState?.info('GPIB 设备已断开', type: LogType.gpib);
     } catch (e) {
-      _logState?.error('断开 GPIB 连接时出错: $e');
+      _logState?.error('断开 GPIB 连接时出错: $e', type: LogType.gpib);
     }
   }
   
   /// 发送命令
   Future<String?> sendCommand(String command, {Duration timeout = const Duration(seconds: 5)}) async {
     if (!_isConnected || _process == null) {
-      _logState?.error('GPIB 设备未连接');
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
       return null;
     }
     
     try {
-      _logState?.debug('发送 GPIB 命令: $command');
+      _logState?.debug('发送 GPIB 命令: $command', type: LogType.gpib);
       
       // 创建 completer 等待响应
       final completer = Completer<String>();
@@ -135,7 +262,7 @@ class GpibService {
         timeout,
         onTimeout: () {
           _pendingCommands.remove(commandId);
-          _logState?.warning('GPIB 命令超时: $command');
+          _logState?.warning('GPIB 命令超时: $command', type: LogType.gpib);
           return 'TIMEOUT';
         },
       );
@@ -143,12 +270,12 @@ class GpibService {
       _pendingCommands.remove(commandId);
       
       if (response != 'TIMEOUT') {
-        _logState?.debug('GPIB 响应: $response');
+        _logState?.debug('GPIB 响应: $response', type: LogType.gpib);
       }
       
       return response;
     } catch (e) {
-      _logState?.error('发送 GPIB 命令失败: $e');
+      _logState?.error('发送 GPIB 命令失败: $e', type: LogType.gpib);
       return null;
     }
   }
@@ -178,19 +305,19 @@ class GpibService {
       } else {
         // 日志或数据输出
         if (line.startsWith('INFO:')) {
-          _logState?.info(line.substring(5).trim());
+          _logState?.info(line.substring(5).trim(), type: LogType.gpib);
         } else if (line.startsWith('ERROR:')) {
-          _logState?.error(line.substring(6).trim());
+          _logState?.error(line.substring(6).trim(), type: LogType.gpib);
         } else if (line.startsWith('DATA:')) {
           // 解析数据
           final data = line.substring(5).trim();
           _parseData(data);
         } else {
-          _logState?.debug(line);
+          _logState?.debug(line, type: LogType.gpib);
         }
       }
     } catch (e) {
-      _logState?.error('解析 GPIB 输出失败: $e');
+      _logState?.error('解析 GPIB 输出失败: $e', type: LogType.gpib);
     }
   }
   
@@ -201,7 +328,7 @@ class GpibService {
       final jsonData = jsonDecode(data);
       _dataController.add(jsonData);
     } catch (e) {
-      _logState?.debug('数据: $data');
+      _logState?.debug('数据: $data', type: LogType.gpib);
     }
   }
   
@@ -277,7 +404,7 @@ if __name__ == "__main__":
     final scriptFile = File('${tempDir.path}/gpib_bridge.py');
     await scriptFile.writeAsString(scriptContent);
     
-    _logState?.debug('Python 桥接脚本已创建: ${scriptFile.path}');
+    _logState?.debug('Python 桥接脚本已创建: ${scriptFile.path}', type: LogType.gpib);
     
     return scriptFile.path;
   }

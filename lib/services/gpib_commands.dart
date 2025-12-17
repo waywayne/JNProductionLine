@@ -16,20 +16,20 @@ class GpibCommands {
   
   /// 查询设备型号
   Future<String?> identify() async {
-    _logState?.info('查询设备型号...');
+    _logState?.info('查询设备型号...', type: LogType.gpib);
     final response = await _gpibService.query('*IDN?');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('设备型号: $response');
+      _logState?.success('设备型号: $response', type: LogType.gpib);
     }
     return response;
   }
   
   /// 复位仪器
   Future<bool> reset() async {
-    _logState?.info('复位仪器...');
+    _logState?.info('复位仪器...', type: LogType.gpib);
     final response = await _gpibService.sendCommand('*RST');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('仪器复位成功');
+      _logState?.success('仪器复位成功', type: LogType.gpib);
       // 等待复位完成
       await Future.delayed(const Duration(seconds: 1));
       return true;
@@ -40,10 +40,10 @@ class GpibCommands {
   /// 设置输出电压
   /// voltage: 电压值（单位：V）
   Future<bool> setVoltage(double voltage) async {
-    _logState?.info('设置输出电压: ${voltage}V');
+    _logState?.info('设置输出电压: ${voltage}V', type: LogType.gpib);
     final response = await _gpibService.sendCommand('VOLT:LEV $voltage');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('电压设置成功: ${voltage}V');
+      _logState?.success('电压设置成功: ${voltage}V', type: LogType.gpib);
       return true;
     }
     return false;
@@ -52,10 +52,10 @@ class GpibCommands {
   /// 设置电流限制
   /// current: 电流限制值（单位：A）
   Future<bool> setCurrentLimit(double current) async {
-    _logState?.info('设置电流限制: ${current}A');
+    _logState?.info('设置电流限制: ${current}A', type: LogType.gpib);
     final response = await _gpibService.sendCommand('CURR:LEV $current');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('电流限制设置成功: ${current}A');
+      _logState?.success('电流限制设置成功: ${current}A', type: LogType.gpib);
       return true;
     }
     return false;
@@ -64,10 +64,10 @@ class GpibCommands {
   /// 设置电流测量范围
   /// range: 电流范围（单位：A）
   Future<bool> setCurrentRange(double range) async {
-    _logState?.info('设置电流测量范围: ${range}A');
+    _logState?.info('设置电流测量范围: ${range}A', type: LogType.gpib);
     final response = await _gpibService.sendCommand('CURR:RANG $range');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('电流范围设置成功: ${range}A');
+      _logState?.success('电流范围设置成功: ${range}A', type: LogType.gpib);
       return true;
     }
     return false;
@@ -75,10 +75,10 @@ class GpibCommands {
   
   /// 开启电源输出
   Future<bool> enableOutput() async {
-    _logState?.info('开启电源输出...');
+    _logState?.info('开启电源输出...', type: LogType.gpib);
     final response = await _gpibService.sendCommand('OUTP:STAT ON');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('电源输出已开启');
+      _logState?.success('电源输出已开启', type: LogType.gpib);
       return true;
     }
     return false;
@@ -86,10 +86,10 @@ class GpibCommands {
   
   /// 关闭电源输出
   Future<bool> disableOutput() async {
-    _logState?.info('关闭电源输出...');
+    _logState?.info('关闭电源输出...', type: LogType.gpib);
     final response = await _gpibService.sendCommand('OUTP:STAT OFF');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('电源输出已关闭');
+      _logState?.success('电源输出已关闭', type: LogType.gpib);
       return true;
     }
     return false;
@@ -103,7 +103,7 @@ class GpibCommands {
         final current = double.parse(response.trim());
         return current;
       } catch (e) {
-        _logState?.error('解析电流值失败: $e');
+        _logState?.error('解析电流值失败: $e', type: LogType.gpib);
       }
     }
     return null;
@@ -116,7 +116,7 @@ class GpibCommands {
       try {
         return double.parse(response.trim());
       } catch (e) {
-        _logState?.error('解析电流限制值失败: $e');
+        _logState?.error('解析电流限制值失败: $e', type: LogType.gpib);
       }
     }
     return null;
@@ -129,7 +129,7 @@ class GpibCommands {
       try {
         return double.parse(response.trim());
       } catch (e) {
-        _logState?.error('解析电流范围值失败: $e');
+        _logState?.error('解析电流范围值失败: $e', type: LogType.gpib);
       }
     }
     return null;
@@ -144,8 +144,8 @@ class GpibCommands {
     double currentLimit = 1.5,
     double currentRange = 1.0,
   }) async {
-    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _logState?.info('开始初始化电源...');
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    _logState?.info('开始初始化电源...', type: LogType.gpib);
     
     // 1. 复位
     if (!await reset()) {
@@ -172,8 +172,8 @@ class GpibCommands {
       return false;
     }
     
-    _logState?.success('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _logState?.success('电源初始化完成！');
+    _logState?.success('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    _logState?.success('电源初始化完成！', type: LogType.gpib);
     return true;
   }
   
@@ -189,9 +189,9 @@ class GpibCommands {
     Function()? onComplete,
     double? alertThreshold,
   }) async {
-    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _logState?.info('开始采集 PCBA 工作电流...');
-    _logState?.info('采样次数: $sampleCount, 采样率: ${sampleRate}Hz');
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    _logState?.info('开始采集 PCBA 工作电流...', type: LogType.gpib);
+    _logState?.info('采样次数: $sampleCount, 采样率: ${sampleRate}Hz', type: LogType.gpib);
     
     final interval = Duration(milliseconds: (1000 / sampleRate).round());
     
@@ -200,18 +200,18 @@ class GpibCommands {
         // 采集电流
         final current = await measureCurrent();
         if (current == null) {
-          _logState?.warning('第 ${i + 1} 次采集失败');
+          _logState?.warning('第 ${i + 1} 次采集失败', type: LogType.gpib);
           continue;
         }
         
         final timestamp = DateTime.now();
         
         // 数据显示
-        _logState?.info('[$i/$sampleCount] 时间: ${_formatTimestamp(timestamp)}, 工作电流: ${current.toStringAsFixed(4)} A');
+        _logState?.info('[$i/$sampleCount] 时间: ${_formatTimestamp(timestamp)}, 工作电流: ${current.toStringAsFixed(4)} A', type: LogType.gpib);
         
         // 异常报警
         if (alertThreshold != null && current > alertThreshold) {
-          _logState?.warning('⚠️ 警告：PCBA 工作电流超出阈值！当前: ${current.toStringAsFixed(4)}A, 阈值: ${alertThreshold}A');
+          _logState?.warning('⚠️ 警告：PCBA 工作电流超出阈值！当前: ${current.toStringAsFixed(4)}A, 阈值: ${alertThreshold}A', type: LogType.gpib);
         }
         
         // 回调
@@ -222,13 +222,13 @@ class GpibCommands {
           await Future.delayed(interval);
         }
       } catch (e) {
-        _logState?.error('采集过程出错: $e');
+        _logState?.error('采集过程出错: $e', type: LogType.gpib);
         break;
       }
     }
     
-    _logState?.success('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _logState?.success('电流采集完成！');
+    _logState?.success('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    _logState?.success('电流采集完成！', type: LogType.gpib);
     onComplete?.call();
   }
   

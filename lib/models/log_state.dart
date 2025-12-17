@@ -12,6 +12,7 @@ enum LogType {
   all,        // 所有日志
   device,     // 设备日志 (Type 0x02)
   debug,      // 调试信息 (Type 0x03)
+  gpib,       // GPIB 测试日志
 }
 
 class LogEntry {
