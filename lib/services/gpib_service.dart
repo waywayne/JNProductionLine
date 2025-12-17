@@ -235,6 +235,7 @@ except Exception as e:
         pythonCmd,
         [scriptPath, address],
         mode: ProcessStartMode.normal,
+        runInShell: Platform.isWindows, // Windows 需要在 shell 中运行
       );
       
       // 创建连接确认的 Completer
@@ -299,14 +300,18 @@ except Exception as e:
         },
       );
       
-      // 检查进程是否还在运行
-      if (_process == null || _process!.exitCode != null) {
-        _logState?.error('❌ Python 桥接进程已退出', type: LogType.gpib);
-        return false;
-      }
-      
+      // 检查连接结果
       if (!connected) {
         _logState?.error('❌ GPIB 设备连接失败', type: LogType.gpib);
+        
+        // 检查进程是否还在运行
+        final exitCode = _process?.exitCode;
+        if (exitCode != null) {
+          await exitCode.then((code) {
+            _logState?.error('Python 桥接进程已退出，退出码: $code', type: LogType.gpib);
+          });
+        }
+        
         await disconnect();
         return false;
       }
@@ -314,6 +319,17 @@ except Exception as e:
       _currentAddress = address;
       _isConnected = true;
       _logState?.success('✅ GPIB 设备连接成功: $address', type: LogType.gpib);
+      
+      // 发送一个测试命令确保通信正常
+      _logState?.debug('测试 GPIB 通信...', type: LogType.gpib);
+      try {
+        final testId = 'test_${DateTime.now().millisecondsSinceEpoch}';
+        _process!.stdin.writeln('$testId|*IDN?');
+        await _process!.stdin.flush();
+        _logState?.debug('测试命令已发送', type: LogType.gpib);
+      } catch (e) {
+        _logState?.warning('测试命令发送失败: $e', type: LogType.gpib);
+      }
       
       return true;
     } catch (e) {
@@ -496,20 +512,30 @@ def main():
         print("INFO: Entering command loop", file=sys.stderr)
         sys.stderr.flush()
         
+        # 保持循环运行，等待命令
         while True:
             try:
-                # 使用非阻塞方式读取
-                line = sys.stdin.readline()
+                # 尝试读取一行，设置较短的超时
+                # 在 Windows 上，readline 是阻塞的
+                # 我们需要检查 stdin 是否仍然打开
+                try:
+                    line = sys.stdin.readline()
+                except Exception as e:
+                    print(f"ERROR: Failed to read from stdin: {e}", file=sys.stderr)
+                    break
                 
                 # 如果 readline 返回空字符串，说明 stdin 已关闭
                 if line == '':
-                    print("INFO: stdin closed, exiting", file=sys.stderr)
+                    print("INFO: stdin closed (EOF received), exiting", file=sys.stderr)
                     break
                 
                 line = line.strip()
+                
+                # 跳过空行
                 if not line:
                     continue
                 
+                # 处理退出命令
                 if line == "EXIT":
                     print("INFO: Received EXIT command", file=sys.stderr)
                     break
