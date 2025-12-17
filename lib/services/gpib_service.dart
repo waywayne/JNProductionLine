@@ -35,6 +35,71 @@ class GpibService {
   /// 获取数据流
   Stream<Map<String, dynamic>> get dataStream => _dataController.stream;
   
+  /// 列出所有可用的 GPIB 资源
+  Future<List<String>> listResources() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('扫描可用的 GPIB 设备...', type: LogType.gpib);
+      
+      // 检查 Python 环境
+      final envCheck = await checkPythonEnvironment();
+      if (!(envCheck['pythonInstalled'] as bool) || !(envCheck['pyvisaInstalled'] as bool)) {
+        _logState?.error('❌ Python 或 PyVISA 未安装', type: LogType.gpib);
+        return [];
+      }
+      
+      final pythonCmd = envCheck['pythonCommand'] as String;
+      
+      // 创建临时 Python 脚本来列出资源
+      final scriptContent = '''
+import pyvisa
+try:
+    rm = pyvisa.ResourceManager()
+    resources = rm.list_resources()
+    for res in resources:
+        print(res)
+    rm.close()
+except Exception as e:
+    print(f"ERROR: {e}", file=sys.stderr)
+''';
+      
+      final tempDir = Directory.systemTemp;
+      final scriptFile = File('${tempDir.path}/list_gpib_resources.py');
+      await scriptFile.writeAsString(scriptContent);
+      
+      // 执行脚本
+      final result = await Process.run(pythonCmd, [scriptFile.path]);
+      
+      if (result.exitCode == 0) {
+        final resources = result.stdout.toString().trim().split('\n')
+            .where((line) => line.isNotEmpty)
+            .toList();
+        
+        if (resources.isEmpty) {
+          _logState?.warning('⚠️  未找到任何 GPIB 设备', type: LogType.gpib);
+          _logState?.info('请检查：', type: LogType.gpib);
+          _logState?.info('1. 设备是否已连接并开机', type: LogType.gpib);
+          _logState?.info('2. NI-VISA 驱动是否正确安装', type: LogType.gpib);
+          _logState?.info('3. 在 NI MAX 中是否能看到设备', type: LogType.gpib);
+        } else {
+          _logState?.success('✅ 找到 ${resources.length} 个设备：', type: LogType.gpib);
+          for (final res in resources) {
+            _logState?.info('   📍 $res', type: LogType.gpib);
+          }
+        }
+        
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+        return resources;
+      } else {
+        _logState?.error('❌ 扫描失败: ${result.stderr}', type: LogType.gpib);
+        return [];
+      }
+    } catch (e) {
+      _logState?.error('扫描 GPIB 设备失败: $e', type: LogType.gpib);
+      return [];
+    }
+  }
+  
   /// 检查 Python 环境
   Future<Map<String, dynamic>> checkPythonEnvironment() async {
     final result = {
@@ -173,11 +238,20 @@ class GpibService {
         mode: ProcessStartMode.normal,
       );
       
+      // 创建连接确认的 Completer
+      final connectionCompleter = Completer<bool>();
+      
       // 监听标准输出
       _stdoutSubscription = _process!.stdout
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
+        // 检查是否是连接成功信号
+        if (line.startsWith('CONNECTED|')) {
+          if (!connectionCompleter.isCompleted) {
+            connectionCompleter.complete(true);
+          }
+        }
         _handleOutput(line);
       });
       
@@ -186,21 +260,35 @@ class GpibService {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-        _logState?.error('GPIB 错误: $line', type: LogType.gpib);
+        _logState?.info('Python: $line', type: LogType.gpib);
       });
       
-      // 等待连接确认
-      await Future.delayed(const Duration(seconds: 2));
+      // 等待连接确认或超时
+      _logState?.debug('等待 GPIB 设备响应...', type: LogType.gpib);
+      
+      final connected = await connectionCompleter.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          _logState?.error('⏱️  连接超时：设备未响应', type: LogType.gpib);
+          return false;
+        },
+      );
       
       // 检查进程是否还在运行
       if (_process == null || _process!.exitCode != null) {
-        _logState?.error('❌ Python 桥接进程启动失败', type: LogType.gpib);
+        _logState?.error('❌ Python 桥接进程已退出', type: LogType.gpib);
+        return false;
+      }
+      
+      if (!connected) {
+        _logState?.error('❌ GPIB 设备连接失败', type: LogType.gpib);
+        await disconnect();
         return false;
       }
       
       _currentAddress = address;
       _isConnected = true;
-      _logState?.success('GPIB 设备连接成功: $address', type: LogType.gpib);
+      _logState?.success('✅ GPIB 设备连接成功: $address', type: LogType.gpib);
       
       return true;
     } catch (e) {
@@ -338,7 +426,6 @@ class GpibService {
 import sys
 import pyvisa
 import time
-import json
 
 def main():
     if len(sys.argv) < 2:
@@ -349,23 +436,57 @@ def main():
     
     try:
         # 初始化 VISA 资源管理器
+        print(f"INFO: Initializing VISA Resource Manager...", file=sys.stderr)
         rm = pyvisa.ResourceManager()
+        
+        # 列出所有可用资源
+        try:
+            resources = rm.list_resources()
+            print(f"INFO: Available resources: {resources}", file=sys.stderr)
+        except Exception as e:
+            print(f"WARNING: Could not list resources: {e}", file=sys.stderr)
+        
+        # 连接到设备
+        print(f"INFO: Connecting to {address}...", file=sys.stderr)
         instrument = rm.open_resource(address)
-        print(f"INFO: Connected to {address}")
+        
+        # 设置超时
+        instrument.timeout = 5000  # 5秒超时
+        
+        # 测试连接 - 发送 *IDN? 查询
+        try:
+            idn = instrument.query("*IDN?").strip()
+            print(f"INFO: Device identified: {idn}", file=sys.stderr)
+        except Exception as e:
+            print(f"WARNING: Could not query *IDN?: {e}", file=sys.stderr)
+        
+        # 发送连接成功信号
+        print("CONNECTED|OK")
+        sys.stdout.flush()
         
         # 命令处理循环
         while True:
             try:
-                line = sys.stdin.readline().strip()
+                line = sys.stdin.readline()
+                if not line:
+                    time.sleep(0.01)
+                    continue
+                
+                line = line.strip()
                 if not line:
                     continue
                 
                 if line == "EXIT":
+                    print("INFO: Received EXIT command", file=sys.stderr)
                     break
                 
                 # 解析命令格式：commandId|command
                 if '|' in line:
-                    command_id, command = line.split('|', 1)
+                    parts = line.split('|', 1)
+                    if len(parts) != 2:
+                        continue
+                    
+                    command_id, command = parts
                     
                     try:
                         # 判断是写命令还是查询命令
@@ -378,21 +499,26 @@ def main():
                         
                         sys.stdout.flush()
                     except Exception as e:
-                        print(f"{command_id}|ERROR:{str(e)}")
+                        error_msg = str(e).replace('|', '_')
+                        print(f"{command_id}|ERROR:{error_msg}")
                         sys.stdout.flush()
+                        print(f"ERROR: Command failed: {e}", file=sys.stderr)
                         
             except KeyboardInterrupt:
+                print("INFO: Keyboard interrupt", file=sys.stderr)
                 break
             except Exception as e:
-                print(f"ERROR: {str(e)}", file=sys.stderr)
+                print(f"ERROR: Loop error: {str(e)}", file=sys.stderr)
         
         # 清理
+        print("INFO: Closing connection...", file=sys.stderr)
         instrument.close()
         rm.close()
-        print("INFO: GPIB connection closed")
+        print("INFO: GPIB connection closed", file=sys.stderr)
         
     except Exception as e:
-        print(f"ERROR: Failed to connect: {str(e)}", file=sys.stderr)
+        print(f"ERROR: Failed to connect to {address}: {str(e)}", file=sys.stderr)
+        print(f"ERROR: Make sure NI-VISA is installed and the device is accessible", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":

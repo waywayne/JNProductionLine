@@ -104,6 +104,10 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
     }
   }
   
+  Future<void> _scanDevices() async {
+    await _gpibService.listResources();
+  }
+  
   Future<void> _identify() async {
     await _gpibCommands.identify();
   }
@@ -294,6 +298,16 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: _scanDevices,
+              icon: const Icon(Icons.search),
+              label: const Text('扫描 GPIB 设备'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple,
+                foregroundColor: Colors.white,
+              ),
             ),
             const SizedBox(height: 12),
             Row(
