@@ -212,13 +212,13 @@ class ProductionTestCommands {
   }
   
   /// Parse voltage response
-  /// Returns voltage in uint16_t
+  /// Returns voltage in mV (uint16_t)
+  /// 设备返回格式：[CMD] + [2字节电压值]
   static int? parseVoltageResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    // Skip command byte if present
+    // 跳过第一个命令字节，读取2字节电压值
     int offset = payload[0] == cmdGetVoltage ? 1 : 0;
-    
     if (payload.length < offset + 2) return null;
     
     ByteData buffer = ByteData.sublistView(payload);
@@ -226,13 +226,13 @@ class ProductionTestCommands {
   }
   
   /// Parse current response
-  /// Returns current in uint8_t
+  /// Returns current in % (uint8_t)
+  /// 设备返回格式：[CMD] + [1字节电量百分比]
   static int? parseCurrentResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    // Skip command byte if present
+    // 跳过第一个命令字节
     int offset = payload[0] == cmdGetCurrent ? 1 : 0;
-    
     if (payload.length < offset + 1) return null;
     
     return payload[offset];
@@ -240,12 +240,12 @@ class ProductionTestCommands {
   
   /// Parse charge status response
   /// Returns map with 'mode' and 'errorCode'
+  /// 设备返回格式：[CMD] + [2字节：模式+错误码]
   static Map<String, int>? parseChargeStatusResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    // Skip command byte if present
+    // 跳过第一个命令字节
     int offset = payload[0] == cmdGetChargeStatus ? 1 : 0;
-    
     if (payload.length < offset + 2) return null;
     
     return {
@@ -296,11 +296,12 @@ class ProductionTestCommands {
   
   /// Parse touch response
   /// Returns CDC value or success status
+  /// 设备返回格式：[CMD] + [数据]
   static dynamic parseTouchResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
+    // 跳过第一个命令字节
     int offset = payload[0] == cmdTouch ? 1 : 0;
-    
     if (payload.length < offset + 1) return null;
     
     // For CDC value, return as integer
@@ -310,24 +311,26 @@ class ProductionTestCommands {
   
   /// Parse RTC response
   /// Returns timestamp in milliseconds
-  /// 设备直接返回8字节时间戳，不包含命令字节
+  /// 设备返回格式：[CMD] + [8字节时间戳]
   static int? parseRTCResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    // 设备直接返回8字节时间戳，不包含命令字节
-    if (payload.length < 8) return null;
+    // 跳过第一个命令字节
+    int offset = payload[0] == cmdRTC ? 1 : 0;
+    if (payload.length < offset + 8) return null;
     
     ByteData buffer = ByteData.sublistView(payload);
-    return buffer.getUint64(0, Endian.little);
+    return buffer.getUint64(offset, Endian.little);
   }
   
   /// Parse light sensor response
   /// Returns light value as double
+  /// 设备返回格式：[CMD] + [8字节double值]
   static double? parseLightSensorResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
+    // 跳过第一个命令字节
     int offset = payload[0] == cmdLightSensor ? 1 : 0;
-    
     if (payload.length < offset + 8) return null;
     
     ByteData buffer = ByteData.sublistView(payload);
@@ -336,14 +339,16 @@ class ProductionTestCommands {
   
   /// Parse IMU response
   /// Returns map with accelerometer, gyroscope, and timestamp data
+  /// 设备返回格式：[CMD] + [40字节IMU数据]
   static Map<String, dynamic>? parseIMUResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
+    // 跳过第一个命令字节
     int offset = payload[0] == cmdIMU ? 1 : 0;
     
     // IMU data: accel_xyz(3*float) + gyro_xyz(3*float) + timestamp1 + timestamp2
     // Assuming 4 bytes per float, 8 bytes for timestamps
-    if (payload.length < offset + 24 + 16) return null;
+    if (payload.length < offset + 40) return null;
     
     ByteData buffer = ByteData.sublistView(payload);
     

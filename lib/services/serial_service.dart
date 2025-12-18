@@ -277,8 +277,6 @@ class SerialService {
         }
         
         if (cliStart.length >= 2 && cliStart[0] == 0x23 && cliStart[1] == 0x23) {
-          _logState?.debug('检测到 CLI 消息 (Start: 23 23)', type: LogType.debug);
-          
           if (cliStart.length >= 14) {
                       final moduleId = ByteData.view(cliStart.buffer, cliStart.offsetInBytes).getUint16(2, Endian.little);
                       final crc16 = ByteData.view(cliStart.buffer, cliStart.offsetInBytes).getUint16(4, Endian.little);
@@ -288,41 +286,41 @@ class SerialService {
                       final payloadLength = ByteData.view(cliStart.buffer, cliStart.offsetInBytes).getUint16(10, Endian.little);
                       final sn = ByteData.view(cliStart.buffer, cliStart.offsetInBytes).getUint16(12, Endian.little);
                       
-                      _logState?.debug('CLI Message:', type: LogType.debug);
-                      _logState?.debug('  Start: 23 23', type: LogType.debug);
-                      _logState?.debug('  Module ID: 0x${moduleId.toRadixString(16).padLeft(4, '0').toUpperCase()} ($moduleId)', type: LogType.debug);
-                      _logState?.debug('  CRC16: 0x${crc16.toRadixString(16).padLeft(4, '0').toUpperCase()}', type: LogType.debug);
-                      _logState?.debug('  Message ID: 0x${messageId.toRadixString(16).padLeft(4, '0').toUpperCase()} ($messageId)', type: LogType.debug);
-                      _logState?.debug('  Flags: 0x${flags.toRadixString(16).padLeft(2, '0').toUpperCase()}', type: LogType.debug);
-                      _logState?.debug('  Result: 0x${result.toRadixString(16).padLeft(2, '0').toUpperCase()} ($result)', type: LogType.debug);
-                      _logState?.debug('  Payload Length: $payloadLength', type: LogType.debug);
-                      _logState?.debug('  SN: $sn', type: LogType.debug);
-                      
                       // 检查是否是响应
-                      // 方式1: Flags bit 7 = 1 表示响应 (ACK bit)
-                      // 方式2: Flags bits 1-3 的 Type 字段 = 1 表示响应 (0x02)
-                      // 方式3: 如果有等待的序列号匹配，也认为是响应
                       final isAckResponse = (flags & 0x80) != 0;
-                      final isTypeResponse = (flags & 0x0E) == 0x02; // bits 1-3 = 001
+                      final isTypeResponse = (flags & 0x0E) == 0x02;
                       final hasPendingRequest = _pendingResponses.containsKey(sn);
+                      
+                      // 先提取 payload 数据
+                      Uint8List? payload;
+                      if (cliStart.length >= 14 + payloadLength) {
+                        if (payloadLength > 0) {
+                          payload = cliStart.sublist(14, 14 + payloadLength);
+                          // 显示Payload长度和内容
+                          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+                          _logState?.debug('   Len: $payloadLength, Data: [$payloadHex]', type: LogType.debug);
+                          
+                          // 尝试解析 Payload 内容
+                          _parsePayload(moduleId, messageId, payload, result);
+                        }
+                      }
                       
                       if (isAckResponse || isTypeResponse || hasPendingRequest) {
                         isResponse = true;
-                        _logState?.debug('📥 收到响应消息 (SN: $sn, Module: $moduleId, Message: $messageId)', type: LogType.debug);
-                        _logState?.debug('   Flags: 0x${flags.toRadixString(16).padLeft(2, '0').toUpperCase()} (ACK=${isAckResponse}, Type=${isTypeResponse}, Pending=${hasPendingRequest})', type: LogType.debug);
-                        _logState?.debug('   当前等待的序列号: ${_pendingResponses.keys.join(", ")}', type: LogType.debug);
                         
                         // 尝试匹配待处理的响应
                         if (_pendingResponses.containsKey(sn)) {
                           final completer = _pendingResponses.remove(sn);
                           if (completer != null && !completer.isCompleted) {
-                            _logState?.success('✅ 匹配到响应 (SN: $sn, Module: $moduleId, Message: $messageId)', type: LogType.debug);
+                            // 简化日志：只显示SN匹配
+                            _logState?.success('✅ SN: $sn', type: LogType.debug);
                             completer.complete({
                               'moduleId': moduleId,
                               'messageId': messageId,
                               'sn': sn,
                               'result': result,
                               'payloadLength': payloadLength,
+                              'payload': payload,  // 包含payload
                             });
                           } else {
                             _logState?.warning('⚠️  Completer 已完成或为空 (SN: $sn)', type: LogType.debug);
@@ -331,35 +329,18 @@ class SerialService {
                           _logState?.warning('⚠️  未找到匹配的等待序列号 (SN: $sn)', type: LogType.debug);
                         }
                       }
-                      
-                      // 提取 payload 数据
-                      if (cliStart.length >= 14 + payloadLength) {
-                        if (payloadLength > 0) {
-                          final payload = cliStart.sublist(14, 14 + payloadLength);
-                          _logState?.debug('  Payload ($payloadLength bytes):', type: LogType.debug);
-                          _logState?.debug('    ${_formatHexData(payload)}', type: LogType.debug);
-                          
-                          // 尝试解析 Payload 内容
-                          _parsePayload(moduleId, messageId, payload, result);
-                        }
-                        
-                        // 解析 Tail (2 bytes)
-                        if (cliStart.length >= 14 + payloadLength + 2) {
-                          final tail = cliStart.sublist(14 + payloadLength, 14 + payloadLength + 2);
-                          _logState?.debug('  Tail: ${_formatHexData(tail)}', type: LogType.debug);
-                        }
-                      }
                     }
                   }
                 }
                 
       
       // 解析 GTP CRC32（在数据包末尾）
-      if (packet.length >= 4 + length + 4) {
-        final crc32Offset = 4 + length;
-        final crc32 = ByteData.view(packet.buffer).getUint32(crc32Offset, Endian.little);
-        _logState?.debug('GTP CRC32: 0x${crc32.toRadixString(16).padLeft(8, '0').toUpperCase()}');
-      }
+      // 简化日志，不显示CRC32
+      // if (packet.length >= 4 + length + 4) {
+      //   final crc32Offset = 4 + length;
+      //   final crc32 = ByteData.view(packet.buffer).getUint32(crc32Offset, Endian.little);
+      //   _logState?.debug('GTP CRC32: 0x${crc32.toRadixString(16).padLeft(8, '0').toUpperCase()}');
+      // }
     } catch (e) {
       _logState?.debug('解析 GTP/CLI 数据时出错: $e');
     }

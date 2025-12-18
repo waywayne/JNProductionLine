@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/log_state.dart';
@@ -102,6 +103,29 @@ class _LogConsoleSectionState extends State<LogConsoleSection> {
                 ),
                 child: const Text(
                   'Export',
+                  style: TextStyle(fontSize: 11),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // Copy button
+            SizedBox(
+              height: 28,
+              child: ElevatedButton(
+                onPressed: () {
+                  _copyLogsToClipboard(context);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue[400],
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+                child: const Text(
+                  'Copy',
                   style: TextStyle(fontSize: 11),
                 ),
               ),
@@ -350,6 +374,40 @@ class _LogConsoleSectionState extends State<LogConsoleSection> {
       _showMessage('日志已导出到: $result');
     } catch (e) {
       _showMessage('导出失败: $e');
+    }
+  }
+  
+  Future<void> _copyLogsToClipboard(BuildContext context) async {
+    try {
+      final logState = context.read<LogState>();
+      
+      // 获取所有日志
+      final logs = logState.logs;
+      
+      if (logs.isEmpty) {
+        _showMessage('没有日志可复制');
+        return;
+      }
+      
+      // 生成日志内容
+      final buffer = StringBuffer();
+      buffer.writeln('========================================');
+      buffer.writeln('JN Production Line - Log Copy');
+      buffer.writeln('Copy Time: ${DateTime.now()}');
+      buffer.writeln('Total Logs: ${logs.length}');
+      buffer.writeln('========================================');
+      buffer.writeln();
+      
+      for (final log in logs) {
+        buffer.writeln(log.formattedMessage);
+      }
+      
+      // 复制到剪贴板
+      await Clipboard.setData(ClipboardData(text: buffer.toString()));
+      
+      _showMessage('已复制 ${logs.length} 条日志到剪贴板');
+    } catch (e) {
+      _showMessage('复制失败: $e');
     }
   }
   
