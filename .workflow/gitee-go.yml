@@ -17,7 +17,7 @@ stages:
       - step: script@1
         name: check_environment
         displayName: CheckPythonEnvironment
-        commands:
+        script:
           - python --version
           - pip --version
         notify: []
@@ -32,7 +32,7 @@ stages:
       - step: script@1
         name: install_python_deps
         displayName: InstallPythonDependencies
-        commands:
+        script:
           - python -m pip install --upgrade pip
           - pip install pyvisa pyvisa-py pandas openpyxl
         notify: []
@@ -42,7 +42,7 @@ stages:
       - step: script@1
         name: download_flutter
         displayName: DownloadFlutterSDK
-        commands:
+        script:
           - curl -o flutter.zip https://storage.flutter-io.cn/flutter_infra_release/releases/stable/windows/flutter_windows_3.24.0-stable.zip
           - tar -xf flutter.zip
         notify: []
@@ -53,7 +53,7 @@ stages:
       - step: script@1
         name: configure_flutter
         displayName: ConfigureFlutter
-        commands:
+        script:
           - set PATH=%CD%\flutter\bin;%PATH%
           - flutter --version
           - flutter doctor
@@ -65,7 +65,7 @@ stages:
       - step: script@1
         name: get_dependencies
         displayName: GetDependencies
-        commands:
+        script:
           - set PATH=%CD%\flutter\bin;%PATH%
           - flutter pub get
         notify: []
@@ -76,7 +76,7 @@ stages:
       - step: script@1
         name: build_windows_app
         displayName: BuildWindowsApplication
-        commands:
+        script:
           - set PATH=%CD%\flutter\bin;%PATH%
           - flutter build windows --release
         artifacts:
@@ -91,7 +91,7 @@ stages:
       - step: script@1
         name: package_artifacts
         displayName: PackageArtifacts
-        commands:
+        script:
           - cd build\windows\runner\Release
           - tar -czf jn_production_line_windows.tar.gz *
           - move jn_production_line_windows.tar.gz ..\..\..\..\

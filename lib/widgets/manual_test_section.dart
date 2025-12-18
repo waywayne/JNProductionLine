@@ -58,18 +58,8 @@ class ManualTestSection extends StatelessWidget {
                 Icons.wifi,
                 () => state.runManualTest('控制WiFi', ProductionTestCommands.createControlWifiCommand()),
               ),
-              _buildTestButton(
-                context,
-                'LED灯(外侧)',
-                Icons.lightbulb_outline,
-                () => state.runManualTest('LED灯(外侧)', ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledOuter)),
-              ),
-              _buildTestButton(
-                context,
-                'LED灯(内侧)',
-                Icons.lightbulb,
-                () => state.runManualTest('LED灯(内侧)', ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledInner)),
-              ),
+              _buildLedToggleButton(context, state, ProductionTestCommands.ledOuter, 'LED灯(外侧)', Icons.lightbulb_outline),
+              _buildLedToggleButton(context, state, ProductionTestCommands.ledInner, 'LED灯(内侧)', Icons.lightbulb),
               _buildTestButton(
                 context,
                 'SPK0',
@@ -167,6 +157,56 @@ class ManualTestSection extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLedToggleButton(
+    BuildContext context,
+    TestState state,
+    int ledNumber,
+    String label,
+    IconData icon,
+  ) {
+    final isOn = state.getLedState(ledNumber);
+    final statusText = isOn ? '已开启' : '已关闭';
+    
+    return SizedBox(
+      width: 140,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () => state.toggleLedState(ledNumber),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isOn ? Colors.amber[400] : Colors.grey[300],
+          foregroundColor: isOn ? Colors.black87 : Colors.black87,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: isOn ? BorderSide(color: Colors.amber[700]!, width: 2) : BorderSide.none,
+          ),
+          padding: const EdgeInsets.all(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 28, color: isOn ? Colors.amber[800] : null),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              statusText,
+              style: TextStyle(
+                fontSize: 9,
+                color: isOn ? Colors.amber[900] : Colors.black54,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),

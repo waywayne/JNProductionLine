@@ -80,6 +80,12 @@ class TestState extends ChangeNotifier {
     1: false, // MIC1
     2: false, // MIC2
   };
+  
+  // LED 状态跟踪 (true = 已开启, false = 已关闭)
+  final Map<int, bool> _ledStates = {
+    ProductionTestCommands.ledOuter: false, // LED0(外侧)
+    ProductionTestCommands.ledInner: false, // LED1(内侧)
+  };
 
   String get testScriptPath => _testScriptPath;
   String get configFilePath => _configFilePath;
@@ -92,6 +98,9 @@ class TestState extends ChangeNotifier {
   
   // 获取 MIC 状态
   bool getMicState(int micNumber) => _micStates[micNumber] ?? false;
+  
+  // 获取 LED 状态
+  bool getLedState(int ledNumber) => _ledStates[ledNumber] ?? false;
   
   void setLogState(LogState logState) {
     _logState = logState;
@@ -228,8 +237,8 @@ class TestState extends ChangeNotifier {
         {'name': '获取设备电量', 'cmd': ProductionTestCommands.createGetCurrentCommand(), 'cmdCode': ProductionTestCommands.cmdGetCurrent},
         {'name': '获取充电状态', 'cmd': ProductionTestCommands.createGetChargeStatusCommand(), 'cmdCode': ProductionTestCommands.cmdGetChargeStatus},
         {'name': '控制WiFi', 'cmd': ProductionTestCommands.createControlWifiCommand(), 'cmdCode': ProductionTestCommands.cmdControlWifi},
-        {'name': '控制LED灯(外侧)', 'cmd': ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledOuter), 'cmdCode': ProductionTestCommands.cmdControlLED},
-        {'name': '控制LED灯(内侧)', 'cmd': ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledInner), 'cmdCode': ProductionTestCommands.cmdControlLED},
+        {'name': '控制LED灯(外侧)', 'cmd': ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledOuter, ProductionTestCommands.ledOn), 'cmdCode': ProductionTestCommands.cmdControlLED},
+        {'name': '控制LED灯(内侧)', 'cmd': ProductionTestCommands.createControlLEDCommand(ProductionTestCommands.ledInner, ProductionTestCommands.ledOn), 'cmdCode': ProductionTestCommands.cmdControlLED},
         {'name': '控制SPK0', 'cmd': ProductionTestCommands.createControlSPKCommand(ProductionTestCommands.spk0), 'cmdCode': ProductionTestCommands.cmdControlSPK},
         {'name': '控制SPK1', 'cmd': ProductionTestCommands.createControlSPKCommand(ProductionTestCommands.spk1), 'cmdCode': ProductionTestCommands.cmdControlSPK},
         {'name': 'Touch左侧', 'cmd': ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchLeft), 'cmdCode': ProductionTestCommands.cmdTouch},
@@ -444,6 +453,18 @@ class TestState extends ChangeNotifier {
       final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
       
+      // 详细解析指令结构
+      if (command.length == 10) {
+        _logState?.info('📋 指令结构:', type: LogType.debug);
+        _logState?.info('   - CMD: 0x${command[0].toRadixString(16).toUpperCase().padLeft(2, '0')} (RTC命令)', type: LogType.debug);
+        _logState?.info('   - OPT: 0x${command[1].toRadixString(16).toUpperCase().padLeft(2, '0')} (设置时间)', type: LogType.debug);
+        
+        // 解析时间戳字节
+        final timestampBytes = command.sublist(2);
+        final timestampHex = timestampBytes.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('   - 时间戳: [$timestampHex] (8 bytes, little endian)', type: LogType.debug);
+      }
+      
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
         timeout: const Duration(seconds: 10),
@@ -491,6 +512,13 @@ class TestState extends ChangeNotifier {
       final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
       
+      // 详细解析指令结构
+      if (command.length == 2) {
+        _logState?.info('📋 指令结构:', type: LogType.debug);
+        _logState?.info('   - CMD: 0x${command[0].toRadixString(16).toUpperCase().padLeft(2, '0')} (RTC命令)', type: LogType.debug);
+        _logState?.info('   - OPT: 0x${command[1].toRadixString(16).toUpperCase().padLeft(2, '0')} (获取时间)', type: LogType.debug);
+      }
+      
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
         timeout: const Duration(seconds: 10),
@@ -501,22 +529,61 @@ class TestState extends ChangeNotifier {
       if (response != null && !response.containsKey('error')) {
         _logState?.success('✅ RTC 时间获取成功', type: LogType.debug);
         
+        // 显示完整响应信息用于调试
+        _logState?.info('📊 完整响应信息:', type: LogType.debug);
+        response.forEach((key, value) {
+          if (key == 'payload' && value is Uint8List) {
+            final payloadHex = (value as Uint8List).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+            _logState?.info('   - $key: [$payloadHex] (${(value as Uint8List).length} bytes)', type: LogType.debug);
+          } else {
+            _logState?.info('   - $key: $value', type: LogType.debug);
+          }
+        });
+        
         // 显示响应数据并解析时间戳
         if (response.containsKey('payload') && response['payload'] != null) {
           final payload = response['payload'] as Uint8List;
           final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
           _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
           
-          // 尝试解析时间戳（跳过命令字节，读取 uint64）
-          if (payload.length >= 9) { // 至少需要 1 byte cmd + 8 bytes timestamp
-            final buffer = ByteData.sublistView(payload, 1); // 跳过命令字节
-            final timestamp = buffer.getUint64(0, Endian.little);
-            final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true);
+          // 详细解析响应结构
+          _logState?.info('📋 响应结构:', type: LogType.debug);
+          if (payload.length == 8) {
+            _logState?.info('   - 格式: 直接8字节时间戳 (little endian)', type: LogType.debug);
+            _logState?.info('   - 时间戳: [$payloadHex]', type: LogType.debug);
             
-            _logState?.info('📅 设备时间戳: $timestamp ms (${timestamp ~/ 1000} s)', type: LogType.debug);
-            _logState?.info('📅 UTC 时间: ${dateTime.toIso8601String()}', type: LogType.debug);
-            _logState?.info('📅 本地时间: ${dateTime.toLocal().toString()}', type: LogType.debug);
+            // 使用 ProductionTestCommands 的解析方法
+            final timestamp = ProductionTestCommands.parseRTCResponse(payload);
+            if (timestamp != null) {
+              final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true);
+              
+              _logState?.info('📅 设备时间戳: $timestamp ms (${timestamp ~/ 1000} s)', type: LogType.debug);
+              _logState?.info('📅 UTC 时间: ${dateTime.toIso8601String()}', type: LogType.debug);
+              _logState?.info('📅 本地时间: ${dateTime.toLocal().toString()}', type: LogType.debug);
+            } else {
+              _logState?.warning('⚠️  无法解析RTC时间戳数据', type: LogType.debug);
+            }
+          } else if (payload.length == 0) {
+            _logState?.warning('⚠️  响应payload为空，设备可能未返回时间戳数据', type: LogType.debug);
+            _logState?.info('   - 可能原因: 设备RTC未初始化或命令处理异常', type: LogType.debug);
+          } else {
+            _logState?.warning('⚠️  响应长度异常: ${payload.length} bytes (期望: 8 bytes)', type: LogType.debug);
+            _logState?.info('   - 格式: 非标准长度', type: LogType.debug);
+            
+            // 尝试解析非标准长度的响应
+            if (payload.length >= 8) {
+              _logState?.info('   - 尝试解析前8字节...', type: LogType.debug);
+              final timestamp = ProductionTestCommands.parseRTCResponse(payload);
+              if (timestamp != null) {
+                final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true);
+                _logState?.info('📅 设备时间戳: $timestamp ms (${timestamp ~/ 1000} s)', type: LogType.debug);
+                _logState?.info('📅 UTC 时间: ${dateTime.toIso8601String()}', type: LogType.debug);
+                _logState?.info('📅 本地时间: ${dateTime.toLocal().toString()}', type: LogType.debug);
+              }
+            }
           }
+        } else {
+          _logState?.error('❌ 响应中没有payload数据', type: LogType.debug);
         }
       } else {
         _logState?.error('❌ RTC 时间获取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
@@ -525,6 +592,63 @@ class TestState extends ChangeNotifier {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     } catch (e) {
       _logState?.error('RTC 获取时间异常: $e', type: LogType.debug);
+    }
+  }
+  
+  /// Toggle LED state (on/off)
+  Future<void> toggleLedState(int ledNumber) async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[LED$ledNumber] 串口未连接', type: LogType.debug);
+      return;
+    }
+    
+    // 切换状态
+    final currentState = _ledStates[ledNumber] ?? false;
+    final newState = !currentState;
+    final state = newState ? ProductionTestCommands.ledOn : ProductionTestCommands.ledOff;
+    final stateText = newState ? '开启' : '关闭';
+    final ledName = ProductionTestCommands.getLEDName(ledNumber);
+    
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('💡 $ledName 控制 - $stateText', type: LogType.debug);
+      _logState?.info('📊 当前状态: ${currentState ? "已开启" : "已关闭"} → 目标状态: ${newState ? "已开启" : "已关闭"}', type: LogType.debug);
+      _logState?.info('📤 LED号: 0x${ledNumber.toRadixString(16).toUpperCase().padLeft(2, '0')} ($ledNumber)', type: LogType.debug);
+      _logState?.info('📤 状态字: 0x${state.toRadixString(16).toUpperCase().padLeft(2, '0')} (${state == ProductionTestCommands.ledOn ? "开启" : "关闭"})', type: LogType.debug);
+      _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createControlLEDCommand(ledNumber, state);
+      
+      // 显示完整指令数据
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        // 更新状态
+        _ledStates[ledNumber] = newState;
+        notifyListeners();
+        _logState?.success('✅ $ledName ${stateText}成功 - 当前状态: ${newState ? "已开启 💡" : "已关闭 ⚫"}', type: LogType.debug);
+        
+        // 显示响应数据
+        if (response.containsKey('payload') && response['payload'] != null) {
+          final payload = response['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+        }
+      } else {
+        _logState?.error('❌ $ledName ${stateText}失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('$ledName ${stateText}异常: $e', type: LogType.debug);
     }
   }
   

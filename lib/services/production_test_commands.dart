@@ -32,6 +32,10 @@ class ProductionTestCommands {
   static const int ledOuter = 0x00; // LED0(外侧)
   static const int ledInner = 0x01; // LED1(内侧)
   
+  // LED state values
+  static const int ledOn = 0x00; // LED开启
+  static const int ledOff = 0x01; // LED关闭
+  
   // SPK control values
   static const int spk0 = 0x00; // SPK0
   static const int spk1 = 0x01; // SPK1
@@ -116,11 +120,11 @@ class ProductionTestCommands {
   }
   
   /// Create control LED command (0x05)
-  /// 控制设备LED灯 - 请求: LED号
-  /// 点击开启测试，内侧LED灯是否依次亮、熄灭、缓慢亮、缓慢熄灭
+  /// 控制设备LED灯 - 请求: LED号 + 状态
   /// [ledNumber] - 0x00: LED0(外侧), 0x01: LED1(内侧)
-  static Uint8List createControlLEDCommand(int ledNumber) {
-    return Uint8List.fromList([cmdControlLED, ledNumber]);
+  /// [state] - 0x00: 开启, 0x01: 关闭
+  static Uint8List createControlLEDCommand(int ledNumber, int state) {
+    return Uint8List.fromList([cmdControlLED, ledNumber, state]);
   }
   
   /// Create control SPK command (0x06)
@@ -278,6 +282,18 @@ class ProductionTestCommands {
     }
   }
   
+  /// Get LED state name
+  static String getLEDStateName(int state) {
+    switch (state) {
+      case ledOn:
+        return '开启';
+      case ledOff:
+        return '关闭';
+      default:
+        return 'UNKNOWN';
+    }
+  }
+  
   /// Parse touch response
   /// Returns CDC value or success status
   static dynamic parseTouchResponse(Uint8List payload) {
@@ -294,15 +310,15 @@ class ProductionTestCommands {
   
   /// Parse RTC response
   /// Returns timestamp in milliseconds
+  /// 设备直接返回8字节时间戳，不包含命令字节
   static int? parseRTCResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    int offset = payload[0] == cmdRTC ? 1 : 0;
-    
-    if (payload.length < offset + 8) return null;
+    // 设备直接返回8字节时间戳，不包含命令字节
+    if (payload.length < 8) return null;
     
     ByteData buffer = ByteData.sublistView(payload);
-    return buffer.getUint64(offset, Endian.little);
+    return buffer.getUint64(0, Endian.little);
   }
   
   /// Parse light sensor response
