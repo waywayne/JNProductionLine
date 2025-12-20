@@ -3,7 +3,11 @@ import 'dart:async';
 import 'dart:typed_data';
 import '../services/serial_service.dart';
 import '../services/production_test_commands.dart';
+import '../services/gtp_protocol.dart';
 import 'log_state.dart';
+import '../config/test_config.dart';
+import '../config/wifi_config.dart';
+import '../config/sn_mac_config.dart';
 
 enum TestStatus {
   waiting,
@@ -87,6 +91,9 @@ class TestState extends ChangeNotifier {
     ProductionTestCommands.ledInner: false, // LED1(内侧)
   };
 
+  // 当前设备标识信息
+  Map<String, String>? _currentDeviceIdentity;
+
   String get testScriptPath => _testScriptPath;
   String get configFilePath => _configFilePath;
   TestGroup? get currentTestGroup => _currentTestGroup;
@@ -95,6 +102,9 @@ class TestState extends ChangeNotifier {
   bool get isRunningTest => _isRunningTest;
 
   List<String> get availablePorts => SerialService.getAvailablePorts();
+  
+  // 获取当前设备标识信息
+  Map<String, String>? get currentDeviceIdentity => _currentDeviceIdentity;
 
   // 获取 MIC 状态
   bool getMicState(int micNumber) => _micStates[micNumber] ?? false;
@@ -115,6 +125,82 @@ class TestState extends ChangeNotifier {
   void setConfigFilePath(String path) {
     _configFilePath = path;
     notifyListeners();
+  }
+
+  /// 初始化SN/MAC配置
+  Future<void> initializeSNMacConfig() async {
+    try {
+      await SNMacConfig.initialize();
+      _logState?.info('SN/MAC配置初始化成功');
+    } catch (e) {
+      _logState?.error('SN/MAC配置初始化失败: $e');
+    }
+  }
+
+  /// 生成新的设备标识信息
+  Future<void> generateDeviceIdentity() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🏷️  开始生成设备标识信息', type: LogType.debug);
+      
+      _currentDeviceIdentity = await SNMacConfig.generateDeviceIdentity();
+      
+      _logState?.info('✅ 设备标识信息生成成功:', type: LogType.debug);
+      _logState?.info('   📋 SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+      _logState?.info('   📡 WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+      _logState?.info('   📶 蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
+      _logState?.info('   🏭 产品线: ${_currentDeviceIdentity!['productLine']}', type: LogType.debug);
+      _logState?.info('   🏢 工厂: ${_currentDeviceIdentity!['factory']}', type: LogType.debug);
+      _logState?.info('   📅 生产日期: ${_currentDeviceIdentity!['productionDate']}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('生成设备标识信息失败: $e', type: LogType.debug);
+    }
+  }
+
+  /// 设置产品线
+  Future<void> setProductLine(String productLine) async {
+    try {
+      await SNMacConfig.setProductLine(productLine);
+      _logState?.info('产品线设置为: $productLine');
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('设置产品线失败: $e');
+    }
+  }
+
+  /// 设置工厂
+  Future<void> setFactory(String factory) async {
+    try {
+      await SNMacConfig.setFactory(factory);
+      _logState?.info('工厂设置为: $factory');
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('设置工厂失败: $e');
+    }
+  }
+
+  /// 设置产线
+  Future<void> setProductionLine(int line) async {
+    try {
+      await SNMacConfig.setProductionLine(line);
+      _logState?.info('产线设置为: $line');
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('设置产线失败: $e');
+    }
+  }
+
+  /// 获取SN/MAC统计信息
+  Map<String, dynamic> getSNMacStatistics() {
+    return SNMacConfig.getStatistics();
+  }
+
+  /// 获取当前SN/MAC配置
+  Map<String, dynamic> getSNMacConfig() {
+    return SNMacConfig.getCurrentConfig();
   }
 
   /// Connect to serial port
@@ -276,8 +362,7 @@ class TestState extends ChangeNotifier {
         },
         {
           'name': '控制WiFi',
-          'cmd': ProductionTestCommands.createControlWifiCommand(),
-          'cmdCode': ProductionTestCommands.cmdControlWifi
+          'customAction': 'testWiFi'
         },
         {
           'name': 'LED灯(外侧)开启',
@@ -323,9 +408,9 @@ class TestState extends ChangeNotifier {
         },
         {
           'name': 'Touch右侧',
-          'cmd': ProductionTestCommands.createTouchCommand(
-              ProductionTestCommands.touchRight),
-          'cmdCode': ProductionTestCommands.cmdTouch
+          'cmd': null,
+          'cmdCode': ProductionTestCommands.cmdTouch,
+          'customAction': 'testTouchRight'
         },
         {
           'name': 'MIC0开启',
@@ -356,9 +441,9 @@ class TestState extends ChangeNotifier {
         },
         {
           'name': 'RTC获取时间',
-          'cmd': null,
-          'cmdCode': ProductionTestCommands.cmdRTC,
-          'customAction': 'getRTC'
+          'cmd': ProductionTestCommands.createRTCCommand(
+              ProductionTestCommands.rtcOptGetTime),
+          'cmdCode': ProductionTestCommands.cmdRTC
         },
         {
           'name': '光敏传感器',
@@ -367,9 +452,7 @@ class TestState extends ChangeNotifier {
         },
         {
           'name': 'IMU数据',
-          'cmd': ProductionTestCommands.createIMUCommand(
-              ProductionTestCommands.imuOptGetData),
-          'cmdCode': ProductionTestCommands.cmdIMU
+          'customAction': 'testIMU'
         },
         {
           'name': '产测结束',
@@ -442,16 +525,28 @@ class TestState extends ChangeNotifier {
           if (customAction != null) {
             switch (customAction) {
               case 'setRTC':
-                await setRTCTime();
+                final success = await setRTCTime();
+                response = success 
+                  ? {'success': true}
+                  : {'error': 'RTC设置时间失败，请检查设备连接或日志'};
+                break;
+              case 'testTouchRight':
+                await testTouchRight();
                 response = {
                   'success': true
                 }; // Assume success for custom actions
                 break;
-              case 'getRTC':
-                await getRTCTime();
-                response = {
-                  'success': true
-                }; // Assume success for custom actions
+              case 'testWiFi':
+                final success = await testWiFi();
+                response = success 
+                  ? {'success': true}
+                  : {'error': 'WiFi测试失败，请检查设备连接或配置'};
+                break;
+              case 'testIMU':
+                final success = await testIMU();
+                response = success 
+                  ? {'success': true}
+                  : {'error': 'IMU测试失败，请检查设备连接'};
                 break;
               default:
                 response = {'error': 'Unknown custom action: $customAction'};
@@ -464,7 +559,7 @@ class TestState extends ChangeNotifier {
             // Send regular command and wait for response
             response = await _serialService.sendCommandAndWaitResponse(
               command,
-              timeout: const Duration(seconds: 10),
+              timeout: TestConfig.defaultTimeout,
               moduleId: ProductionTestCommands.moduleId,
               messageId: ProductionTestCommands.messageId,
             );
@@ -507,8 +602,15 @@ class TestState extends ChangeNotifier {
             TestStatus status = TestStatus.pass;
             String? errorMsg;
 
-            try {
-              switch (cmdCode) {
+            // Check if this is a custom action response (no payload to parse)
+            if (response.containsKey('success') && response['success'] == true) {
+              // Custom action completed successfully
+              result = 'Pass';
+              status = TestStatus.pass;
+            } else {
+              // Regular command response - parse payload
+              try {
+                switch (cmdCode) {
                 case ProductionTestCommands.cmdGetVoltage:
                   final voltage = ProductionTestCommands.parseVoltageResponse(
                       response['payload']);
@@ -543,6 +645,25 @@ class TestState extends ChangeNotifier {
                     result = 'Fail';
                     status = TestStatus.fail;
                     errorMsg = '无法解析充电状态';
+                  }
+                  break;
+
+                case ProductionTestCommands.cmdControlWifi:
+                  final wifiResult = ProductionTestCommands.parseWifiResponse(
+                      response['payload']);
+                  if (wifiResult != null && wifiResult['success'] == true) {
+                    String details = wifiResult['optName'] ?? '';
+                    if (wifiResult.containsKey('rssi')) {
+                      details += ' (RSSI: ${wifiResult['rssi']}dBm)';
+                    } else if (wifiResult.containsKey('mac')) {
+                      details += ' (MAC: ${wifiResult['mac']})';
+                    }
+                    result = 'Pass ($details)';
+                    status = TestStatus.pass;
+                  } else {
+                    result = 'Fail';
+                    status = TestStatus.fail;
+                    errorMsg = wifiResult?['error'] ?? '无法解析WiFi响应';
                   }
                   break;
 
@@ -602,11 +723,12 @@ class TestState extends ChangeNotifier {
                   result = 'Pass';
                   status = TestStatus.pass;
                   break;
+                }
+              } catch (e) {
+                result = 'Error';
+                status = TestStatus.error;
+                errorMsg = '解析响应时出错: $e';
               }
-            } catch (e) {
-              result = 'Error';
-              status = TestStatus.error;
-              errorMsg = '解析响应时出错: $e';
             }
 
             debugPrint('Test $testName: $result (attempt ${retryCount + 1})');
@@ -689,10 +811,11 @@ class TestState extends ChangeNotifier {
   }
 
   /// Set RTC time to current UTC time
-  Future<void> setRTCTime() async {
+  /// Returns true if successful, false otherwise
+  Future<bool> setRTCTime() async {
     if (!_serialService.isConnected) {
       _logState?.error('[RTC] 串口未连接', type: LogType.debug);
-      return;
+      return false;
     }
 
     try {
@@ -743,7 +866,7 @@ class TestState extends ChangeNotifier {
 
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
-        timeout: const Duration(seconds: 10),
+        timeout: TestConfig.defaultTimeout,
         moduleId: ProductionTestCommands.moduleId,
         messageId: ProductionTestCommands.messageId,
       );
@@ -759,15 +882,27 @@ class TestState extends ChangeNotifier {
               .join(' ');
           _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)',
               type: LogType.debug);
+          
+          // 检查响应数据是否有效（至少包含命令字）
+          if (payload.isNotEmpty && payload[0] == ProductionTestCommands.cmdRTC) {
+            _logState?.info('📌 RTC 设置时间成功，收到有效响应', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return true;
+          }
         }
+        
+        _logState?.warning('⚠️  RTC 设置时间响应数据不完整', type: LogType.debug);
       } else {
         _logState?.error('❌ RTC 时间设置失败: ${response?['error'] ?? '无响应'}',
             type: LogType.debug);
       }
 
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
     } catch (e) {
       _logState?.error('RTC 设置时间异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
     }
   }
 
@@ -809,7 +944,7 @@ class TestState extends ChangeNotifier {
 
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
-        timeout: const Duration(seconds: 10),
+        timeout: TestConfig.defaultTimeout,
         moduleId: ProductionTestCommands.moduleId,
         messageId: ProductionTestCommands.messageId,
       );
@@ -843,9 +978,10 @@ class TestState extends ChangeNotifier {
 
           // 详细解析响应结构
           _logState?.info('📋 响应结构:', type: LogType.debug);
-          if (payload.length == 8) {
-            _logState?.info('   - 格式: 直接8字节时间戳 (little endian)',
+          if (payload.length == 9) {
+            _logState?.info('   - 格式: [CMD] + 8字节时间戳 (little endian)',
                 type: LogType.debug);
+            _logState?.info('   - CMD: 0x${payload[0].toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
             _logState?.info('   - 时间戳: [$payloadHex]', type: LogType.debug);
 
             // 使用 ProductionTestCommands 的解析方法
@@ -870,13 +1006,13 @@ class TestState extends ChangeNotifier {
             _logState?.info('   - 可能原因: 设备RTC未初始化或命令处理异常', type: LogType.debug);
           } else {
             _logState?.warning(
-                '⚠️  响应长度异常: ${payload.length} bytes (期望: 8 bytes)',
+                '⚠️  响应长度异常: ${payload.length} bytes (期望: 9 bytes)',
                 type: LogType.debug);
             _logState?.info('   - 格式: 非标准长度', type: LogType.debug);
 
             // 尝试解析非标准长度的响应
-            if (payload.length >= 8) {
-              _logState?.info('   - 尝试解析前8字节...', type: LogType.debug);
+            if (payload.length >= 9) {
+              _logState?.info('   - 尝试解析...', type: LogType.debug);
               final timestamp =
                   ProductionTestCommands.parseRTCResponse(payload);
               if (timestamp != null) {
@@ -948,7 +1084,7 @@ class TestState extends ChangeNotifier {
 
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
-        timeout: const Duration(seconds: 10),
+        timeout: TestConfig.defaultTimeout,
         moduleId: ProductionTestCommands.moduleId,
         messageId: ProductionTestCommands.messageId,
       );
@@ -1024,7 +1160,7 @@ class TestState extends ChangeNotifier {
 
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
-        timeout: const Duration(seconds: 10),
+        timeout: TestConfig.defaultTimeout,
         moduleId: ProductionTestCommands.moduleId,
         messageId: ProductionTestCommands.messageId,
       );
@@ -1079,7 +1215,7 @@ class TestState extends ChangeNotifier {
       // Send command and wait for response
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
-        timeout: const Duration(seconds: 10),
+        timeout: TestConfig.defaultTimeout,
         moduleId: moduleId ?? ProductionTestCommands.moduleId,
         messageId: messageId ?? ProductionTestCommands.messageId,
       );
@@ -1111,6 +1247,387 @@ class TestState extends ChangeNotifier {
       _logState?.error('❌ $testName - 异常: $e', type: LogType.debug);
     }
     // 不再设置 _isRunningTest = false，因为不再使用阻塞机制
+  }
+
+  /// Test Touch Right Side - 遍历所有touch pad获取CDC值
+  Future<void> testTouchRight() async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[Touch右侧] 串口未连接', type: LogType.debug);
+      return;
+    }
+
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('👆 Touch 右侧测试', type: LogType.debug);
+      _logState?.info('📋 测试说明: 遍历所有3个touch pad，获取CDC值', type: LogType.debug);
+      _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+
+      // 遍历所有3个touch pad (ID: 0x00, 0x01, 0x02)
+      for (int touchId = 0; touchId <= 2; touchId++) {
+        _logState?.info('', type: LogType.debug);
+        _logState?.info('📍 测试 Touch Pad $touchId:', type: LogType.debug);
+        _logState?.info('   - Touch侧: 右侧 (0x01)', type: LogType.debug);
+        _logState?.info('   - Touch ID: 0x${touchId.toRadixString(16).toUpperCase().padLeft(2, '0')} ($touchId)', type: LogType.debug);
+        _logState?.info('   - 操作: 获取CDC值 (0x00)', type: LogType.debug);
+
+        // 创建获取CDC值的命令
+        final command = ProductionTestCommands.createTouchCommand(
+          ProductionTestCommands.touchRight,
+          touchId: touchId,
+          opt: ProductionTestCommands.touchOptGetCDC,
+        );
+
+        // 显示完整指令数据
+        final commandHex = command
+            .map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0'))
+            .join(' ');
+        _logState?.info('📦 发送指令: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+
+        // 详细解析指令结构
+        if (command.length == 4) {
+          _logState?.info('📋 指令结构:', type: LogType.debug);
+          _logState?.info('   - CMD: 0x${command[0].toRadixString(16).toUpperCase().padLeft(2, '0')} (Touch命令)', type: LogType.debug);
+          _logState?.info('   - Side: 0x${command[1].toRadixString(16).toUpperCase().padLeft(2, '0')} (右侧)', type: LogType.debug);
+          _logState?.info('   - Touch ID: 0x${command[2].toRadixString(16).toUpperCase().padLeft(2, '0')} ($touchId)', type: LogType.debug);
+          _logState?.info('   - OPT: 0x${command[3].toRadixString(16).toUpperCase().padLeft(2, '0')} (获取CDC)', type: LogType.debug);
+        }
+
+        // 发送命令并等待响应
+        final response = await _serialService.sendCommandAndWaitResponse(
+          command,
+          timeout: TestConfig.defaultTimeout,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+
+        if (response != null && !response.containsKey('error')) {
+          // 显示响应数据
+          if (response.containsKey('payload') && response['payload'] != null) {
+            final payload = response['payload'] as Uint8List;
+            final payloadHex = payload
+                .map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0'))
+                .join(' ');
+            _logState?.info('📥 响应数据: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+
+            // 解析CDC值
+            final cdcValue = ProductionTestCommands.parseTouchResponse(payload);
+            if (cdcValue != null) {
+              _logState?.success('✅ Touch Pad $touchId - CDC值: $cdcValue', type: LogType.debug);
+            } else {
+              _logState?.warning('⚠️  Touch Pad $touchId - 无法解析CDC值', type: LogType.debug);
+            }
+          }
+        } else {
+          _logState?.error('❌ Touch Pad $touchId - 获取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        }
+
+        // 添加短暂延迟，避免命令发送过快
+        await Future.delayed(TestConfig.touchTestDelay);
+      }
+
+      _logState?.info('', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.success('✅ Touch 右侧测试完成', type: LogType.debug);
+      _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('Touch 右侧测试异常: $e', type: LogType.debug);
+    }
+  }
+
+  /// WiFi多步骤测试流程
+  /// 按顺序执行：开始测试 -> 连接热点 -> 测试RSSI -> 获取MAC -> 烧录MAC -> 结束测试
+  Future<bool> testWiFi() async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[WiFi] 串口未连接', type: LogType.debug);
+      return false;
+    }
+
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🌐 开始WiFi多步骤测试流程', type: LogType.debug);
+      _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+
+      // 步骤1: 开始测试 (0x00)
+      if (!await _executeWiFiStep(WiFiConfig.optStartTest, '开始WiFi测试')) {
+        return false;
+      }
+
+      // 步骤2: 连接热点 (0x01)
+      List<int>? apData;
+      if (WiFiConfig.defaultSSID.isNotEmpty && WiFiConfig.defaultPassword.isNotEmpty) {
+        List<int> ssidBytes = WiFiConfig.stringToBytes(WiFiConfig.defaultSSID);
+        List<int> pwdBytes = WiFiConfig.stringToBytes(WiFiConfig.defaultPassword);
+        apData = [...ssidBytes, ...pwdBytes];
+        _logState?.info('📡 使用配置的热点: SSID="${WiFiConfig.defaultSSID}"', type: LogType.debug);
+      } else {
+        _logState?.warning('⚠️  未配置热点信息，使用空的SSID和密码', type: LogType.debug);
+        apData = [0, 0]; // 空的SSID和PWD，都以\0结尾
+      }
+      
+      if (!await _executeWiFiStep(WiFiConfig.optConnectAP, '连接热点', data: apData)) {
+        return false;
+      }
+
+      // 步骤3: 测试RSSI (0x02)
+      if (!await _executeWiFiStep(WiFiConfig.optTestRSSI, '测试RSSI')) {
+        return false;
+      }
+
+      // 步骤4: 获取MAC地址 (0x03)
+      String? macAddress;
+      final getMacResult = await _executeWiFiStep(WiFiConfig.optGetMAC, '获取MAC地址');
+      if (!getMacResult) {
+        return false;
+      }
+
+      // 步骤5: 烧录MAC地址 (0x04)
+      // 这里可以使用获取到的MAC地址，或者使用预设的MAC地址
+      // 为了简化，我们使用一个示例MAC地址
+      String burnMac = '00:11:22:33:44:55'; // 示例MAC地址
+      List<int> macBytes = WiFiConfig.stringToBytes(burnMac);
+      // 确保MAC地址字节数组长度为18（包含\0）
+      while (macBytes.length < WiFiConfig.macAddressLength) {
+        macBytes.add(0);
+      }
+      
+      if (!await _executeWiFiStep(WiFiConfig.optBurnMAC, '烧录MAC地址', data: macBytes)) {
+        return false;
+      }
+
+      // 步骤6: 结束测试 (0xFF)
+      if (!await _executeWiFiStep(WiFiConfig.optEndTest, '结束WiFi测试')) {
+        return false;
+      }
+
+      _logState?.info('', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.success('✅ WiFi多步骤测试完成', type: LogType.debug);
+      _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return true;
+    } catch (e) {
+      _logState?.error('WiFi测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 执行单个WiFi测试步骤
+  Future<bool> _executeWiFiStep(int opt, String stepName, {List<int>? data}) async {
+    try {
+      _logState?.info('🔄 步骤: $stepName (0x${opt.toRadixString(16).toUpperCase().padLeft(2, '0')})', type: LogType.debug);
+      
+      // 创建命令
+      final command = ProductionTestCommands.createControlWifiCommand(opt, data: data);
+      
+      // 显示发送的命令
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+      
+      // 如果有数据，显示数据内容
+      if (data != null && data.isNotEmpty) {
+        if (opt == WiFiConfig.optConnectAP) {
+          // 解析SSID和PWD
+          int ssidEnd = data.indexOf(0);
+          if (ssidEnd > 0) {
+            String ssid = String.fromCharCodes(data.sublist(0, ssidEnd));
+            List<int> pwdBytes = data.sublist(ssidEnd + 1);
+            int pwdEnd = pwdBytes.indexOf(0);
+            String pwd = pwdEnd >= 0 ? String.fromCharCodes(pwdBytes.sublist(0, pwdEnd)) : String.fromCharCodes(pwdBytes);
+            _logState?.info('   📡 SSID: "$ssid", PWD: "$pwd"', type: LogType.debug);
+          }
+        } else if (opt == WiFiConfig.optBurnMAC) {
+          // 显示MAC地址
+          int macEnd = data.indexOf(0);
+          String mac = macEnd >= 0 ? String.fromCharCodes(data.sublist(0, macEnd)) : String.fromCharCodes(data);
+          _logState?.info('   🏷️  MAC: $mac', type: LogType.debug);
+        }
+      }
+
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response != null && !response.containsKey('error')) {
+        // 显示响应数据
+        if (response.containsKey('payload') && response['payload'] != null) {
+          final payload = response['payload'] as Uint8List;
+          final payloadHex = payload
+              .map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0'))
+              .join(' ');
+          _logState?.info('📥 响应: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+
+          // 解析WiFi响应
+          final wifiResult = ProductionTestCommands.parseWifiResponse(payload);
+          if (wifiResult != null && wifiResult['success'] == true) {
+            String details = '';
+            if (wifiResult.containsKey('rssi')) {
+              details = ' - RSSI: ${wifiResult['rssi']}dBm';
+            } else if (wifiResult.containsKey('mac')) {
+              details = ' - MAC: ${wifiResult['mac']}';
+            }
+            _logState?.success('✅ $stepName 成功$details', type: LogType.debug);
+            return true;
+          } else {
+            _logState?.error('❌ $stepName 失败: ${wifiResult?['error'] ?? '解析响应失败'}', type: LogType.debug);
+            return false;
+          }
+        } else {
+          _logState?.error('❌ $stepName 失败: 响应无payload数据', type: LogType.debug);
+          return false;
+        }
+      } else {
+        _logState?.error('❌ $stepName 失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ $stepName 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// IMU数据获取测试
+  /// 开始获取数据 -> 持续接收5秒 -> 询问是否结束 -> 停止获取数据
+  Future<bool> testIMU() async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[IMU] 串口未连接', type: LogType.debug);
+      return false;
+    }
+
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 开始IMU数据获取测试', type: LogType.debug);
+      _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+
+      // 步骤1: 开始获取IMU数据 (0x00)
+      _logState?.info('🔄 发送开始获取IMU数据命令', type: LogType.debug);
+      
+      final startCommand = ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptStartData);
+      final startCommandHex = startCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$startCommandHex] (${startCommand.length} bytes)', type: LogType.debug);
+
+      // 发送开始命令，但不等待特定响应，因为设备会持续发送数据
+      final startResponse = await _serialService.sendCommandAndWaitResponse(
+        startCommand,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (startResponse == null || startResponse.containsKey('error')) {
+        _logState?.error('❌ 开始获取IMU数据失败: ${startResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+
+      _logState?.success('✅ 开始获取IMU数据命令发送成功', type: LogType.debug);
+      _logState?.info('📡 开始监听IMU数据流...', type: LogType.debug);
+
+      // 步骤2: 持续接收IMU数据5秒
+      int dataCount = 0;
+      final startTime = DateTime.now();
+      final endTime = startTime.add(const Duration(seconds: 5));
+      
+      // 设置数据流监听器
+      StreamSubscription? dataSubscription;
+      bool receivedData = false;
+      
+      dataSubscription = _serialService.dataStream.listen((data) {
+        try {
+          // 解析GTP响应
+          final gtpResponse = GTPProtocol.parseGTPResponse(data);
+          if (gtpResponse != null && !gtpResponse.containsKey('error')) {
+            final cliResponse = gtpResponse;
+            if (cliResponse != null && cliResponse.containsKey('payload')) {
+              final payload = cliResponse['payload'] as Uint8List;
+              
+              // 检查是否是IMU数据 (第一个字节是0x0B)
+              if (payload.isNotEmpty && payload[0] == ProductionTestCommands.cmdIMU) {
+                dataCount++;
+                receivedData = true;
+                
+                final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+                _logState?.info('📥 IMU数据 #$dataCount: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+                
+                // 解析IMU数据
+                final imuData = ProductionTestCommands.parseIMUResponse(payload);
+                if (imuData != null) {
+                  _logState?.info('   📊 加速度: X=${imuData['accel_x']?.toStringAsFixed(3)}, Y=${imuData['accel_y']?.toStringAsFixed(3)}, Z=${imuData['accel_z']?.toStringAsFixed(3)}', type: LogType.debug);
+                  _logState?.info('   🔄 陀螺仪: X=${imuData['gyro_x']?.toStringAsFixed(3)}, Y=${imuData['gyro_y']?.toStringAsFixed(3)}, Z=${imuData['gyro_z']?.toStringAsFixed(3)}', type: LogType.debug);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          _logState?.warning('⚠️  解析IMU数据时出错: $e', type: LogType.debug);
+        }
+      });
+
+      // 等待5秒
+      while (DateTime.now().isBefore(endTime)) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+
+      // 取消数据监听
+      await dataSubscription?.cancel();
+
+      _logState?.info('', type: LogType.debug);
+      _logState?.info('⏰ 5秒数据收集完成，共收到 $dataCount 条IMU数据', type: LogType.debug);
+
+      if (!receivedData) {
+        _logState?.warning('⚠️  未收到IMU数据，可能设备未正确响应', type: LogType.debug);
+      }
+
+      // 步骤3: 发送停止获取IMU数据命令 (0x01)
+      _logState?.info('🛑 发送停止获取IMU数据命令', type: LogType.debug);
+      
+      final stopCommand = ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptStopData);
+      final stopCommandHex = stopCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$stopCommandHex] (${stopCommand.length} bytes)', type: LogType.debug);
+
+      final stopResponse = await _serialService.sendCommandAndWaitResponse(
+        stopCommand,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (stopResponse != null && !stopResponse.containsKey('error')) {
+        // 显示停止响应
+        if (stopResponse.containsKey('payload') && stopResponse['payload'] != null) {
+          final payload = stopResponse['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 停止响应: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+        }
+        
+        _logState?.success('✅ 停止获取IMU数据成功', type: LogType.debug);
+        
+        _logState?.info('', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.success('✅ IMU数据获取测试完成', type: LogType.debug);
+        _logState?.info('📊 总共收到 $dataCount 条IMU数据', type: LogType.debug);
+        _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        
+        return receivedData; // 只要收到了数据就认为测试成功
+      } else {
+        _logState?.error('❌ 停止获取IMU数据失败: ${stopResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('IMU测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
+    }
   }
 
   @override

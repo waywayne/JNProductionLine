@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import '../models/log_state.dart';
+import '../config/test_config.dart';
 
 /// GPIB 通讯服务
 /// 通过 PyVISA 桥接实现 GPIB 设备通讯
@@ -368,7 +369,7 @@ except Exception as e:
   }
   
   /// 发送命令
-  Future<String?> sendCommand(String command, {Duration timeout = const Duration(seconds: 5)}) async {
+  Future<String?> sendCommand(String command, {Duration timeout = TestConfig.defaultTimeout}) async {
     if (!_isConnected || _process == null) {
       _logState?.error('GPIB 设备未连接', type: LogType.gpib);
       return null;
@@ -410,7 +411,7 @@ except Exception as e:
   }
   
   /// 查询命令（发送并等待响应）
-  Future<String?> query(String command, {Duration timeout = const Duration(seconds: 5)}) async {
+  Future<String?> query(String command, {Duration timeout = TestConfig.defaultTimeout}) async {
     return await sendCommand(command, timeout: timeout);
   }
   

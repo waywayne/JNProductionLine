@@ -58,8 +58,12 @@ class ProductionTestCommands {
   static const int rtcOptGetTime = 0x01; // 获取时间
   
   // IMU operations
-  static const int imuOptGetData = 0x00; // 获取IMU数据
-  static const int imuOptSetCalibration = 0x01; // 设置IMU标定参数
+  static const int imuOptStartData = 0x00; // 开始获取IMU数据
+  static const int imuOptStopData = 0x01; // 停止获取IMU数据
+  
+  // 保持向后兼容
+  static const int imuOptGetData = 0x00; // 获取IMU数据（兼容旧版本）
+  static const int imuOptSetCalibration = 0x01; // 设置IMU标定参数（兼容旧版本）
   
   /// Create exit sleep mode command
   /// 退出休眠模式 - module id:5, message id:4
@@ -114,9 +118,15 @@ class ProductionTestCommands {
   }
   
   /// Create control WiFi command (0x04)
-  /// 控制设备连接wifi - 请求: wifi模式, 设备打开wifi
-  static Uint8List createControlWifiCommand() {
-    return Uint8List.fromList([cmdControlWifi]);
+  /// 控制设备连接wifi - 多步骤测试流程
+  /// [opt] - 测试选项：0x00开始测试, 0x01连接热点, 0x02测试RSSI, 0x03获取MAC, 0x04烧录MAC, 0xFF结束测试
+  /// [data] - 可选数据（连接热点时需要SSID+PWD，烧录MAC时需要MAC地址）
+  static Uint8List createControlWifiCommand(int opt, {List<int>? data}) {
+    List<int> command = [cmdControlWifi, opt];
+    if (data != null) {
+      command.addAll(data);
+    }
+    return Uint8List.fromList(command);
   }
   
   /// Create control LED command (0x05)
@@ -170,6 +180,7 @@ class ProductionTestCommands {
       // Convert timestamp to 8 bytes (uint64_t, little endian)
       ByteData buffer = ByteData(8);
       buffer.setUint64(0, timestamp, Endian.little);
+      
       command.addAll(buffer.buffer.asUint8List());
     }
     return Uint8List.fromList(command);
@@ -294,24 +305,113 @@ class ProductionTestCommands {
     }
   }
   
-  /// Parse touch response
-  /// Returns CDC value or success status
-  /// 设备返回格式：[CMD] + [数据]
-  static dynamic parseTouchResponse(Uint8List payload) {
+  /// Parse WiFi response
+  /// Returns response data based on the WiFi test step
+  /// 设备返回格式：[CMD] + [OPT] + [数据]
+  static Map<String, dynamic>? parseWifiResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    // 跳过第一个命令字节
-    int offset = payload[0] == cmdTouch ? 1 : 0;
-    if (payload.length < offset + 1) return null;
+    // 检查是否包含WiFi命令字节
+    if (payload[0] != cmdControlWifi) return null;
     
-    // For CDC value, return as integer
-    // For threshold setting, return success status
-    return payload[offset];
+    // 至少需要命令字节和选项字节
+    if (payload.length < 2) return null;
+    
+    int opt = payload[1];
+    Map<String, dynamic> result = {
+      'opt': opt,
+      'optName': _getWifiOptionName(opt),
+    };
+    
+    // 根据不同的选项解析数据
+    switch (opt) {
+      case 0x00: // 开始测试
+      case 0x01: // 连接热点
+      case 0xFF: // 结束测试
+        // 这些步骤通常只返回确认
+        result['success'] = true;
+        break;
+        
+      case 0x02: // 测试RSSI
+        if (payload.length >= 3) {
+          // RSSI值通常是有符号整数
+          int rssi = payload[2];
+          if (rssi > 127) rssi = rssi - 256; // 转换为有符号数
+          result['rssi'] = rssi;
+          result['success'] = true;
+        }
+        break;
+        
+      case 0x03: // 获取MAC地址
+      case 0x04: // 烧录MAC地址
+        if (payload.length >= 20) { // CMD + OPT + 18字节MAC
+          List<int> macBytes = payload.sublist(2, 20);
+          // 找到\0的位置
+          int nullIndex = macBytes.indexOf(0);
+          if (nullIndex >= 0) {
+            macBytes = macBytes.sublist(0, nullIndex);
+          }
+          result['mac'] = String.fromCharCodes(macBytes);
+          result['success'] = true;
+        }
+        break;
+        
+      default:
+        result['success'] = false;
+        result['error'] = 'Unknown WiFi option: 0x${opt.toRadixString(16)}';
+    }
+    
+    return result;
+  }
+  
+  /// Get WiFi option name
+  static String _getWifiOptionName(int opt) {
+    switch (opt) {
+      case 0x00: return '开始测试';
+      case 0x01: return '连接热点';
+      case 0x02: return '测试RSSI';
+      case 0x03: return '获取MAC地址';
+      case 0x04: return '烧录MAC地址';
+      case 0xFF: return '结束测试';
+      default: return 'UNKNOWN';
+    }
+  }
+  
+  /// Parse touch response
+  /// Returns CDC value or success status
+  /// 设备返回格式：[CMD] 或 [CMD] + [CDC数据]
+  /// 返回值：CDC数值（包括0）表示成功，null表示解析失败
+  static int? parseTouchResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查是否包含Touch命令字节
+    if (payload[0] != cmdTouch) return null;
+    
+    // 如果只有命令字节，表示命令成功执行，返回0作为CDC值
+    if (payload.length == 1) {
+      return 0;
+    }
+    
+    // 如果有额外数据，解析CDC值
+    int offset = 1;
+    
+    // 尝试读取4字节CDC值
+    if (payload.length >= offset + 4) {
+      ByteData buffer = ByteData.sublistView(payload);
+      return buffer.getUint32(offset, Endian.little);
+    }
+    
+    // 兼容模式：读取1字节CDC值
+    if (payload.length >= offset + 1) {
+      return payload[offset];
+    }
+    
+    return null;
   }
   
   /// Parse RTC response
   /// Returns timestamp in milliseconds
-  /// 设备返回格式：[CMD] + [8字节时间戳]
+  /// 设备返回格式：[CMD] + [8字节毫秒级时间戳]
   static int? parseRTCResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
@@ -325,16 +425,17 @@ class ProductionTestCommands {
   
   /// Parse light sensor response
   /// Returns light value as double
-  /// 设备返回格式：[CMD] + [8字节double值]
+  /// 设备返回格式：[CMD] + [1字节数值]
   static double? parseLightSensorResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
     // 跳过第一个命令字节
     int offset = payload[0] == cmdLightSensor ? 1 : 0;
-    if (payload.length < offset + 8) return null;
+    if (payload.length < offset + 1) return null;
     
-    ByteData buffer = ByteData.sublistView(payload);
-    return buffer.getFloat64(offset, Endian.little);
+    // 读取1字节数值并转换为double
+    int lightValue = payload[offset];
+    return lightValue.toDouble();
   }
   
   /// Parse IMU response

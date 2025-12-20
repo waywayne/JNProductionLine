@@ -6,6 +6,7 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'gtp_protocol.dart';
 import 'production_test_commands.dart';
 import '../models/log_state.dart';
+import '../config/test_config.dart';
 
 /// Serial communication service for production testing
 class SerialService {
@@ -369,7 +370,7 @@ class SerialService {
           exitSleepCommand,
           moduleId: ProductionTestCommands.exitSleepModuleId,
           messageId: ProductionTestCommands.exitSleepMessageId,
-          timeout: const Duration(seconds: 2),
+          timeout: TestConfig.exitSleepTimeout,
         );
         
         if (response != null && !response.containsKey('error')) {
@@ -648,26 +649,6 @@ class SerialService {
       _logState?.debug(_formatHexData(cliPayload), type: LogType.debug);
     }
     
-    // 解析 GTP 头部信息
-    if (gtpPacket.length >= 16) {
-      final preamble = gtpPacket.sublist(0, 4);
-      final version = gtpPacket[4];
-      final length = ByteData.view(gtpPacket.buffer).getUint16(5, Endian.little);
-      final type = gtpPacket[7];
-      final fc = gtpPacket[8];
-      final seq = ByteData.view(gtpPacket.buffer).getUint16(9, Endian.little);
-      final crc8 = gtpPacket[11];
-      
-      _logState?.debug('GTP Header:', type: LogType.debug);
-      _logState?.debug('  Preamble: ${preamble.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}', type: LogType.debug);
-      _logState?.debug('  Version: 0x${version.toRadixString(16).padLeft(2, '0').toUpperCase()}', type: LogType.debug);
-      _logState?.debug('  Length: $length', type: LogType.debug);
-      _logState?.debug('  Type: 0x${type.toRadixString(16).padLeft(2, '0').toUpperCase()}', type: LogType.debug);
-      _logState?.debug('  FC: 0x${fc.toRadixString(16).padLeft(2, '0').toUpperCase()}', type: LogType.debug);
-      _logState?.debug('  Seq: $seq', type: LogType.debug);
-      _logState?.debug('  CRC8: 0x${crc8.toRadixString(16).padLeft(2, '0').toUpperCase()}', type: LogType.debug);
-    }
-    
     // 解析 CLI 消息信息
     if (moduleId != null && messageId != null) {
       _logState?.debug('CLI Message:', type: LogType.debug);
@@ -688,7 +669,7 @@ class SerialService {
   /// Send command and wait for response
   Future<Map<String, dynamic>?> sendCommandAndWaitResponse(
     Uint8List command, {
-    Duration timeout = const Duration(seconds: 5),
+    Duration timeout = TestConfig.defaultTimeout,
     int? moduleId,
     int? messageId,
   }) async {
