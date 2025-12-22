@@ -90,6 +90,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                         child: _TestGroupWidget(
                           group: state.currentTestGroup!,
                           onStart: state.startTest,
+                          testState: state,
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -110,10 +111,12 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
 class _TestGroupWidget extends StatelessWidget {
   final TestGroup group;
   final VoidCallback onStart;
+  final TestState testState;
 
   const _TestGroupWidget({
     required this.group,
     required this.onStart,
+    required this.testState,
   });
 
   @override
@@ -272,24 +275,30 @@ class _TestGroupWidget extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        // Start button
+        // Start/Stop button
         SizedBox(
           width: double.infinity,
           height: 40,
           child: ElevatedButton(
-            onPressed: group.name.isNotEmpty ? onStart : null,
+            onPressed: group.name.isNotEmpty 
+                ? (testState.isRunningTest ? testState.stopTest : onStart)
+                : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.grey[400],
-              foregroundColor: Colors.black87,
+              backgroundColor: testState.isRunningTest 
+                  ? Colors.red[400] 
+                  : Colors.grey[400],
+              foregroundColor: testState.isRunningTest 
+                  ? Colors.white 
+                  : Colors.black87,
               disabledBackgroundColor: Colors.grey[300],
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
-            child: const Text(
-              'Start',
-              style: TextStyle(fontSize: 14),
+            child: Text(
+              testState.isRunningTest ? 'Stop' : 'Start',
+              style: const TextStyle(fontSize: 14),
             ),
           ),
         ),

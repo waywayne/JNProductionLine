@@ -145,12 +145,20 @@ class ProductionTestCommands {
   }
   
   /// Create touch command (0x07)
-  /// Touch测试 - 请求: touch号 + touch id + opt + data
+  /// 左Touch请求: CMD + TouchID + ActionID
+  /// 右Touch请求: CMD + TouchID + AreaID
+  /// [touchId] - 0x00: 左Touch, 0x01: 右Touch
+  /// [actionOrAreaId] - 左Touch为ActionID，右Touch为AreaID
+  static Uint8List createTouchCommand(int touchId, int actionOrAreaId) {
+    return Uint8List.fromList([cmdTouch, touchId, actionOrAreaId]);
+  }
+  
+  /// Create legacy touch command (保持向后兼容)
   /// [touchSide] - 0x00: 左touch, 0x01: 右touch
   /// [touchId] - touch ID
   /// [opt] - 0x00: 获取CDC值, 0x01: 设置阈值
   /// [data] - 可选数据
-  static Uint8List createTouchCommand(int touchSide, {int touchId = 0, int opt = touchOptGetCDC, List<int>? data}) {
+  static Uint8List createLegacyTouchCommand(int touchSide, {int touchId = 0, int opt = touchOptGetCDC, List<int>? data}) {
     List<int> command = [cmdTouch, touchSide, touchId, opt];
     if (data != null) {
       command.addAll(data);
@@ -307,17 +315,15 @@ class ProductionTestCommands {
   
   /// Parse WiFi response
   /// Returns response data based on the WiFi test step
-  /// 设备返回格式：[CMD] + [OPT] + [数据]
-  static Map<String, dynamic>? parseWifiResponse(Uint8List payload) {
+  /// 设备返回格式：[CMD] + [数据] (不包含OPT)
+  /// @param payload 设备返回的数据
+  /// @param opt 当前执行的WiFi操作码
+  static Map<String, dynamic>? parseWifiResponse(Uint8List payload, int opt) {
     if (payload.isEmpty) return null;
     
     // 检查是否包含WiFi命令字节
     if (payload[0] != cmdControlWifi) return null;
     
-    // 至少需要命令字节和选项字节
-    if (payload.length < 2) return null;
-    
-    int opt = payload[1];
     Map<String, dynamic> result = {
       'opt': opt,
       'optName': _getWifiOptionName(opt),
@@ -333,9 +339,9 @@ class ProductionTestCommands {
         break;
         
       case 0x02: // 测试RSSI
-        if (payload.length >= 3) {
+        if (payload.length >= 2) { // CMD + RSSI值
           // RSSI值通常是有符号整数
-          int rssi = payload[2];
+          int rssi = payload[1];
           if (rssi > 127) rssi = rssi - 256; // 转换为有符号数
           result['rssi'] = rssi;
           result['success'] = true;
@@ -344,15 +350,31 @@ class ProductionTestCommands {
         
       case 0x03: // 获取MAC地址
       case 0x04: // 烧录MAC地址
-        if (payload.length >= 20) { // CMD + OPT + 18字节MAC
-          List<int> macBytes = payload.sublist(2, 20);
+        if (payload.length >= 2) { // 至少需要 CMD + 数据
+          // MAC地址以ASCII字符串形式返回，格式如 "00:90:4c:2e:e3:16"
+          // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
+          List<int> macBytes = payload.sublist(1);
+          
           // 找到\0的位置
           int nullIndex = macBytes.indexOf(0);
           if (nullIndex >= 0) {
             macBytes = macBytes.sublist(0, nullIndex);
           }
-          result['mac'] = String.fromCharCodes(macBytes);
-          result['success'] = true;
+          
+          // 将字节转换为ASCII字符串
+          String macAddress = String.fromCharCodes(macBytes);
+          
+          // 验证MAC地址格式（应该是 XX:XX:XX:XX:XX:XX 格式）
+          if (macAddress.isNotEmpty) {
+            result['mac'] = macAddress;
+            result['success'] = true;
+          } else {
+            result['success'] = false;
+            result['error'] = 'MAC地址为空';
+          }
+        } else {
+          result['success'] = false;
+          result['error'] = '响应数据长度不足';
         }
         break;
         
@@ -378,10 +400,38 @@ class ProductionTestCommands {
   }
   
   /// Parse touch response
+  /// 新协议格式：CMD + TouchID + AreaID/ActionID + Data(2字节CDC)
+  /// 返回值：Map包含touchId, areaOrActionId, cdcValue
+  static Map<String, dynamic>? parseTouchResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查是否包含Touch命令字节
+    if (payload[0] != cmdTouch) return null;
+    
+    // 新协议格式：CMD + TouchID + AreaID/ActionID + Data(2字节CDC)
+    if (payload.length >= 5) {
+      int touchId = payload[1];
+      int areaOrActionId = payload[2];
+      // CDC值为2字节小端序
+      int cdcValue = payload[3] | (payload[4] << 8);
+      
+      return {
+        'touchId': touchId,
+        'areaOrActionId': areaOrActionId,
+        'cdcValue': cdcValue,
+        'success': true,
+      };
+    }
+    
+    // 兼容旧格式
+    return _parseLegacyTouchResponse(payload);
+  }
+  
+  /// Parse legacy touch response (兼容旧协议)
   /// Returns CDC value or success status
   /// 设备返回格式：[CMD] 或 [CMD] + [CDC数据]
   /// 返回值：CDC数值（包括0）表示成功，null表示解析失败
-  static int? parseTouchResponse(Uint8List payload) {
+  static Map<String, dynamic>? _parseLegacyTouchResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
     // 检查是否包含Touch命令字节
@@ -389,7 +439,10 @@ class ProductionTestCommands {
     
     // 如果只有命令字节，表示命令成功执行，返回0作为CDC值
     if (payload.length == 1) {
-      return 0;
+      return {
+        'cdcValue': 0,
+        'success': true,
+      };
     }
     
     // 如果有额外数据，解析CDC值
@@ -398,15 +451,28 @@ class ProductionTestCommands {
     // 尝试读取4字节CDC值
     if (payload.length >= offset + 4) {
       ByteData buffer = ByteData.sublistView(payload);
-      return buffer.getUint32(offset, Endian.little);
+      int cdcValue = buffer.getUint32(offset, Endian.little);
+      return {
+        'cdcValue': cdcValue,
+        'success': true,
+      };
     }
     
     // 兼容模式：读取1字节CDC值
     if (payload.length >= offset + 1) {
-      return payload[offset];
+      return {
+        'cdcValue': payload[offset],
+        'success': true,
+      };
     }
     
     return null;
+  }
+  
+  /// Parse legacy touch response and return CDC value (for backward compatibility)
+  static int? parseLegacyTouchResponseValue(Uint8List payload) {
+    final result = _parseLegacyTouchResponse(payload);
+    return result?['cdcValue'];
   }
   
   /// Parse RTC response

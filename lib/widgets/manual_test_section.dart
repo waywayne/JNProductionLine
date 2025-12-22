@@ -76,7 +76,7 @@ class ManualTestSection extends StatelessWidget {
                 context,
                 'Touch左侧',
                 Icons.touch_app,
-                () => state.runManualTest('Touch左侧', ProductionTestCommands.createTouchCommand(ProductionTestCommands.touchLeft)),
+                () => state.testTouchLeft(),
               ),
               _buildTestButton(
                 context,
