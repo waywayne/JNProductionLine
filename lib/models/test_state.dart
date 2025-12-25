@@ -2254,15 +2254,14 @@ class TestState extends ChangeNotifier {
           
         } else if (Platform.isWindows) {
           // Windows: 使用curl (Windows 10+ 自带curl)
+          // 注意：Windows自带的curl版本较老，不支持某些FTP参数
           _logState?.info('🔧 开始下载 FTP URL: $ftpUrl (尝试 ${retry + 1}/$maxRetries)', type: LogType.debug);
           
           final curlArgs = [
-            '-v',
-            '--ftp-pasv',
-            '--disable-epsv',
-            '-o', savePath,
-            '--connect-timeout', '5',
-            '--max-time', '30',
+            '-v',  // 详细输出
+            '-o', savePath,  // 输出文件
+            '--connect-timeout', '5',  // 连接超时
+            '--max-time', '30',  // 最大执行时间
             ftpUrl,
           ];
           
