@@ -95,15 +95,17 @@ class _SerialPortSectionState extends State<SerialPortSection> {
         final availablePorts = state.availablePorts;
         final isConnected = state.isConnected;
         
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey[300]!),
-          ),
-          child: Row(
-            children: [
+        return Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Row(
+                children: [
               const Text(
                 'Serial Port:',
                 style: TextStyle(
@@ -243,10 +245,96 @@ class _SerialPortSectionState extends State<SerialPortSection> {
                   fontWeight: FontWeight.w500,
                 ),
               ),
-            ],
-          ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // GPIB 检测按钮
+            _buildGpibDetectionButton(context, state),
+          ],
         );
       },
+    );
+  }
+
+  Widget _buildGpibDetectionButton(BuildContext context, TestState state) {
+    final isReady = state.isGpibReady;
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isReady ? Colors.green[50] : Colors.purple[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isReady ? Colors.green[300]! : Colors.purple[300]!,
+          width: 2,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isReady ? Colors.green[100] : Colors.purple[100],
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(
+              isReady ? Icons.check_circle : Icons.settings_input_component,
+              color: isReady ? Colors.green[700] : Colors.purple[700],
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'GPIB 程控电源',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isReady ? Colors.green[900] : Colors.purple[900],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isReady 
+                      ? '✓ GPIB Ready - 设备已就绪 (${state.gpibAddress})' 
+                      : '未检测 - 点击右侧按钮进行检测',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isReady ? Colors.green[700] : Colors.purple[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 100,
+            height: 36,
+            child: ElevatedButton(
+              onPressed: () => state.openGpibDialog(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isReady ? Colors.green[600] : Colors.purple[600],
+                foregroundColor: Colors.white,
+                elevation: 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              child: Text(
+                isReady ? '已连接' : '检测',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

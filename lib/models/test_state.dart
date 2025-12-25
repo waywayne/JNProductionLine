@@ -7,6 +7,7 @@ import 'package:path/path.dart' as path;
 import '../services/serial_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
+import '../services/gpib_service.dart';
 import 'log_state.dart';
 import '../config/test_config.dart';
 import '../config/wifi_config.dart';
@@ -220,6 +221,12 @@ class TestState extends ChangeNotifier {
   String? _generatedDeviceId;
   List<int>? _generatedBluetoothMAC;
 
+  // GPIB检测状态
+  final GpibService _gpibService = GpibService();
+  bool _showGpibDialog = false;
+  bool _isGpibReady = false;
+  String? _gpibAddress;
+
   String get testScriptPath => _testScriptPath;
   String get configFilePath => _configFilePath;
   TestGroup? get currentTestGroup => _currentTestGroup;
@@ -281,6 +288,11 @@ class TestState extends ChangeNotifier {
   List<TestReportItem> get testReportItems => _testReportItems;
   int get currentAutoTestIndex => _currentAutoTestIndex;
   bool get showTestReportDialog => _showTestReportDialog;
+
+  // GPIB状态getter
+  bool get showGpibDialog => _showGpibDialog;
+  bool get isGpibReady => _isGpibReady;
+  String? get gpibAddress => _gpibAddress;
 
   // 获取 MIC 状态
   bool getMicState(int micNumber) => _micStates[micNumber] ?? false;
@@ -4182,6 +4194,15 @@ class TestState extends ChangeNotifier {
       return;
     }
 
+    // 检查GPIB是否就绪
+    if (!_isGpibReady) {
+      _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.error('❌ GPIB设备未就绪，无法开始自动化测试', type: LogType.debug);
+      _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.debug);
+      _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return;
+    }
+
     _isAutoTesting = true;
     _currentAutoTestIndex = 0;
     _testReportItems.clear();
@@ -4904,13 +4925,49 @@ class TestState extends ChangeNotifier {
   /// 1. 漏电流测试 (需要GPIB程控电源)
   Future<bool> _autoTestLeakageCurrent() async {
     try {
-      _logState?.info('🔌 开始漏电流测试 (< 500uA)', type: LogType.debug);
-      // TODO: 实现GPIB程控电源电流采集
-      // 暂时返回跳过
-      throw Exception('SKIP: GPIB设备未连接');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始漏电流测试', type: LogType.debug);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.debug);
+      _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查GPIB是否就绪
+      if (!_isGpibReady) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        return false;
+      }
+      
+      // 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        return false;
+      }
+      
+      // 转换为微安 (uA)
+      final currentUa = currentA * 1000000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 漏电流测试结果:', type: LogType.debug);
+      _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.debug);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.debug);
+      
+      if (currentUa < TestConfig.leakageCurrentThresholdUa) {
+        _logState?.success('✅ 漏电流测试通过', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
     } catch (e) {
       if (e.toString().contains('SKIP')) rethrow;
-      _logState?.error('漏电流测试异常: $e', type: LogType.debug);
+      _logState?.error('❌ 漏电流测试异常: $e', type: LogType.debug);
       return false;
     }
   }
@@ -5060,13 +5117,49 @@ class TestState extends ChangeNotifier {
   /// 3. 工作功耗测试 (需要GPIB程控电源)
   Future<bool> _autoTestWorkingPower() async {
     try {
-      _logState?.info('🔋 开始工作功耗测试 (< 380mA)', type: LogType.debug);
-      // TODO: 实现GPIB程控电源电流采集
-      // 暂时返回跳过
-      throw Exception('SKIP: GPIB设备未连接');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔋 开始工作功耗测试', type: LogType.debug);
+      _logState?.info('   阈值: < ${TestConfig.workingCurrentThresholdMa} mA', type: LogType.debug);
+      _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查GPIB是否就绪
+      if (!_isGpibReady) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        return false;
+      }
+      
+      // 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        return false;
+      }
+      
+      // 转换为毫安 (mA)
+      final currentMa = currentA * 1000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 工作功耗测试结果:', type: LogType.debug);
+      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+      _logState?.info('   阈值: < ${TestConfig.workingCurrentThresholdMa} mA', type: LogType.debug);
+      
+      if (currentMa < TestConfig.workingCurrentThresholdMa) {
+        _logState?.success('✅ 工作功耗测试通过', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ 工作功耗测试失败: 超过阈值', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
     } catch (e) {
       if (e.toString().contains('SKIP')) rethrow;
-      _logState?.error('工作功耗测试异常: $e', type: LogType.debug);
+      _logState?.error('❌ 工作功耗测试异常: $e', type: LogType.debug);
       return false;
     }
   }
@@ -5930,6 +6023,106 @@ class TestState extends ChangeNotifier {
     _logState?.info('🧹 测试报告已清空', type: LogType.debug);
   }
 
+  // ==================== GPIB检测功能 ====================
+
+  /// 打开GPIB检测弹窗
+  void openGpibDialog() {
+    _showGpibDialog = true;
+    notifyListeners();
+  }
+
+  /// 关闭GPIB检测弹窗
+  void closeGpibDialog() {
+    _showGpibDialog = false;
+    notifyListeners();
+  }
+
+  /// 检测并连接GPIB设备
+  Future<bool> detectAndConnectGpib(String address) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('🔍 开始GPIB检测流程', type: LogType.gpib);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+
+      // 设置LogState
+      _gpibService.setLogState(_logState!);
+
+      // 1. 检查Python环境
+      _logState?.info('📋 步骤 1/4: 检查Python环境', type: LogType.gpib);
+      final envCheck = await _gpibService.checkPythonEnvironment();
+      
+      if (!(envCheck['pythonInstalled'] as bool)) {
+        _logState?.error('❌ Python未安装', type: LogType.gpib);
+        _logState?.info('请先安装Python 3.7+: https://www.python.org/downloads/', type: LogType.gpib);
+        return false;
+      }
+
+      // 2. 检查并安装依赖
+      if (!(envCheck['pyvisaInstalled'] as bool)) {
+        _logState?.warning('⚠️  PyVISA未安装，开始自动安装...', type: LogType.gpib);
+        _logState?.info('📋 步骤 2/4: 安装Python依赖', type: LogType.gpib);
+        
+        final installSuccess = await _gpibService.installPythonDependencies();
+        if (!installSuccess) {
+          _logState?.error('❌ 依赖安装失败', type: LogType.gpib);
+          return false;
+        }
+      } else {
+        _logState?.success('✅ 步骤 2/4: Python依赖已就绪', type: LogType.gpib);
+      }
+
+      // 3. 连接GPIB设备
+      _logState?.info('📋 步骤 3/4: 连接GPIB设备', type: LogType.gpib);
+      final connected = await _gpibService.connect(address);
+      
+      if (!connected) {
+        _logState?.error('❌ GPIB设备连接失败', type: LogType.gpib);
+        return false;
+      }
+
+      // 4. 初始化设备参数
+      _logState?.info('📋 步骤 4/4: 初始化设备参数', type: LogType.gpib);
+      
+      // 设置电压为5V
+      _logState?.debug('设置电压: 5.0V', type: LogType.gpib);
+      await _gpibService.sendCommand('VOLT 5.0');
+      
+      // 设置电流限制为1A
+      _logState?.debug('设置电流限制: 1.0A', type: LogType.gpib);
+      await _gpibService.sendCommand('CURR 1.0');
+      
+      // 查询设备ID
+      final idn = await _gpibService.query('*IDN?');
+      if (idn != null && idn != 'TIMEOUT') {
+        _logState?.info('设备信息: $idn', type: LogType.gpib);
+      }
+
+      // 标记GPIB就绪
+      _isGpibReady = true;
+      _gpibAddress = address;
+      notifyListeners();
+
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.success('✅ GPIB Ready - 设备已就绪！', type: LogType.gpib);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+
+      return true;
+    } catch (e) {
+      _logState?.error('❌ GPIB检测失败: $e', type: LogType.gpib);
+      _isGpibReady = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// 断开GPIB连接
+  Future<void> disconnectGpib() async {
+    await _gpibService.disconnect();
+    _isGpibReady = false;
+    _gpibAddress = null;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _sensorDataSubscription?.cancel();
@@ -5937,6 +6130,7 @@ class TestState extends ChangeNotifier {
     _sensorTimeoutTimer?.cancel();
     _packetTimeoutTimer?.cancel();
     _serialService.dispose();
+    _gpibService.dispose();
     super.dispose();
   }
 }

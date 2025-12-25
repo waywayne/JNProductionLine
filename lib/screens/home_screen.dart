@@ -14,6 +14,7 @@ import '../widgets/mic_test_dialog.dart';
 import '../widgets/bluetooth_test_dialog.dart';
 import '../widgets/wifi_test_steps_widget.dart';
 import '../widgets/test_report_dialog.dart';
+import '../widgets/gpib_detection_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -150,6 +151,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             // 测试报告弹窗
             if (testState.showTestReportDialog)
               const TestReportDialog(),
+            
+            // GPIB检测弹窗
+            if (testState.showGpibDialog)
+              const GpibDetectionDialog(),
           ],
         );
       },

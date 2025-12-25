@@ -415,6 +415,73 @@ except Exception as e:
     return await sendCommand(command, timeout: timeout);
   }
   
+  /// 测量电流（多次采样并计算平均值）
+  /// sampleCount: 采样次数
+  /// sampleRate: 采样率 (Hz)
+  /// 返回平均电流值（安培 A），如果失败返回 null
+  Future<double?> measureCurrent({
+    required int sampleCount,
+    required int sampleRate,
+  }) async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return null;
+    }
+    
+    try {
+      final sampleIntervalMs = 1000 ~/ sampleRate;
+      final samples = <double>[];
+      
+      _logState?.info('开始电流采样: $sampleCount 次, ${sampleRate}Hz', type: LogType.gpib);
+      _logState?.debug('采样间隔: ${sampleIntervalMs}ms', type: LogType.gpib);
+      
+      for (int i = 0; i < sampleCount; i++) {
+        // 查询当前电流值 (MEAS:CURR? 或 READ?)
+        final response = await query('MEAS:CURR?', timeout: const Duration(seconds: 3));
+        
+        if (response == null || response == 'TIMEOUT') {
+          _logState?.warning('采样 ${i + 1}/$sampleCount 超时', type: LogType.gpib);
+          continue;
+        }
+        
+        // 解析电流值
+        try {
+          final current = double.parse(response.trim());
+          samples.add(current);
+          _logState?.debug('采样 ${i + 1}/$sampleCount: ${(current * 1000).toStringAsFixed(3)} mA', type: LogType.gpib);
+        } catch (e) {
+          _logState?.warning('采样 ${i + 1}/$sampleCount 解析失败: $response', type: LogType.gpib);
+        }
+        
+        // 等待下一次采样（最后一次不需要等待）
+        if (i < sampleCount - 1) {
+          await Future.delayed(Duration(milliseconds: sampleIntervalMs));
+        }
+      }
+      
+      if (samples.isEmpty) {
+        _logState?.error('未获取到有效的电流采样数据', type: LogType.gpib);
+        return null;
+      }
+      
+      // 计算平均值
+      final average = samples.reduce((a, b) => a + b) / samples.length;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('📊 电流采样统计:', type: LogType.gpib);
+      _logState?.info('   有效采样数: ${samples.length}/$sampleCount', type: LogType.gpib);
+      _logState?.info('   平均电流: ${(average * 1000).toStringAsFixed(3)} mA', type: LogType.gpib);
+      _logState?.info('   最小值: ${(samples.reduce((a, b) => a < b ? a : b) * 1000).toStringAsFixed(3)} mA', type: LogType.gpib);
+      _logState?.info('   最大值: ${(samples.reduce((a, b) => a > b ? a : b) * 1000).toStringAsFixed(3)} mA', type: LogType.gpib);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      
+      return average;
+    } catch (e) {
+      _logState?.error('电流测量失败: $e', type: LogType.gpib);
+      return null;
+    }
+  }
+  
   /// 处理输出
   void _handleOutput(String line) {
     try {

@@ -27,4 +27,24 @@ class TestConfig {
   
   /// Touch测试间隔时间（Duration对象）
   static const Duration touchTestDelay = Duration(milliseconds: touchTestDelayMs);
+  
+  // ==================== GPIB 电流采样配置 ====================
+  
+  /// GPIB 采样次数
+  static const int gpibSampleCount = 20;
+  
+  /// GPIB 采样率 (Hz)
+  static const int gpibSampleRate = 10;
+  
+  /// GPIB 采样间隔时间（毫秒）= 1000ms / 采样率
+  static int get gpibSampleIntervalMs => 1000 ~/ gpibSampleRate;
+  
+  /// GPIB 采样间隔时间（Duration对象）
+  static Duration get gpibSampleInterval => Duration(milliseconds: gpibSampleIntervalMs);
+  
+  /// 漏电流测试阈值 (uA)
+  static const double leakageCurrentThresholdUa = 500.0;
+  
+  /// 工作功耗测试阈值 (mA)
+  static const double workingCurrentThresholdMa = 380.0;
 }
