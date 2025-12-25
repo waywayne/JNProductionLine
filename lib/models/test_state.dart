@@ -2607,21 +2607,23 @@ class TestState extends ChangeNotifier {
   /// 初始化左Touch测试步骤
   void _initializeLeftTouchTestSteps() {
     _leftTouchTestSteps = [
-      TouchTestStep(
-        touchId: TouchTestConfig.touchLeft,
-        actionId: TouchTestConfig.leftActionSingleTap,
-        name: '单击测试',
-        description: '测试左侧Touch单击功能',
-        userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionSingleTap),
-      ),
-      TouchTestStep(
-        touchId: TouchTestConfig.touchLeft,
-        actionId: TouchTestConfig.leftActionDoubleTap,
-        name: '双击测试',
-        description: '测试左侧Touch双击功能',
-        userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionDoubleTap),
-      ),
-      // 删除长按测试项
+      // 注释掉单击测试
+      // TouchTestStep(
+      //   touchId: TouchTestConfig.touchLeft,
+      //   actionId: TouchTestConfig.leftActionSingleTap,
+      //   name: '单击测试',
+      //   description: '测试左侧Touch单击功能',
+      //   userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionSingleTap),
+      // ),
+      // 注释掉双击测试
+      // TouchTestStep(
+      //   touchId: TouchTestConfig.touchLeft,
+      //   actionId: TouchTestConfig.leftActionDoubleTap,
+      //   name: '双击测试',
+      //   description: '测试左侧Touch双击功能',
+      //   userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionDoubleTap),
+      // ),
+      // 只保留佩戴检测测试项
       TouchTestStep(
         touchId: TouchTestConfig.touchLeft,
         actionId: TouchTestConfig.leftActionWearDetect,
