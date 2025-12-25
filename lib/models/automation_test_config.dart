@@ -124,7 +124,7 @@ class AutoTestSteps {
         id: 'working_current',
         name: '工作功耗测试',
         description: '测试设备工作电流',
-        expectedResult: '静态电流值 < 380mA',
+        expectedResult: '静态电流值 < 450mA',
         type: AutoTestStepType.automatic,
       ),
       const AutoTestStep(

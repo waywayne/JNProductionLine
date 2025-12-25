@@ -507,29 +507,28 @@ class TestState extends ChangeNotifier {
   /// 获取测试序列
   List<Map<String, dynamic>> _getTestSequence() {
     return [
-      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': true},
-      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
-      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '4. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
-      {'name': '5. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
-      {'name': '6. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
-      {'name': '7. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
-      {'name': '8. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
-      {'name': '9. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
-      {'name': '10. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
-      {'name': '11. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
-      {'name': '12. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '13. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '14. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '15. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '16. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '17. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '18. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '19. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '20. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '21. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '22. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '23. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
+      {'name': '3. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '4. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '5. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '6. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '7. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '8. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '9. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '10. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '11. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '12. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '13. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '14. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '15. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '16. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '17. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '18. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '19. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '20. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '21. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '22. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -1919,6 +1918,52 @@ class TestState extends ChangeNotifier {
       _isLeftTouchTesting = false;
       // 保持弹窗显示，由用户手动关闭
       notifyListeners();
+    }
+  }
+
+  /// 漏电流手动测试
+  Future<void> testLeakageCurrent() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('🔌 开始漏电流测试', type: LogType.gpib);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+      _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.gpib);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      
+      // 检查GPIB是否就绪
+      if (!_isGpibReady) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.gpib);
+        _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.gpib);
+        return;
+      }
+      
+      // 使用GPIB测量电流（不发送任何串口指令）
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.gpib);
+        return;
+      }
+      
+      // 转换为微安 (uA)
+      final currentUa = currentA * 1000000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('📊 漏电流测试结果:', type: LogType.gpib);
+      _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.gpib);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+      
+      if (currentUa < TestConfig.leakageCurrentThresholdUa) {
+        _logState?.success('✅ 漏电流测试通过', type: LogType.gpib);
+      } else {
+        _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.gpib);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    } catch (e) {
+      _logState?.error('❌ 漏电流测试异常: $e', type: LogType.gpib);
     }
   }
 
@@ -4297,35 +4342,34 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（33项）
+    // 定义完整测试序列（32项）
     final testSequence = [
-      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': true},
-      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
-      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '4. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
-      {'name': '5. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
-      {'name': '6. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
-      {'name': '6.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
-      {'name': '6.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
-      {'name': '6.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
-      {'name': '7. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
-      {'name': '8. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
-      {'name': '9. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
-      {'name': '10. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
-      {'name': '11. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '12. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '13. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '14. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '15. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '23. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '24. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '25. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '26. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '27. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '28. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
-      {'name': '29. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '30. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
-      {'name': '31. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
+      {'name': '3. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '4. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '5. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '5.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
+      {'name': '5.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
+      {'name': '5.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '6. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '7. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '8. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '9. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '10. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '11. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '12. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '13. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '14. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '15. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '16. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '17. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '18. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '19. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '20. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '21. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '22. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '23. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {

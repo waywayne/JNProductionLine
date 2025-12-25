@@ -37,6 +37,13 @@ class ManualTestSection extends StatelessWidget {
               ),
               _buildTestButton(
                 context,
+                '漏电流测试',
+                Icons.electric_bolt,
+                () => state.testLeakageCurrent(),
+                color: Colors.purple,
+              ),
+              _buildTestButton(
+                context,
                 '获取设备电压',
                 Icons.battery_charging_full,
                 () => state.runManualTest('获取设备电压', ProductionTestCommands.createGetVoltageCommand()),
@@ -128,15 +135,19 @@ class ManualTestSection extends StatelessWidget {
     VoidCallback onPressed, {
     int? moduleId,
     int? messageId,
+    Color? color,
   }) {
+    final buttonColor = color ?? Colors.grey[300]!;
+    final textColor = color != null ? Colors.white : Colors.black87;
+    
     return SizedBox(
       width: 140,
       height: 80,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.grey[300],
-          foregroundColor: Colors.black87,
+          backgroundColor: buttonColor,
+          foregroundColor: textColor,
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
