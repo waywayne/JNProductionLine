@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:math' as Math;
 
 /// Production test commands based on the specification
 /// 产测业务指令集
@@ -26,6 +27,7 @@ class ProductionTestCommands {
   static const int cmdIMU = 0x0B; // IMU测试
   static const int cmdSensor = 0x0C; // Sensor测试
   static const int cmdBluetooth = 0x0D; // 蓝牙测试
+  static const int cmdWriteSN = 0xFE; // SN码写入
   static const int cmdEndTest = 0xFF; // 产测结束
   
   // LED control values
@@ -59,11 +61,22 @@ class ProductionTestCommands {
   
   // IMU operations
   static const int imuOptStartData = 0x00; // 开始获取IMU数据
-  static const int imuOptStopData = 0x01; // 停止获取IMU数据
+  static const int imuOptStopData = 0xFF; // 停止获取IMU数据
   
   // 保持向后兼容
   static const int imuOptGetData = 0x00; // 获取IMU数据（兼容旧版本）
   static const int imuOptSetCalibration = 0x01; // 设置IMU标定参数（兼容旧版本）
+  
+  // Sensor operations
+  static const int sensorOptStart = 0x00; // 开始sensor测试
+  static const int sensorOptBeginData = 0x01; // 开始发送数据
+  static const int sensorOptStop = 0xFF; // 停止sensor测试
+  
+  // Bluetooth MAC operations
+  static const int bluetoothOptBurnMac = 0x00; // 蓝牙mac地址烧录（6字节）
+  static const int bluetoothOptReadMac = 0x01; // 上位机主动读MAC地址
+  static const int bluetoothOptSetName = 0x02; // 设置蓝牙名称
+  static const int bluetoothOptGetName = 0x03; // 获取蓝牙名称
   
   /// Create exit sleep mode command
   /// 退出休眠模式 - module id:5, message id:4
@@ -213,15 +226,107 @@ class ProductionTestCommands {
   }
   
   /// Create sensor command (0x0C)
-  /// Sensor测试 - 待定
-  static Uint8List createSensorCommand() {
-    return Uint8List.fromList([cmdSensor]);
+  /// Sensor测试 - 请求: opt
+  /// [opt] - 0x00: 开始sensor测试, 0xFF: 停止sensor测试
+  static Uint8List createSensorCommand(int opt) {
+    return Uint8List.fromList([cmdSensor, opt]);
   }
   
-  /// Create bluetooth command (0x0D)
-  /// 蓝牙测试 - 待定
-  static Uint8List createBluetoothCommand() {
-    return Uint8List.fromList([cmdBluetooth]);
+  /// Create bluetooth MAC command (0x0D)
+  /// 蓝牙MAC地址操作 - 请求: opt + 数据(可选)
+  /// [opt] - 0x00: 蓝牙mac地址烧录（6字节）, 0x01: 上位机主动读MAC地址
+  /// [macAddress] - MAC地址（6字节，仅烧录时需要）
+  static Uint8List createBluetoothMacCommand(int opt, {List<int>? macAddress}) {
+    List<int> command = [cmdBluetooth, opt];
+    if (opt == bluetoothOptBurnMac && macAddress != null && macAddress.length == 6) {
+      command.addAll(macAddress);
+    }
+    return Uint8List.fromList(command);
+  }
+  
+  /// Create set bluetooth name command (0x0D 0x02)
+  /// 设置蓝牙名称 - CMD 0x0D + OPT 0x02 + 名称字符串 + \0
+  /// [name] - 蓝牙名称字符串（ASCII编码）
+  static Uint8List createSetBluetoothNameCommand(String name) {
+    List<int> command = [cmdBluetooth, bluetoothOptSetName];
+    // 将名称字符串转换为ASCII字节
+    command.addAll(name.codeUnits);
+    // 添加null终止符
+    command.add(0x00);
+    return Uint8List.fromList(command);
+  }
+  
+  /// Create get bluetooth name command (0x0D 0x03)
+  /// 获取蓝牙名称 - CMD 0x0D + OPT 0x03
+  static Uint8List createGetBluetoothNameCommand() {
+    return Uint8List.fromList([cmdBluetooth, bluetoothOptGetName]);
+  }
+  
+  /// Parse bluetooth name response
+  /// 响应格式：[CMD 0x0D] + [名称字符串] + [\0]（可能有多个）
+  /// 返回响应中的蓝牙名称
+  static String? parseBluetoothNameResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0x0D
+    if (payload[0] != cmdBluetooth) return null;
+    
+    // 提取名称（跳过CMD字节）
+    if (payload.length < 2) return null;
+    
+    try {
+      var nameBytes = payload.sublist(1);
+      
+      // 移除末尾所有的null终止符（可能有多个0x00）
+      while (nameBytes.isNotEmpty && nameBytes.last == 0x00) {
+        nameBytes = nameBytes.sublist(0, nameBytes.length - 1);
+      }
+      
+      if (nameBytes.isEmpty) return null;
+      
+      return String.fromCharCodes(nameBytes);
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /// Create write SN command (0xFE)
+  /// SN码写入 - CMD 0xFE + SN码字符串 + \0
+  /// [snCode] - SN码字符串（ASCII编码）
+  static Uint8List createWriteSNCommand(String snCode) {
+    List<int> command = [cmdWriteSN];
+    // 将SN码字符串转换为ASCII字节
+    command.addAll(snCode.codeUnits);
+    // 添加null终止符
+    command.add(0x00);
+    return Uint8List.fromList(command);
+  }
+  
+  /// Parse write SN response
+  /// 响应格式：[CMD 0xFE] + [SN码字符串] + [\0]（可选）
+  /// 返回响应中的SN码，用于验证
+  static String? parseWriteSNResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0xFE
+    if (payload[0] != cmdWriteSN) return null;
+    
+    // 提取SN码（跳过CMD字节）
+    if (payload.length < 2) return null;
+    
+    try {
+      // 将字节转换为字符串
+      var snBytes = payload.sublist(1);
+      
+      // 移除末尾的null终止符（如果存在）
+      if (snBytes.isNotEmpty && snBytes.last == 0x00) {
+        snBytes = snBytes.sublist(0, snBytes.length - 1);
+      }
+      
+      return String.fromCharCodes(snBytes);
+    } catch (e) {
+      return null;
+    }
   }
   
   /// Create end test command (0xFF)
@@ -258,18 +363,20 @@ class ProductionTestCommands {
   }
   
   /// Parse charge status response
-  /// Returns map with 'mode' and 'errorCode'
-  /// 设备返回格式：[CMD] + [2字节：模式+错误码]
+  /// Returns map with 'mode' and 'fault'
+  /// 设备返回格式：[CMD 0x03] + [充电状态枚举] + [故障码]
+  /// 充电状态枚举：0=STOP, 1=CC, 2=CV, 3=DONE
+  /// 故障码：0x00=正常, 0x01=故障
   static Map<String, int>? parseChargeStatusResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
-    // 跳过第一个命令字节
-    int offset = payload[0] == cmdGetChargeStatus ? 1 : 0;
-    if (payload.length < offset + 2) return null;
+    // 检查第一个字节是否是充电状态命令 (0x03)
+    if (payload.length < 3) return null;
+    if (payload[0] != cmdGetChargeStatus) return null;
     
     return {
-      'mode': payload[offset],
-      'errorCode': payload[offset + 1],
+      'mode': payload[1],      // 充电状态枚举类型
+      'fault': payload[2],     // 故障码
     };
   }
   
@@ -332,10 +439,38 @@ class ProductionTestCommands {
     // 根据不同的选项解析数据
     switch (opt) {
       case 0x00: // 开始测试
-      case 0x01: // 连接热点
       case 0xFF: // 结束测试
         // 这些步骤通常只返回确认
         result['success'] = true;
+        break;
+        
+      case 0x01: // 连接热点 - 返回IP地址
+        if (payload.length >= 2) { // CMD + IP数据
+          // IP地址以ASCII字符串形式返回，格式如 "192.168.1.100"
+          // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
+          List<int> ipBytes = payload.sublist(2);
+          
+          // 找到\0的位置
+          int nullIndex = ipBytes.indexOf(0);
+          if (nullIndex >= 0) {
+            ipBytes = ipBytes.sublist(0, nullIndex);
+          }
+          
+          // 将字节转换为ASCII字符串
+          String ipAddress = String.fromCharCodes(ipBytes);
+          
+          // 验证IP地址格式
+          if (ipAddress.isNotEmpty) {
+            result['ip'] = ipAddress;
+            result['success'] = true;
+          } else {
+            result['success'] = false;
+            result['error'] = 'IP地址为空';
+          }
+        } else {
+          // 如果没有IP数据，也认为连接成功
+          result['success'] = true;
+        }
         break;
         
       case 0x02: // 测试RSSI
@@ -566,6 +701,229 @@ class ProductionTestCommands {
         return '右Touch';
       default:
         return 'UNKNOWN';
+    }
+  }
+  
+  /// Parse sensor response
+  /// Returns parsed sensor data or null if parsing fails
+  /// 设备返回格式：[CMD] + [picTotalBytes(4)] + [dataIndex(4)] + [dataLen(4)] + [data[]]
+  static Map<String, dynamic>? parseSensorResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查是否包含Sensor命令字节
+    if (payload[0] != cmdSensor) return null;
+    
+    // 如果只有命令字节，表示开始或停止确认
+    if (payload.length == 1) {
+      return {
+        'cmd': payload[0],
+        'success': true,
+        'message': 'Sensor命令执行成功',
+        'type': 'command_ack',
+      };
+    }
+    
+    // 解析sensor图片数据包
+    // 数据结构: CMD(1) + picTotalBytes(4) + dataIndex(4) + dataLen(4) + data[]
+    if (payload.length < 13) { // 至少需要 1 + 4 + 4 + 4 = 13 字节
+      return {
+        'cmd': payload[0],
+        'success': false,
+        'error': '数据包长度不足',
+      };
+    }
+    
+    try {
+      ByteData buffer = ByteData.sublistView(payload);
+      
+      // 解析包头信息 (小端序)
+      int picTotalBytes = buffer.getUint32(1, Endian.little);
+      int dataIndex = buffer.getUint32(5, Endian.little);
+      int dataLen = buffer.getUint32(9, Endian.little);
+      
+      // 取消严格的数据长度限制，允许接收更大的数据包
+      int minExpectedLength = 13 + dataLen;
+      if (payload.length < minExpectedLength) {
+        return {
+          'cmd': payload[0],
+          'success': false,
+          'error': '数据包长度不足，最少需要: $minExpectedLength, 实际: ${payload.length}',
+        };
+      }
+      
+      // 提取数据部分，使用实际可用的数据长度
+      int actualDataLen = Math.min(dataLen, payload.length - 13);
+      Uint8List data = payload.sublist(13, 13 + actualDataLen);
+      
+      // 检查是否是最后一个包（使用原始dataLen）
+      bool isLastPacket = (dataIndex + dataLen) == picTotalBytes;
+      
+      return {
+        'cmd': payload[0],
+        'type': 'image_data',
+        'picTotalBytes': picTotalBytes,
+        'dataIndex': dataIndex,
+        'dataLen': actualDataLen, // 使用实际提取的数据长度
+        'originalDataLen': dataLen, // 保留原始声明的数据长度
+        'data': data,
+        'isLastPacket': isLastPacket,
+        'success': true,
+        'dataHex': data.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' '),
+      };
+    } catch (e) {
+      return {
+        'cmd': payload[0],
+        'success': false,
+        'error': '解析数据包时出错: $e',
+      };
+    }
+  }
+  
+  /// Parse Bluetooth MAC response
+  /// Returns MAC address
+  /// 设备回复第一个字节为 cmd 后面为 6字节mac，需要解析出来
+  static Map<String, dynamic>? parseBluetoothMacResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查是否包含Bluetooth命令字节
+    if (payload[0] != cmdBluetooth) return null;
+    
+    // 如果只有命令字节，表示烧录成功确认
+    if (payload.length == 1) {
+      return {
+        'cmd': payload[0],
+        'success': true,
+        'message': '蓝牙MAC地址烧录成功',
+      };
+    }
+    
+    // 解析MAC地址（6字节）
+    if (payload.length >= 7) { // CMD + 6字节MAC
+      List<int> macBytes = payload.sublist(1, 7);
+      String macAddress = macBytes.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
+      
+      return {
+        'cmd': payload[0],
+        'mac': macAddress,
+        'macBytes': macBytes,
+        'success': true,
+      };
+    }
+    
+    return {
+      'cmd': payload[0],
+      'success': false,
+      'error': 'MAC地址数据长度不足',
+    };
+  }
+  
+  /// Get sensor option name
+  static String getSensorOptionName(int opt) {
+    switch (opt) {
+      case sensorOptStart: return '开始sensor测试';
+      case sensorOptBeginData: return '开始发送数据';
+      case sensorOptStop: return '停止sensor测试';
+      default: return 'UNKNOWN';
+    }
+  }
+  
+  /// Get Bluetooth MAC option name
+  static String getBluetoothMacOptionName(int opt) {
+    switch (opt) {
+      case bluetoothOptBurnMac: return '蓝牙mac地址烧录';
+      case bluetoothOptReadMac: return '上位机主动读MAC地址';
+      default: return 'UNKNOWN';
+    }
+  }
+
+  /// Create LED command
+  /// ledType: LED类型 (0x00=外侧, 0x01=内侧)
+  /// opt: LED操作 (0x00=开启, 0x01=关闭)
+  static Uint8List createLEDCommand(int ledType, int opt) {
+    final command = Uint8List(3);
+    command[0] = cmdControlLED; // 0x05
+    command[1] = ledType; // 0x00=外侧, 0x01=内侧
+    command[2] = opt; // 0x00=开启, 0x01=关闭
+    return command;
+  }
+
+  /// Parse LED response
+  static Map<String, dynamic>? parseLEDResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查是否包含LED命令字节
+    if (payload[0] != cmdControlLED) return null;
+    
+    // 如果只有命令字节，表示LED操作成功确认
+    if (payload.length == 1) {
+      return {
+        'cmd': payload[0],
+        'success': true,
+        'message': 'LED操作成功',
+      };
+    }
+    
+    // 如果有更多数据，可以在这里解析
+    return {
+      'cmd': payload[0],
+      'success': true,
+      'data': payload.sublist(1),
+    };
+  }
+
+  /// Parse MIC response
+  static Map<String, dynamic>? parseMICResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查是否包含MIC命令字节
+    if (payload[0] != cmdControlMIC) return null;
+    
+    // 如果只有命令字节，表示MIC操作成功确认
+    if (payload.length == 1) {
+      return {
+        'cmd': payload[0],
+        'success': true,
+        'message': 'MIC操作成功',
+      };
+    }
+    
+    // 如果有更多数据，可以在这里解析
+    return {
+      'cmd': payload[0],
+      'success': true,
+      'data': payload.sublist(1),
+    };
+  }
+
+  /// Get LED option name
+  static String getLEDOptionName(int ledType, int opt) {
+    final ledTypeName = ledType == 0x00 ? '外侧' : '内侧';
+    final optName = opt == 0x00 ? '开启' : '关闭';
+    return 'LED$ledTypeName$optName';
+  }
+
+  /// Create Bluetooth MAC command
+  /// opt: 0x00=写入MAC地址, 0x01=读取MAC地址
+  /// macBytes: MAC地址字节数组（6字节），仅在写入时需要
+  static Uint8List createBluetoothMACCommand(int opt, List<int> macBytes) {
+    if (opt == 0x00) {
+      // 写入MAC地址：CMD + OPT + 6字节MAC
+      if (macBytes.length != 6) {
+        throw ArgumentError('MAC地址必须是6字节');
+      }
+      final command = Uint8List(8);
+      command[0] = cmdBluetooth; // 0x0D
+      command[1] = opt; // 0x00
+      for (int i = 0; i < 6; i++) {
+        command[2 + i] = macBytes[i];
+      }
+      return command;
+    } else {
+      // 读取MAC地址：CMD + OPT
+      final command = Uint8List(2);
+      command[0] = cmdBluetooth; // 0x0D
+      command[1] = opt; // 0x01
+      return command;
     }
   }
 }

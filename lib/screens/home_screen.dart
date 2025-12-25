@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:file_picker/file_picker.dart';
 import '../models/test_state.dart';
 import '../models/log_state.dart';
 import '../widgets/menu_bar_widget.dart';
-import '../widgets/file_loader_section.dart';
 import '../widgets/factory_test_section.dart';
 import '../widgets/serial_port_section.dart';
 import '../widgets/log_console_section.dart';
-import '../widgets/sn_mac_config_section.dart';
-import '../widgets/wifi_test_steps_widget.dart';
 import '../widgets/touch_test_dialog.dart';
-import '../widgets/automation_test_widget.dart';
-import '../models/automation_test_state.dart';
+import '../widgets/sensor_data_dialog.dart';
+import '../widgets/imu_data_dialog.dart';
+import '../widgets/led_test_dialog.dart';
+import '../widgets/mic_test_dialog.dart';
+import '../widgets/bluetooth_test_dialog.dart';
+import '../widgets/wifi_test_steps_widget.dart';
+import '../widgets/test_report_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,12 +24,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  AutomationTestState? _automationTestState;
   
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 1, vsync: this);
     
     // 初始化时设置LogState和SN/MAC配置
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -37,23 +37,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       testState.setLogState(logState);
       testState.initializeSNMacConfig();
       
-      // 初始化自动化测试状态
-      _automationTestState = AutomationTestState(testState);
-      _automationTestState!.setLogState(logState);
-      
       logState.info('应用启动');
-      
-      // 触发重建以更新UI
-      if (mounted) {
-        setState(() {});
-      }
     });
   }
   
   @override
   void dispose() {
     _tabController.dispose();
-    _automationTestState?.dispose();
     super.dispose();
   }
 
@@ -77,11 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       tabs: const [
                         Tab(
                           icon: Icon(Icons.build),
-                          text: '手动测试',
-                        ),
-                        Tab(
-                          icon: Icon(Icons.auto_mode),
-                          text: '自动化测试',
+                          text: '生产测试',
                         ),
                       ],
                     ),
@@ -92,11 +78,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     child: TabBarView(
                       controller: _tabController,
                       children: [
-                        // 手动测试页面
+                        // 生产测试页面
                         _buildManualTestPage(),
-                        
-                        // 自动化测试页面
-                        _buildAutomationTestPage(),
                       ],
                     ),
                   ),
@@ -109,6 +92,64 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               TouchTestDialog(
                 isLeftTouch: testState.isLeftTouchDialog,
               ),
+            
+            // Sensor测试弹窗
+            if (testState.showSensorDialog)
+              const SensorDataDialog(),
+            
+            // IMU测试弹窗
+            if (testState.showIMUDialog)
+              const IMUDataDialog(),
+            
+            // LED测试弹窗
+            if (testState.showLEDDialog && testState.currentLEDType != null)
+              LEDTestDialog(
+                ledType: testState.currentLEDType!,
+                onTestPassed: () {
+                  testState.closeLEDDialog();
+                },
+              ),
+            
+            // MIC测试弹窗
+            if (testState.showMICDialog)
+              const MICTestDialog(),
+            
+            // 蓝牙测试弹窗
+            if (testState.showBluetoothDialog)
+              const BluetoothTestDialog(),
+            
+            // WiFi测试弹窗
+            if (testState.showWiFiDialog)
+              Dialog(
+                child: Container(
+                  width: 600,
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.wifi, color: Colors.blue, size: 32),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'WiFi测试进行中',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+                      const WiFiTestStepsWidget(),
+                    ],
+                  ),
+                ),
+              ),
+            
+            // 测试报告弹窗
+            if (testState.showTestReportDialog)
+              const TestReportDialog(),
           ],
         );
       },
@@ -122,27 +163,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Consumer<TestState>(
-              builder: (context, state, _) => FileLoaderSection(
-                title: 'Load Test Script',
-                path: state.testScriptPath,
-                onLoad: () => _loadFile(context, true),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Consumer<TestState>(
-              builder: (context, state, _) => FileLoaderSection(
-                title: 'Load Config File',
-                path: state.configFilePath,
-                onLoad: () => _loadFile(context, false),
-              ),
-            ),
-            const SizedBox(height: 16),
             const SerialPortSection(),
-            const SizedBox(height: 16),
-            const SNMacConfigSection(),
-            const SizedBox(height: 16),
-            const WiFiTestStepsWidget(),
             const SizedBox(height: 16),
             SizedBox(
               height: 600,
@@ -175,56 +196,5 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
   
-  Widget _buildAutomationTestPage() {
-    if (_automationTestState == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-    
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
-        children: [
-          // 自动化测试区域
-          Expanded(
-            flex: 3,
-            child: ChangeNotifierProvider.value(
-              value: _automationTestState!,
-              child: const AutomationTestWidget(),
-            ),
-          ),
-          const SizedBox(width: 16),
-          // 日志区域
-          Expanded(
-            flex: 2,
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              padding: const EdgeInsets.all(12),
-              child: const LogConsoleSection(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Future<void> _loadFile(BuildContext context, bool isTestScript) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['py'],
-    );
-
-    if (result != null && result.files.single.path != null) {
-      final state = context.read<TestState>();
-      if (isTestScript) {
-        state.setTestScriptPath(result.files.single.path!);
-      } else {
-        state.setConfigFilePath(result.files.single.path!);
-      }
-    }
-  }
 }

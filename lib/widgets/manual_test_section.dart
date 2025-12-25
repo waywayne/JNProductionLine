@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import '../services/production_test_commands.dart';
+import 'led_test_dialog.dart';
 
 /// Manual test section with individual buttons for each test
 class ManualTestSection extends StatelessWidget {
@@ -58,8 +59,8 @@ class ManualTestSection extends StatelessWidget {
                 Icons.wifi,
                 () => state.testWiFi(),
               ),
-              _buildLedToggleButton(context, state, ProductionTestCommands.ledOuter, 'LED灯(外侧)', Icons.lightbulb_outline),
-              _buildLedToggleButton(context, state, ProductionTestCommands.ledInner, 'LED灯(内侧)', Icons.lightbulb),
+              _buildLEDTestButton(context, '外侧', Icons.lightbulb_outline),
+              _buildLEDTestButton(context, '内侧', Icons.lightbulb),
               _buildTestButton(
                 context,
                 'SPK0',
@@ -105,12 +106,8 @@ class ManualTestSection extends StatelessWidget {
                 Icons.wb_sunny,
                 () => state.runManualTest('光敏传感器', ProductionTestCommands.createLightSensorCommand()),
               ),
-              _buildTestButton(
-                context,
-                'IMU数据',
-                Icons.sensors,
-                () => state.testIMU(),
-              ),
+              _buildIMUToggleButton(context, state),
+              _buildSensorToggleButton(context, state),
               _buildTestButton(
                 context,
                 '产测结束',
@@ -164,52 +161,103 @@ class ManualTestSection extends StatelessWidget {
     );
   }
 
-  Widget _buildLedToggleButton(
+  Widget _buildLEDTestButton(
     BuildContext context,
-    TestState state,
-    int ledNumber,
-    String label,
+    String ledType,
     IconData icon,
   ) {
-    final isOn = state.getLedState(ledNumber);
-    final statusText = isOn ? '已开启' : '已关闭';
-    
-    return SizedBox(
-      width: 140,
-      height: 80,
-      child: ElevatedButton(
-        onPressed: () => state.toggleLedState(ledNumber),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isOn ? Colors.amber[400] : Colors.grey[300],
-          foregroundColor: isOn ? Colors.black87 : Colors.black87,
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: isOn ? BorderSide(color: Colors.amber[700]!, width: 2) : BorderSide.none,
-          ),
-          padding: const EdgeInsets.all(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 28, color: isOn ? Colors.amber[800] : null),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 2),
-            Text(
-              statusText,
-              style: TextStyle(
-                fontSize: 9,
-                color: isOn ? Colors.amber[900] : Colors.black54,
+    return Consumer<TestState>(
+      builder: (context, state, _) {
+        final testResult = state.getLEDTestResult(ledType);
+        
+        // 根据测试结果确定按钮样式
+        Color backgroundColor;
+        Color foregroundColor;
+        Color borderColor;
+        String statusText;
+        
+        if (testResult == null) {
+          // 未测试
+          backgroundColor = Colors.amber[100]!;
+          foregroundColor = Colors.amber[800]!;
+          borderColor = Colors.amber[300]!;
+          statusText = '点击测试';
+        } else if (testResult) {
+          // 测试通过
+          backgroundColor = Colors.green[100]!;
+          foregroundColor = Colors.green[800]!;
+          borderColor = Colors.green[400]!;
+          statusText = '测试通过';
+        } else {
+          // 测试未通过
+          backgroundColor = Colors.red[100]!;
+          foregroundColor = Colors.red[800]!;
+          borderColor = Colors.red[400]!;
+          statusText = '测试未通过';
+        }
+        
+        return SizedBox(
+          width: 140,
+          height: 80,
+          child: ElevatedButton(
+            onPressed: () => _showLEDTestDialog(context, ledType),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: backgroundColor,
+              foregroundColor: foregroundColor,
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(color: borderColor, width: 1),
               ),
-              textAlign: TextAlign.center,
+              padding: const EdgeInsets.all(12),
             ),
-          ],
-        ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  testResult == null ? icon : 
+                  testResult ? Icons.check_circle : Icons.cancel,
+                  size: 28, 
+                  color: foregroundColor,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'LED灯($ledType)',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  statusText,
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showLEDTestDialog(BuildContext context, String ledType) {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // 防止点击外部关闭
+      builder: (context) => LEDTestDialog(
+        ledType: ledType,
+        onTestPassed: () {
+          // 测试通过的回调 - 直接显示SnackBar即可
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('LED$ledType测试通过'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        },
       ),
     );
   }
@@ -255,6 +303,104 @@ class ManualTestSection extends StatelessWidget {
               style: TextStyle(
                 fontSize: 9,
                 color: isOn ? Colors.white70 : Colors.black54,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIMUToggleButton(BuildContext context, TestState state) {
+    final isTesting = state.isIMUTesting;
+    final statusText = isTesting ? '监听中' : '未开始';
+    
+    return SizedBox(
+      width: 120,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () async {
+          if (isTesting) {
+            await state.stopIMUDataStream();
+          } else {
+            await state.startIMUDataStream();
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isTesting ? Colors.blue[400] : Colors.blue[50],
+          foregroundColor: isTesting ? Colors.white : Colors.blue[700],
+          elevation: isTesting ? 4 : 1,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isTesting ? Colors.blue[600]! : Colors.blue[300]!,
+              width: 1,
+            ),
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(isTesting ? Icons.sensors_outlined : Icons.sensors, size: 28),
+            const SizedBox(height: 4),
+            const Text(
+              'IMU数据',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            Text(
+              statusText,
+              style: const TextStyle(fontSize: 9),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSensorToggleButton(BuildContext context, TestState state) {
+    final isTesting = state.isSensorTesting;
+    final statusText = isTesting ? '监听中' : '未开始';
+    
+    return SizedBox(
+      width: 140,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () async {
+          if (isTesting) {
+            await state.stopSensorTest();
+          } else {
+            await state.startSensorTest();
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isTesting ? Colors.orange[400] : Colors.grey[300],
+          foregroundColor: isTesting ? Colors.white : Colors.black87,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: isTesting ? BorderSide(color: Colors.orange[700]!, width: 2) : BorderSide.none,
+          ),
+          padding: const EdgeInsets.all(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(isTesting ? Icons.image_outlined : Icons.image, size: 28),
+            const SizedBox(height: 4),
+            const Text(
+              'Sensor图片',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              statusText,
+              style: TextStyle(
+                fontSize: 9,
+                color: isTesting ? Colors.white70 : Colors.black54,
               ),
               textAlign: TextAlign.center,
             ),

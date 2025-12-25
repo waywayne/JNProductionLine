@@ -36,166 +36,167 @@ class _SNMacConfigSectionState extends State<SNMacConfigSection> {
   Widget build(BuildContext context) {
     return Consumer<TestState>(
       builder: (context, state, child) {
-        return Card(
-          margin: const EdgeInsets.all(16),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+        return Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey[400]!),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'SN码和MAC地址配置',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // 配置选项
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('产品线:', style: TextStyle(fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 4),
+                        DropdownButton<String>(
+                          value: _selectedProductLine,
+                          isExpanded: true,
+                          items: SNMacConfig.productLines.entries.map((entry) {
+                            return DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: Text('${entry.key} - ${entry.value}'),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _selectedProductLine = value;
+                              });
+                              state.setProductLine(value);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('工厂:', style: TextStyle(fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 4),
+                        DropdownButton<String>(
+                          value: _selectedFactory,
+                          isExpanded: true,
+                          items: SNMacConfig.factories.entries.map((entry) {
+                            return DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: Text('${entry.key} - ${entry.value}'),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _selectedFactory = value;
+                              });
+                              state.setFactory(value);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('产线:', style: TextStyle(fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 4),
+                        DropdownButton<int>(
+                          value: _selectedProductionLine,
+                          isExpanded: true,
+                          items: List.generate(9, (index) => index + 1).map((line) {
+                            return DropdownMenuItem<int>(
+                              value: line,
+                              child: Text('产线 $line'),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _selectedProductionLine = value;
+                              });
+                              state.setProductionLine(value);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 20),
+              
+              // 操作按钮
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => state.generateDeviceIdentity(),
+                    icon: const Icon(Icons.add),
+                    label: const Text('生成设备标识'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: () => _showStatistics(context, state),
+                    icon: const Icon(Icons.analytics),
+                    label: const Text('查看统计'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    onPressed: () => state.initializeSNMacConfig(),
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重新加载配置'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 20),
+              
+              // 当前设备信息显示
+              if (state.currentDeviceIdentity != null) ...[
+                const Divider(),
+                const SizedBox(height: 12),
                 const Text(
-                  'SN码和MAC地址配置',
+                  '当前设备标识信息:',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: 16),
-                
-                // 配置选项
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('产品线:', style: TextStyle(fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 4),
-                          DropdownButton<String>(
-                            value: _selectedProductLine,
-                            isExpanded: true,
-                            items: SNMacConfig.productLines.entries.map((entry) {
-                              return DropdownMenuItem<String>(
-                                value: entry.key,
-                                child: Text('${entry.key} - ${entry.value}'),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _selectedProductLine = value;
-                                });
-                                state.setProductLine(value);
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('工厂:', style: TextStyle(fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 4),
-                          DropdownButton<String>(
-                            value: _selectedFactory,
-                            isExpanded: true,
-                            items: SNMacConfig.factories.entries.map((entry) {
-                              return DropdownMenuItem<String>(
-                                value: entry.key,
-                                child: Text('${entry.key} - ${entry.value}'),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _selectedFactory = value;
-                                });
-                                state.setFactory(value);
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('产线:', style: TextStyle(fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 4),
-                          DropdownButton<int>(
-                            value: _selectedProductionLine,
-                            isExpanded: true,
-                            items: List.generate(9, (index) => index + 1).map((line) {
-                              return DropdownMenuItem<int>(
-                                value: line,
-                                child: Text('产线 $line'),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _selectedProductionLine = value;
-                                });
-                                state.setProductionLine(value);
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // 操作按钮
-                Row(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: () => state.generateDeviceIdentity(),
-                      icon: const Icon(Icons.add),
-                      label: const Text('生成设备标识'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed: () => _showStatistics(context, state),
-                      icon: const Icon(Icons.analytics),
-                      label: const Text('查看统计'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed: () => state.initializeSNMacConfig(),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('重新加载配置'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 20),
-                
-                // 当前设备信息显示
-                if (state.currentDeviceIdentity != null) ...[
-                  const Divider(),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '当前设备标识信息:',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildDeviceInfoCard(state.currentDeviceIdentity!),
-                ],
+                const SizedBox(height: 8),
+                _buildDeviceInfoCard(state.currentDeviceIdentity!),
               ],
-            ),
+            ],
           ),
         );
       },

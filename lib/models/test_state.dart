@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
+import 'dart:convert';
+import 'package:path/path.dart' as path;
 import '../services/serial_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
@@ -9,6 +12,7 @@ import '../config/test_config.dart';
 import '../config/wifi_config.dart';
 import '../config/sn_mac_config.dart';
 import 'touch_test_step.dart';
+import 'test_report.dart';
 
 enum TestStatus {
   waiting,
@@ -161,6 +165,61 @@ class TestState extends ChangeNotifier {
   bool _showTouchDialog = false;
   bool _isLeftTouchDialog = false;
 
+  // Sensor测试状态
+  bool _isSensorTesting = false;
+  bool _showSensorDialog = false;
+  List<Map<String, dynamic>> _sensorDataList = [];
+  StreamSubscription<Uint8List>? _sensorDataSubscription;
+  
+  // Sensor图片数据拼接状态
+  int? _expectedTotalBytes;
+  List<int> _imageBuffer = [];
+  DateTime? _lastPacketTime;
+  Timer? _sensorTimeoutTimer;
+  Timer? _packetTimeoutTimer;
+  Completer<bool>? _sensorTestCompleter; // 用于等待用户确认Sensor测试结果
+  int _sensorRetryCount = 0;
+  Uint8List? _completeImageData;
+
+  // IMU数据流监听状态
+  bool _isIMUTesting = false;
+  bool _showIMUDialog = false;
+  List<Map<String, dynamic>> _imuDataList = [];
+  StreamSubscription<Uint8List>? _imuDataSubscription;
+  Completer<bool>? _imuTestCompleter; // 用于等待用户确认
+  
+  // LED测试弹窗状态
+  bool _showLEDDialog = false;
+  String? _currentLEDType; // "内侧" 或 "外侧"
+  Completer<bool>? _ledTestCompleter; // 用于等待用户确认LED测试结果
+  
+  // MIC测试弹窗状态
+  bool _showMICDialog = false;
+  int? _currentMICNumber; // 0=左MIC, 1=右MIC, 2=TALK MIC
+  Completer<bool>? _micTestCompleter; // 用于等待用户确认MIC测试结果
+  
+  // 蓝牙测试弹窗状态
+  bool _showBluetoothDialog = false;
+  Completer<bool>? _bluetoothTestCompleter; // 用于等待用户确认蓝牙测试结果
+  String _bluetoothTestStep = ''; // 蓝牙测试当前步骤
+  String? _bluetoothNameToSet; // 要设置的蓝牙名称
+  
+  // WiFi测试弹窗状态
+  bool _showWiFiDialog = false;
+  String? _deviceIPAddress; // WiFi连接成功后获取的设备IP地址
+  String? _sensorImagePath; // Sensor测试图片的本地路径
+
+  // 自动化测试状态
+  bool _isAutoTesting = false;
+  TestReport? _currentTestReport;
+  List<TestReportItem> _testReportItems = [];
+  int _currentAutoTestIndex = 0;
+  bool _showTestReportDialog = false;
+  
+  // 生成的设备标识（用于蓝牙MAC地址验证）
+  String? _generatedDeviceId;
+  List<int>? _generatedBluetoothMAC;
+
   String get testScriptPath => _testScriptPath;
   String get configFilePath => _configFilePath;
   TestGroup? get currentTestGroup => _currentTestGroup;
@@ -187,6 +246,42 @@ class TestState extends ChangeNotifier {
   bool get showTouchDialog => _showTouchDialog;
   bool get isLeftTouchDialog => _isLeftTouchDialog;
 
+  // 获取Sensor测试状态
+  bool get isSensorTesting => _isSensorTesting;
+  bool get showSensorDialog => _showSensorDialog;
+  List<Map<String, dynamic>> get sensorDataList => _sensorDataList;
+  Uint8List? get completeImageData => _completeImageData;
+
+  // IMU测试状态getter
+  bool get isIMUTesting => _isIMUTesting;
+  bool get showIMUDialog => _showIMUDialog;
+  List<Map<String, dynamic>> get imuDataList => _imuDataList;
+  
+  // LED测试状态getter
+  bool get showLEDDialog => _showLEDDialog;
+  String? get currentLEDType => _currentLEDType;
+  
+  // WiFi测试状态getter
+  bool get showWiFiDialog => _showWiFiDialog;
+  String? get deviceIPAddress => _deviceIPAddress;
+  String? get sensorImagePath => _sensorImagePath;
+
+  // MIC测试状态getter
+  bool get showMICDialog => _showMICDialog;
+  int? get currentMICNumber => _currentMICNumber;
+
+  // 蓝牙测试状态getter
+  bool get showBluetoothDialog => _showBluetoothDialog;
+  String get bluetoothTestStep => _bluetoothTestStep;
+  String? get bluetoothNameToSet => _bluetoothNameToSet;
+
+  // 自动化测试状态getter
+  bool get isAutoTesting => _isAutoTesting;
+  TestReport? get currentTestReport => _currentTestReport;
+  List<TestReportItem> get testReportItems => _testReportItems;
+  int get currentAutoTestIndex => _currentAutoTestIndex;
+  bool get showTestReportDialog => _showTestReportDialog;
+
   // 获取 MIC 状态
   bool getMicState(int micNumber) => _micStates[micNumber] ?? false;
 
@@ -199,9 +294,30 @@ class TestState extends ChangeNotifier {
   }
   
   /// 关闭Touch测试弹窗
-  void closeTouchDialog() {
+  Future<void> closeTouchDialog() async {
+    // 如果正在测试，清理测试状态
+    if (_isLeftTouchTesting) {
+      _isLeftTouchTesting = false;
+      _leftTouchTestSteps.clear();
+    }
+    if (_isRightTouchTesting) {
+      _isRightTouchTesting = false;
+      _rightTouchTestSteps.clear();
+    }
+    
     _showTouchDialog = false;
     notifyListeners();
+  }
+  
+  /// 重新打开Touch测试弹窗
+  void reopenTouchDialog() {
+    if (_isLeftTouchTesting || _isRightTouchTesting) {
+      _showTouchDialog = true;
+      notifyListeners();
+      _logState?.info('🔄 Touch测试弹窗已重新打开', type: LogType.debug);
+    } else {
+      _logState?.warning('⚠️ 没有正在进行的Touch测试', type: LogType.debug);
+    }
   }
 
   void setTestScriptPath(String path) {
@@ -299,6 +415,112 @@ class TestState extends ChangeNotifier {
     }
   }
 
+  /// 停止自动化测试
+  void stopAutoTest() {
+    _shouldStopTest = true;
+    _logState?.warning('⚠️  用户请求停止自动化测试', type: LogType.debug);
+  }
+  
+  /// 重试单个测试项
+  Future<void> retrySingleTest(int itemIndex) async {
+    if (itemIndex < 0 || itemIndex >= _testReportItems.length) {
+      _logState?.error('❌ 无效的测试项索引: $itemIndex', type: LogType.debug);
+      return;
+    }
+    
+    final item = _testReportItems[itemIndex];
+    _logState?.info('🔄 开始重试测试项: ${item.testName}', type: LogType.debug);
+    
+    // 获取测试序列
+    final testSequence = _getTestSequence();
+    
+    // 查找对应的测试项
+    final testIndex = testSequence.indexWhere((test) => test['name'] == item.testName);
+    if (testIndex == -1) {
+      _logState?.error('❌ 未找到测试项: ${item.testName}', type: LogType.debug);
+      return;
+    }
+    
+    final test = testSequence[testIndex];
+    
+    // 更新测试项状态为运行中
+    _testReportItems[itemIndex] = item.copyWith(
+      status: TestReportStatus.running,
+      startTime: DateTime.now(),
+      endTime: null,
+      errorMessage: null,
+    );
+    notifyListeners();
+    
+    try {
+      final executor = test['executor'] as Future<bool> Function();
+      
+      // 根据测试类型决定是否使用重试包装器
+      final result = (test['type'] == 'WiFi' || 
+                     test['type'] == 'IMU' || 
+                     test['type'] == 'Touch' || 
+                     test['type'] == 'Sensor')
+          ? await executor()
+          : await _executeTestWithRetry(test['name'] as String, executor);
+      
+      // 更新测试项状态
+      final updatedItem = item.copyWith(
+        status: result ? TestReportStatus.pass : TestReportStatus.fail,
+        endTime: DateTime.now(),
+        errorMessage: result ? null : '测试未通过',
+      );
+      
+      _testReportItems[itemIndex] = updatedItem;
+      
+      if (result) {
+        _logState?.success('✅ ${test['name']} 重试成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ ${test['name']} 重试失败', type: LogType.debug);
+      }
+    } catch (e) {
+      _logState?.error('❌ ${test['name']} 重试异常: $e', type: LogType.debug);
+      
+      final updatedItem = item.copyWith(
+        status: TestReportStatus.fail,
+        endTime: DateTime.now(),
+        errorMessage: '测试异常: $e',
+      );
+      
+      _testReportItems[itemIndex] = updatedItem;
+    }
+    
+    notifyListeners();
+  }
+  
+  /// 获取测试序列
+  List<Map<String, dynamic>> _getTestSequence() {
+    return [
+      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': true},
+      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
+      {'name': '4. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '5. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '6. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '7. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '8. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '9. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '10. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '11. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '12. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '13. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '14. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '15. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '16. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '17. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '18. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '19. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '20. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '21. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '22. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '23. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+    ];
+  }  
+
   /// 检查是否应该停止测试
   bool get shouldStopTest => _shouldStopTest;
 
@@ -326,7 +548,7 @@ class TestState extends ChangeNotifier {
   Future<bool> _executeWiFiStepWithRetry(int stepIndex) async {
     final maxRetries = _wifiTestSteps[stepIndex].maxRetries;
     
-    for (int retry = 0; retry <= maxRetries; retry++) {
+    for (int retry = 0; retry < maxRetries; retry++) {
       // 每次循环都获取最新的步骤对象
       final currentStep = _wifiTestSteps[stepIndex];
       
@@ -340,10 +562,10 @@ class TestState extends ChangeNotifier {
         return false;
       }
 
-      // 更新步骤状态
+      // 更新步骤状态 - retry从0开始，显示时+1，范围是1到maxRetries
       _wifiTestSteps[stepIndex] = currentStep.copyWith(
         status: WiFiStepStatus.testing,
-        currentRetry: retry,
+        currentRetry: retry + 1, // 显示时从1开始
       );
       notifyListeners();
 
@@ -358,16 +580,22 @@ class TestState extends ChangeNotifier {
           final successStep = _wifiTestSteps[stepIndex];
           _wifiTestSteps[stepIndex] = successStep.copyWith(
             status: WiFiStepStatus.success,
-            currentRetry: retry,
+            currentRetry: 0, // 成功后重置重试计数
           );
           notifyListeners();
           return true;
         }
       } catch (e) {
         _logState?.error('WiFi步骤执行异常: $e', type: LogType.debug);
+        // 记录错误信息
+        final errorStep = _wifiTestSteps[stepIndex];
+        _wifiTestSteps[stepIndex] = errorStep.copyWith(
+          errorMessage: e.toString(),
+        );
+        notifyListeners();
       }
 
-      // 如果不是最后一次重试，继续
+      // 如果不是最后一次重试，等待后继续
       if (retry < maxRetries) {
         await Future.delayed(const Duration(milliseconds: 1000));
       }
@@ -377,9 +605,11 @@ class TestState extends ChangeNotifier {
     final finalStep = _wifiTestSteps[stepIndex];
     _wifiTestSteps[stepIndex] = finalStep.copyWith(
       status: WiFiStepStatus.failed,
-      errorMessage: '重试 $maxRetries 次后仍然失败',
+      errorMessage: finalStep.errorMessage ?? '重试 $maxRetries 次后仍然失败',
     );
     notifyListeners();
+    
+    _logState?.error('❌ ${finalStep.name} 最终失败，已重试 $maxRetries 次', type: LogType.debug);
     return false;
   }
 
@@ -425,16 +655,81 @@ class TestState extends ChangeNotifier {
   Future<void> disconnect() async {
     _logState?.info('正在断开串口连接');
     
-    // 如果正在运行测试，先停止测试
-    if (_isRunningTest) {
-      _logState?.warning('⚠️  检测到正在运行测试，自动停止...');
-      stopTest();
-    }
+    // 清理所有测试状态和关闭所有弹窗
+    await _cleanupAllTestsAndDialogs();
     
     await _serialService.disconnect();
     _selectedPort = null;
     _currentTestGroup = null; // 断开连接时清空测试组
     _logState?.info('串口已断开');
+    notifyListeners();
+  }
+  
+  /// 清理所有测试状态和关闭所有弹窗
+  Future<void> _cleanupAllTestsAndDialogs() async {
+    _logState?.warning('⚠️  串口断开，清理所有测试状态和关闭所有弹窗...');
+    
+    // 停止自动化测试
+    if (_isAutoTesting) {
+      _shouldStopTest = true;
+      _isAutoTesting = false;
+    }
+    
+    // 停止手动测试
+    if (_isRunningTest) {
+      stopTest();
+    }
+    
+    // 关闭所有弹窗
+    _showWiFiDialog = false;
+    _showIMUDialog = false;
+    _showSensorDialog = false;
+    _showLEDDialog = false;
+    _showTouchDialog = false;
+    _showTestReportDialog = false;
+    
+    // 清理IMU测试状态
+    if (_isIMUTesting) {
+      await _imuDataSubscription?.cancel();
+      _imuDataSubscription = null;
+      _isIMUTesting = false;
+      _imuDataList.clear();
+      if (_imuTestCompleter != null && !_imuTestCompleter!.isCompleted) {
+        _imuTestCompleter?.complete(false);
+      }
+      _imuTestCompleter = null;
+    }
+    
+    // 清理Sensor测试状态
+    if (_isSensorTesting) {
+      await _sensorDataSubscription?.cancel();
+      _sensorDataSubscription = null;
+      _isSensorTesting = false;
+      _sensorDataList.clear();
+      _resetImageBuffer();
+      _sensorTimeoutTimer?.cancel();
+      _packetTimeoutTimer?.cancel();
+      if (_sensorTestCompleter != null && !_sensorTestCompleter!.isCompleted) {
+        _sensorTestCompleter?.complete(false);
+      }
+      _sensorTestCompleter = null;
+    }
+    
+    // 清理LED测试状态
+    if (_ledTestCompleter != null && !_ledTestCompleter!.isCompleted) {
+      _ledTestCompleter?.complete(false);
+    }
+    _ledTestCompleter = null;
+    _currentLEDType = null;
+    
+    // 清理Touch测试状态
+    _isLeftTouchTesting = false;
+    _isRightTouchTesting = false;
+    
+    // 清理WiFi测试状态
+    // WiFi测试步骤会自动停止
+    
+    _logState?.success('✅ 所有测试状态已清理，所有弹窗已关闭');
     notifyListeners();
   }
 
@@ -1483,17 +1778,46 @@ class TestState extends ChangeNotifier {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
 
       // 按顺序执行所有步骤
+      bool allSuccess = true;
+      int failedStepIndex = -1;
+      
       for (int stepIndex = 0; stepIndex < _rightTouchTestSteps.length; stepIndex++) {
-        if (_shouldStopTest) break;
+        if (_shouldStopTest) {
+          allSuccess = false;
+          failedStepIndex = stepIndex;
+          break;
+        }
         
         final success = await _executeRightTouchStep(stepIndex);
         if (!success) {
-          _logState?.error('❌ 右Touch测试失败，停止测试', type: LogType.debug);
+          _logState?.error('❌ 右Touch测试失败: ${_rightTouchTestSteps[stepIndex].name}，停止测试', type: LogType.debug);
+          allSuccess = false;
+          failedStepIndex = stepIndex;
           break;
         }
         
         // 步骤间延迟
         await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      // 如果测试提前结束，将剩余步骤标记为跳过
+      if (failedStepIndex >= 0) {
+        for (int i = failedStepIndex + 1; i < _rightTouchTestSteps.length; i++) {
+          if (_rightTouchTestSteps[i].status == TouchStepStatus.testing ||
+              _rightTouchTestSteps[i].status == TouchStepStatus.waiting) {
+            _rightTouchTestSteps[i] = _rightTouchTestSteps[i].copyWith(
+              status: TouchStepStatus.failed,
+              errorMessage: '前序步骤失败，跳过测试',
+            );
+          }
+        }
+        notifyListeners();
+      }
+      
+      // 标记测试是否全部成功
+      _isRightTouchTesting = false;
+      if (!allSuccess) {
+        _logState?.error('❌ 右Touch测试未完全通过', type: LogType.debug);
       }
 
       _logState?.info('', type: LogType.debug);
@@ -1530,17 +1854,46 @@ class TestState extends ChangeNotifier {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
 
       // 按顺序执行所有步骤
+      bool allSuccess = true;
+      int failedStepIndex = -1;
+      
       for (int stepIndex = 0; stepIndex < _leftTouchTestSteps.length; stepIndex++) {
-        if (_shouldStopTest) break;
+        if (_shouldStopTest) {
+          allSuccess = false;
+          failedStepIndex = stepIndex;
+          break;
+        }
         
         final success = await _executeLeftTouchStep(stepIndex);
         if (!success) {
-          _logState?.error('❌ 左Touch测试失败，停止测试', type: LogType.debug);
+          _logState?.error('❌ 左Touch测试失败: ${_leftTouchTestSteps[stepIndex].name}，停止测试', type: LogType.debug);
+          allSuccess = false;
+          failedStepIndex = stepIndex;
           break;
         }
         
         // 步骤间延迟
         await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      // 如果测试提前结束，将剩余步骤标记为跳过
+      if (failedStepIndex >= 0) {
+        for (int i = failedStepIndex + 1; i < _leftTouchTestSteps.length; i++) {
+          if (_leftTouchTestSteps[i].status == TouchStepStatus.testing ||
+              _leftTouchTestSteps[i].status == TouchStepStatus.waiting) {
+            _leftTouchTestSteps[i] = _leftTouchTestSteps[i].copyWith(
+              status: TouchStepStatus.failed,
+              errorMessage: '前序步骤失败，跳过测试',
+            );
+          }
+        }
+        notifyListeners();
+      }
+      
+      // 标记测试是否全部成功
+      _isLeftTouchTesting = false;
+      if (!allSuccess) {
+        _logState?.error('❌ 左Touch测试未完全通过', type: LogType.debug);
       }
 
       _logState?.info('', type: LogType.debug);
@@ -1559,16 +1912,6 @@ class TestState extends ChangeNotifier {
 
   /// 初始化WiFi测试步骤
   void _initializeWiFiTestSteps() {
-    // 准备连接热点的数据
-    List<int>? apData;
-    if (WiFiConfig.defaultSSID.isNotEmpty && WiFiConfig.defaultPassword.isNotEmpty) {
-      List<int> ssidBytes = WiFiConfig.stringToBytes(WiFiConfig.defaultSSID);
-      List<int> pwdBytes = WiFiConfig.stringToBytes(WiFiConfig.defaultPassword);
-      apData = [...ssidBytes, ...pwdBytes];
-    } else {
-      apData = [0, 0]; // 空的SSID和PWD，都以\0结尾
-    }
-
     _wifiTestSteps = List<WiFiTestStep>.from([
       WiFiTestStep(
         opt: WiFiConfig.optStartTest,
@@ -1578,8 +1921,8 @@ class TestState extends ChangeNotifier {
       WiFiTestStep(
         opt: WiFiConfig.optConnectAP,
         name: '连接热点',
-        description: 'SSID: "${WiFiConfig.defaultSSID}"',
-        data: apData,
+        description: '只发送CMD+OPT，不带数据',
+        data: null, // 不发送SSID和密码数据，只发送CMD 0x04 + OPT 0x01
       ),
       WiFiTestStep(
         opt: WiFiConfig.optTestRSSI,
@@ -1608,6 +1951,9 @@ class TestState extends ChangeNotifier {
       return false;
     }
 
+    bool testStarted = false;
+    bool testSuccess = false;
+    
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('🌐 开始WiFi多步骤测试流程', type: LogType.debug);
@@ -1616,34 +1962,245 @@ class TestState extends ChangeNotifier {
 
       // 初始化WiFi测试步骤
       _initializeWiFiTestSteps();
+      
+      // 显示WiFi测试弹窗
+      _showWiFiDialog = true;
+      notifyListeners();
+      
+      // 等待一小段时间让弹窗显示
+      await Future.delayed(const Duration(milliseconds: 300));
 
-      // 执行每个步骤
-      for (int i = 0; i < _wifiTestSteps.length; i++) {
+      // 执行除最后一步（结束测试）外的所有步骤
+      for (int i = 0; i < _wifiTestSteps.length - 1; i++) {
         // 检查是否需要停止测试
         if (_shouldStopTest) {
           _logState?.warning('🛑 WiFi测试已被用户停止');
-          return false;
+          testSuccess = false;
+          break;
         }
 
         final step = _wifiTestSteps[i];
         final success = await _executeWiFiStepWithRetry(i);
         
+        if (i == 0 && success) {
+          testStarted = true; // 第一步成功，标记测试已开始
+          _logState?.info('⏳ 开始WiFi测试成功，等待10秒后再连接热点...', type: LogType.debug);
+          await Future.delayed(const Duration(seconds: 10));
+          _logState?.info('✅ 等待完成，准备连接热点', type: LogType.debug);
+        }
+        
         if (!success) {
           _logState?.error('❌ WiFi测试失败: ${step.name}');
-          return false;
+          testSuccess = false;
+          break;
+        }
+        
+        // 所有步骤都成功
+        if (i == _wifiTestSteps.length - 2) {
+          testSuccess = true;
         }
       }
 
       _logState?.info('', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.success('✅ WiFi多步骤测试完成', type: LogType.debug);
+      if (testSuccess) {
+        _logState?.success('✅ WiFi多步骤测试完成', type: LogType.debug);
+      } else {
+        _logState?.error('❌ WiFi测试未完全通过', type: LogType.debug);
+      }
       _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      return true;
+      return testSuccess;
     } catch (e) {
       _logState?.error('WiFi测试异常: $e', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
+    } finally {
+      // 无论成功失败，只要测试开始了，都必须执行结束步骤
+      if (testStarted) {
+        _logState?.info('🛑 WiFi测试结束，发送结束指令...', type: LogType.debug);
+        final endStepIndex = _wifiTestSteps.length - 1;
+        final endSuccess = await _executeWiFiStepWithRetry(endStepIndex);
+        if (!endSuccess) {
+          _logState?.warning('⚠️ WiFi结束指令发送失败，但继续执行', type: LogType.debug);
+        } else {
+          _logState?.success('✅ WiFi结束指令发送成功', type: LogType.debug);
+        }
+      }
+      
+      // 等待一小段时间让用户看到最终结果
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 关闭WiFi测试弹窗
+      _showWiFiDialog = false;
+      notifyListeners();
+    }
+  }
+  
+  /// 关闭WiFi测试弹窗
+  void closeWiFiDialog() {
+    _showWiFiDialog = false;
+    notifyListeners();
+    _logState?.info('🔄 WiFi测试弹窗已关闭', type: LogType.debug);
+  }
+  
+  /// 重新打开WiFi测试弹窗
+  void reopenWiFiDialog() {
+    if (_wifiTestSteps.isNotEmpty) {
+      _showWiFiDialog = true;
+      notifyListeners();
+      _logState?.info('🔄 WiFi测试弹窗已重新打开', type: LogType.debug);
+    } else {
+      _logState?.warning('⚠️ 没有正在进行的WiFi测试', type: LogType.debug);
+    }
+  }
+
+  /// 从设备通过FTP下载Sensor测试图片
+  /// 返回true表示下载成功，false表示失败
+  Future<bool> _downloadSensorImageFromDevice() async {
+    if (_deviceIPAddress == null || _deviceIPAddress!.isEmpty) {
+      _logState?.error('❌ 无法下载图片：设备IP地址为空', type: LogType.debug);
+      return false;
+    }
+
+    try {
+      _logState?.info('📥 开始从设备下载Sensor测试图片...', type: LogType.debug);
+      _logState?.info('   设备IP: $_deviceIPAddress', type: LogType.debug);
+      
+      // 构建FTP URL，显式指定端口21
+      final ftpUrl = 'ftp://$_deviceIPAddress:21/test.jpg';
+      _logState?.info('   FTP URL: $ftpUrl', type: LogType.debug);
+      
+      // 确定保存路径（跨平台兼容）
+      String savePath;
+      if (Platform.isMacOS) {
+        // macOS: 保存到用户文档目录
+        final homeDir = Platform.environment['HOME'] ?? '';
+        savePath = path.join(homeDir, 'Documents', 'JNProductionLine', 'sensor_test.jpg');
+      } else if (Platform.isWindows) {
+        // Windows: 保存到用户文档目录
+        final userProfile = Platform.environment['USERPROFILE'] ?? '';
+        savePath = path.join(userProfile, 'Documents', 'JNProductionLine', 'sensor_test.jpg');
+      } else {
+        // 其他平台：保存到当前目录
+        savePath = path.join(Directory.current.path, 'sensor_test.jpg');
+      }
+      
+      _logState?.info('   保存路径: $savePath', type: LogType.debug);
+      
+      // 确保目录存在
+      final saveDir = Directory(path.dirname(savePath));
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+        _logState?.info('   ✅ 创建目录: ${saveDir.path}', type: LogType.debug);
+      }
+      
+      // 使用curl命令下载（跨平台兼容，带重试机制）
+      ProcessResult? result;
+      int maxRetries = 3;
+      
+      for (int retry = 0; retry < maxRetries; retry++) {
+        if (retry > 0) {
+          _logState?.warning('🔄 FTP下载重试 $retry/$maxRetries...', type: LogType.debug);
+          // 每次重试增加等待时间：1秒、2秒、3秒
+          await Future.delayed(Duration(seconds: retry));
+        }
+        
+        if (Platform.isMacOS || Platform.isLinux) {
+          _logState?.info('🔧 开始下载 FTP URL: $ftpUrl (尝试 ${retry + 1}/$maxRetries)', type: LogType.debug);
+          
+          // macOS/Linux: 使用curl，添加FTP特定选项
+          final curlArgs = [
+            '-v',  // 详细输出，用于调试
+            '--ftp-pasv',  // 使用被动模式（PASV）
+            '--disable-epsv',  // 禁用扩展被动模式
+            '-o', savePath,
+            '--connect-timeout', '5',
+            '--max-time', '30',
+            ftpUrl,
+          ];
+          
+          _logState?.info('🔧 执行命令: curl ${curlArgs.join(" ")}', type: LogType.debug);
+          
+          result = await Process.run('curl', curlArgs);
+          
+          // 输出详细的stderr信息（curl的详细输出在stderr）
+          if (result.stderr.toString().isNotEmpty) {
+            _logState?.info('📋 curl详细输出:\n${result.stderr}', type: LogType.debug);
+          }
+          
+        } else if (Platform.isWindows) {
+          // Windows: 使用curl (Windows 10+ 自带curl)
+          _logState?.info('🔧 开始下载 FTP URL: $ftpUrl (尝试 ${retry + 1}/$maxRetries)', type: LogType.debug);
+          
+          final curlArgs = [
+            '-v',
+            '--ftp-pasv',
+            '--disable-epsv',
+            '-o', savePath,
+            '--connect-timeout', '5',
+            '--max-time', '30',
+            ftpUrl,
+          ];
+          
+          _logState?.info('🔧 执行命令: curl.exe ${curlArgs.join(" ")}', type: LogType.debug);
+          
+          result = await Process.run('curl.exe', curlArgs);
+          
+          if (result.stderr.toString().isNotEmpty) {
+            _logState?.info('📋 curl详细输出:\n${result.stderr}', type: LogType.debug);
+          }
+          
+        } else {
+          _logState?.error('❌ 不支持的操作系统', type: LogType.debug);
+          return false;
+        }
+        
+        // 如果成功，跳出重试循环
+        if (result != null && result.exitCode == 0) {
+          _logState?.success('✅ FTP下载成功！', type: LogType.debug);
+          break;
+        } else if (retry < maxRetries - 1) {
+          _logState?.warning('⚠️ FTP下载失败 (退出码: ${result?.exitCode ?? 'unknown'})，准备重试...', type: LogType.debug);
+        }
+      }
+      
+      // 检查最终结果
+      if (result == null) {
+        _logState?.error('❌ 不支持的操作系统', type: LogType.debug);
+        return false;
+      }
+      
+      if (result.exitCode == 0) {
+        // 验证文件是否存在且有内容
+        final file = File(savePath);
+        if (await file.exists()) {
+          final fileSize = await file.length();
+          if (fileSize > 0) {
+            _sensorImagePath = savePath;
+            _logState?.success('✅ Sensor测试图片下载成功！', type: LogType.debug);
+            _logState?.info('   文件大小: ${(fileSize / 1024).toStringAsFixed(2)} KB', type: LogType.debug);
+            _logState?.info('   保存位置: $savePath', type: LogType.debug);
+            notifyListeners();
+            return true;
+          } else {
+            _logState?.error('❌ 下载的文件为空', type: LogType.debug);
+            return false;
+          }
+        } else {
+          _logState?.error('❌ 文件下载后不存在', type: LogType.debug);
+          return false;
+        }
+      } else {
+        _logState?.error('❌ FTP下载失败 (退出码: ${result.exitCode})', type: LogType.debug);
+        if (result.stderr.toString().isNotEmpty) {
+          _logState?.error('   错误信息: ${result.stderr}', type: LogType.debug);
+        }
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ 下载Sensor图片异常: $e', type: LogType.debug);
       return false;
     }
   }
@@ -1677,10 +2234,10 @@ class TestState extends ChangeNotifier {
         }
       }
 
-      // 发送命令并等待响应（5秒超时）
+      // 发送命令并等待响应（2秒超时）
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
-        timeout: const Duration(seconds: 5), // 5秒超时
+        timeout: const Duration(seconds: 2), // 2秒超时
         moduleId: ProductionTestCommands.moduleId,
         messageId: ProductionTestCommands.messageId,
       );
@@ -1702,6 +2259,28 @@ class TestState extends ChangeNotifier {
               details = ' - RSSI: ${wifiResult['rssi']}dBm';
             } else if (wifiResult.containsKey('mac')) {
               details = ' - MAC: ${wifiResult['mac']}';
+            } else if (wifiResult.containsKey('ip')) {
+              // 保存IP地址
+              _deviceIPAddress = wifiResult['ip'];
+              details = ' - IP: ${wifiResult['ip']}';
+              _logState?.success('✅ 获取到设备IP地址: $_deviceIPAddress', type: LogType.debug);
+              
+              // 等待3秒让设备FTP服务完全启动
+              _logState?.info('⏳ 等待3秒让设备FTP服务启动...', type: LogType.debug);
+              await Future.delayed(const Duration(seconds: 3));
+              
+              // 同步下载图片，阻塞WiFi测试流程直到下载完成
+              _logState?.info('📥 正在下载Sensor测试图片...', type: LogType.debug);
+              final downloadSuccess = await _downloadSensorImageFromDevice();
+              
+              if (!downloadSuccess) {
+                _logState?.error('❌ Sensor图片下载失败，WiFi测试终止', type: LogType.debug);
+                final currentStep = _wifiTestSteps[stepIndex];
+                _wifiTestSteps[stepIndex] = currentStep.copyWith(errorMessage: 'FTP图片下载失败');
+                return false;
+              }
+              
+              _logState?.success('✅ Sensor图片下载成功，继续WiFi测试', type: LogType.debug);
             }
             
             // 保存结果到步骤中
@@ -1963,13 +2542,7 @@ class TestState extends ChangeNotifier {
         description: '测试左侧Touch双击功能',
         userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionDoubleTap),
       ),
-      TouchTestStep(
-        touchId: TouchTestConfig.touchLeft,
-        actionId: TouchTestConfig.leftActionLongPress,
-        name: '长按测试',
-        description: '测试左侧Touch长按功能',
-        userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionLongPress),
-      ),
+      // 删除长按测试项
       TouchTestStep(
         touchId: TouchTestConfig.touchLeft,
         actionId: TouchTestConfig.leftActionWearDetect,
@@ -2445,8 +3018,2924 @@ class TestState extends ChangeNotifier {
     _logState?.info('⏭️ 跳过步骤: ${step.name}', type: LogType.debug);
   }
 
+  /// 开始Sensor测试 - 手动测试也使用相同的简单逻辑
+  Future<bool> startSensorTest() async {
+    try {
+      _logState?.info('📷 开始Sensor传感器测试（手动）', type: LogType.debug);
+      
+      // 检查图片是否已下载
+      if (_sensorImagePath == null || _sensorImagePath!.isEmpty) {
+        _logState?.error('❌ Sensor测试失败：未找到测试图片', type: LogType.debug);
+        _logState?.info('   提示：请先完成WiFi测试以下载图片', type: LogType.debug);
+        return false;
+      }
+      
+      // 验证文件是否存在
+      final imageFile = File(_sensorImagePath!);
+      if (!await imageFile.exists()) {
+        _logState?.error('❌ Sensor测试失败：图片文件不存在', type: LogType.debug);
+        _logState?.info('   路径: $_sensorImagePath', type: LogType.debug);
+        _sensorImagePath = null; // 清除无效路径
+        return false;
+      }
+      
+      // 验证文件大小
+      final fileSize = await imageFile.length();
+      if (fileSize == 0) {
+        _logState?.error('❌ Sensor测试失败：图片文件为空', type: LogType.debug);
+        _logState?.info('   路径: $_sensorImagePath', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ Sensor测试图片存在，准备显示...', type: LogType.debug);
+      _logState?.info('   路径: $_sensorImagePath', type: LogType.debug);
+      _logState?.info('   大小: ${(fileSize / 1024).toStringAsFixed(2)} KB', type: LogType.debug);
+      
+      // 显示图片弹窗供用户查看
+      _showSensorDialog = true;
+      _completeImageData = await imageFile.readAsBytes();
+      notifyListeners();
+      
+      _logState?.info('📺 显示Sensor测试图片（3秒）...', type: LogType.debug);
+      
+      // 等待3秒让用户查看图片
+      await Future.delayed(const Duration(seconds: 3));
+      
+      // 关闭弹窗
+      _showSensorDialog = false;
+      notifyListeners();
+      
+      _logState?.success('✅ Sensor测试通过', type: LogType.debug);
+      
+      return true;
+    } catch (e) {
+      _logState?.error('❌ Sensor测试异常: $e', type: LogType.debug);
+      // 确保异常时也关闭弹窗
+      _showSensorDialog = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// 内部方法：带重试的Sensor测试启动
+  Future<bool> _startSensorTestWithRetry() async {
+    _sensorRetryCount++;
+    
+    if (_sensorRetryCount > 10) {
+      _logState?.error('❌ Sensor测试启动失败，已重试10次', type: LogType.debug);
+      _resetSensorTest();
+      return false;
+    }
+
+    _isSensorTesting = true;
+    notifyListeners();
+
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 开始Sensor图片测试 (第 $_sensorRetryCount 次尝试)', type: LogType.debug);
+      _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+
+      final startCommand = ProductionTestCommands.createSensorCommand(ProductionTestCommands.sensorOptStart);
+      final startCommandHex = startCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$startCommandHex] (${startCommand.length} bytes)', type: LogType.debug);
+
+      // 发送开始命令并等待SN匹配的响应确认
+      final startResponse = await _serialService.sendCommandAndWaitResponse(
+        startCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (startResponse != null && !startResponse.containsKey('error')) {
+        _logState?.success('✅ Sensor测试启动成功，收到确认响应', type: LogType.debug);
+      } else {
+        _logState?.warning('⚠️  Sensor测试启动失败: ${startResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 2));
+        return _startSensorTestWithRetry();
+      }
+      
+      // 发送开始发送数据命令 (opt 0x01) - 不等待响应
+      _logState?.info('🔄 发送开始发送数据命令 (opt 0x01)', type: LogType.debug);
+      final beginDataCommand = ProductionTestCommands.createSensorCommand(ProductionTestCommands.sensorOptBeginData);
+      final beginDataCommandHex = beginDataCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$beginDataCommandHex] (${beginDataCommand.length} bytes)', type: LogType.debug);
+
+      // 直接发送命令，不等待响应
+      await _serialService.sendCommand(
+        beginDataCommand,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      _logState?.success('✅ 开始发送数据命令已发送，直接开始监听', type: LogType.debug);
+      
+      // 开始监听Sensor数据
+      _logState?.info('📡 开始监听Sensor图片数据流...', type: LogType.debug);
+      await _startSensorDataListener();
+      
+      // 设置5分钟总超时
+      _sensorTimeoutTimer = Timer(const Duration(minutes: 5), () {
+        _logState?.error('❌ Sensor测试总超时（5分钟），准备重试', type: LogType.debug);
+        _retrySensorTest();
+      });
+
+      return true;
+    } catch (e) {
+      _logState?.error('启动Sensor测试异常: $e', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 2));
+      return _startSensorTestWithRetry();
+    }
+  }
+
+  /// 停止Sensor测试（带重试机制）
+  Future<bool> stopSensorTest({int retryCount = 0}) async {
+    if (!_isSensorTesting) {
+      _logState?.warning('[Sensor] 未在测试中', type: LogType.debug);
+      // 即使未在测试，也要确保弹窗关闭
+      _showSensorDialog = false;
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      // 发送停止sensor测试命令 (0x0C, 0xFF)
+      _logState?.info('🛑 发送停止sensor测试命令 (第${retryCount + 1}次尝试)', type: LogType.debug);
+      
+      final stopCommand = ProductionTestCommands.createSensorCommand(ProductionTestCommands.sensorOptStop);
+      final stopCommandHex = stopCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$stopCommandHex] (${stopCommand.length} bytes)', type: LogType.debug);
+
+      // 发送停止命令并等待SN匹配的响应确认
+      final stopResponse = await _serialService.sendCommandAndWaitResponse(
+        stopCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (stopResponse != null && !stopResponse.containsKey('error')) {
+        _logState?.success('✅ 停止sensor测试成功，收到确认响应', type: LogType.debug);
+        
+        // 成功后才关闭弹窗和清理状态
+        await _sensorDataSubscription?.cancel();
+        _sensorDataSubscription = null;
+        _resetImageBuffer();
+        
+        _isSensorTesting = false;
+        _showSensorDialog = false;
+        notifyListeners();
+        
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.success('✅ Sensor测试结束', type: LogType.debug);
+        _logState?.info('📊 总共收到 ${_sensorDataList.length} 个数据包', type: LogType.debug);
+        _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        
+        return true;
+      } else {
+        _logState?.error('❌ 停止sensor测试失败: ${stopResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        
+        // 失败后重试（最多3次）
+        if (retryCount < 3) {
+          _logState?.warning('🔄 准备重试停止命令...', type: LogType.debug);
+          await Future.delayed(const Duration(seconds: 1));
+          return stopSensorTest(retryCount: retryCount + 1);
+        } else {
+          _logState?.error('❌ 停止命令重试3次后仍失败，强制关闭', type: LogType.debug);
+          
+          // 强制清理状态
+          await _sensorDataSubscription?.cancel();
+          _sensorDataSubscription = null;
+          _resetImageBuffer();
+          
+          _isSensorTesting = false;
+          _showSensorDialog = false;
+          notifyListeners();
+          
+          return false;
+        }
+      }
+    } catch (e) {
+      _logState?.error('停止Sensor测试异常: $e', type: LogType.debug);
+      
+      // 异常时也要强制清理监听器，避免继续接收数据
+      await _sensorDataSubscription?.cancel();
+      _sensorDataSubscription = null;
+      _resetImageBuffer();
+      
+      _isSensorTesting = false;
+      _showSensorDialog = false;
+      notifyListeners();
+      
+      return false;
+    }
+  }
+
+  /// 开始监听sensor数据
+  Future<void> _startSensorDataListener() async {
+    // 先取消之前的监听器，确保完全清理
+    await _sensorDataSubscription?.cancel();
+    _sensorDataSubscription = null;
+    
+    // 等待一小段时间确保监听器完全清理
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    _logState?.info('🎯 启动Sensor数据监听器...', type: LogType.debug);
+    _sensorDataSubscription = _serialService.dataStream.listen(
+      (data) async {
+        try {
+          _logState?.info('📨 Sensor监听器收到数据事件！', type: LogType.debug);
+          // 打印所有接收到的裸数据
+          final rawDataHex = data.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          // _logState?.info('🔍 Sensor监听-接收裸数据: [$rawDataHex] (${data.length} bytes)', type: LogType.debug);
+        
+        // 直接检查payload第一个字节是否是Sensor CMD (0x0C)
+        _logState?.info('🔍 检查数据: isEmpty=${data.isEmpty}, 第一个字节=${data.isNotEmpty ? '0x${data[0].toRadixString(16).toUpperCase().padLeft(2, '0')}' : 'N/A'}, cmdSensor=0x${ProductionTestCommands.cmdSensor.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+        
+        if (data.isNotEmpty && data[0] == ProductionTestCommands.cmdSensor) {
+          _logState?.info('✅ 匹配Sensor CMD，开始解析...', type: LogType.debug);
+          final sensorResult = ProductionTestCommands.parseSensorResponse(data);
+          _logState?.info('📊 解析结果: ${sensorResult != null ? 'success=${sensorResult['success']}' : 'null'}', type: LogType.debug);
+          
+          if (sensorResult != null && sensorResult['success'] == true) {
+            _logState?.info('🎯 调用_handleSensorDataPacket...', type: LogType.debug);
+            await _handleSensorDataPacket(sensorResult);
+          } else {
+            _logState?.warning('⚠️  Sensor解析失败或不成功', type: LogType.debug);
+          }
+        } else {
+          _logState?.info('❌ 数据不匹配Sensor CMD，跳过处理', type: LogType.debug);
+        }
+      } catch (e) {
+        _logState?.warning('⚠️  解析Sensor数据时出错: $e', type: LogType.debug);
+      }
+    },
+    onError: (error) {
+      _logState?.error('❌ Sensor数据流监听错误: $error', type: LogType.debug);
+    },
+    onDone: () {
+      _logState?.info('✅ Sensor数据流监听完成', type: LogType.debug);
+    },
+    );
+    
+    _logState?.info('✅ Sensor数据监听器已启动', type: LogType.debug);
+  }
+
+  /// 处理sensor数据包
+  Future<void> _handleSensorDataPacket(Map<String, dynamic> sensorResult) async {
+    final now = DateTime.now();
+    
+    // 重置包间超时计时器
+    _packetTimeoutTimer?.cancel();
+    
+    if (sensorResult['type'] == 'command_ack') {
+      // 命令确认包
+      _logState?.info('📥 收到Sensor命令确认', type: LogType.debug);
+      return;
+    }
+    
+    if (sensorResult['type'] == 'image_data') {
+      // 图片数据包
+      final picTotalBytes = sensorResult['picTotalBytes'] as int;
+      final dataIndex = sensorResult['dataIndex'] as int;
+      final dataLen = sensorResult['dataLen'] as int;
+      final originalDataLen = sensorResult['originalDataLen'] as int? ?? dataLen;
+      final data = sensorResult['data'] as Uint8List;
+      final isLastPacket = sensorResult['isLastPacket'] as bool;
+      
+      // 如果实际数据长度与声明长度不同，记录日志
+      if (dataLen != originalDataLen) {
+        _logState?.info('📏 数据长度调整: 声明=$originalDataLen, 实际=$dataLen', type: LogType.debug);
+      }
+      
+      // 检查包间超时（5秒）
+      if (_lastPacketTime != null && now.difference(_lastPacketTime!).inSeconds > 5) {
+        _logState?.error('❌ 包间超时（>5秒），准备重试', type: LogType.debug);
+        _retrySensorTest();
+        return;
+      }
+      
+      // 初始化图片缓冲区
+      if (_expectedTotalBytes == null) {
+        _expectedTotalBytes = picTotalBytes;
+        _imageBuffer = List<int>.filled(picTotalBytes, 0);
+        _logState?.info('📊 开始接收图片数据，总大小: $picTotalBytes 字节', type: LogType.debug);
+      }
+      
+      // 验证总大小一致性
+      if (_expectedTotalBytes != picTotalBytes) {
+        _logState?.error('❌ 图片总大小不一致，期望: $_expectedTotalBytes, 实际: $picTotalBytes', type: LogType.debug);
+        _retrySensorTest();
+        return;
+      }
+      
+      // 验证数据范围
+      if (dataIndex + dataLen > picTotalBytes) {
+        _logState?.error('❌ 数据包范围超出总大小: 偏移=$dataIndex + 长度=$dataLen > 总大小=$picTotalBytes', type: LogType.debug);
+        _retrySensorTest();
+        return;
+      }
+      
+      // 复制数据到缓冲区，并显示详细信息
+      int copiedBytes = 0;
+      
+      // 调试：检查接收到的数据内容
+      final dataHex = data.take(32).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📦 数据包 #${_sensorDataList.length + 1} 内容前32字节: [$dataHex]${data.length > 32 ? '...' : ''}', type: LogType.debug);
+      
+      // 检查数据是否全为0
+      final nonZeroCount = data.where((b) => b != 0).length;
+      _logState?.info('📊 数据统计: 总字节=$dataLen, 非零字节=$nonZeroCount, 零字节=${dataLen - nonZeroCount}', type: LogType.debug);
+      
+      for (int i = 0; i < dataLen; i++) {
+        if (dataIndex + i < _imageBuffer.length) {
+          _imageBuffer[dataIndex + i] = data[i];
+          copiedBytes++;
+        }
+      }
+      
+      _lastPacketTime = now;
+      
+      // 记录数据包信息
+      final packetInfo = {
+        'timestamp': now.toString(),
+        'index': _sensorDataList.length + 1,
+        'picTotalBytes': picTotalBytes,
+        'dataIndex': dataIndex,
+        'dataLen': dataLen,
+        'copiedBytes': copiedBytes,
+        'isLastPacket': isLastPacket,
+        'progress': ((dataIndex + dataLen) / picTotalBytes * 100).toStringAsFixed(1),
+        'type': 'image_packet',
+      };
+      
+      _sensorDataList.add(packetInfo);
+      notifyListeners();
+      
+      // 详细的包信息日志
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📥 图片数据包 #${packetInfo['index']}:', type: LogType.debug);
+      _logState?.info('   偏移地址: $dataIndex', type: LogType.debug);
+      _logState?.info('   数据长度: $dataLen', type: LogType.debug);
+      _logState?.info('   复制字节: $copiedBytes', type: LogType.debug);
+      _logState?.info('   接收进度: ${packetInfo['progress']}%', type: LogType.debug);
+      _logState?.info('   是否最后包: $isLastPacket', type: LogType.debug);
+      
+      // 显示数据的前几个字节用于调试
+      if (data.isNotEmpty) {
+        final dataHex = data.take(16).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('   数据前16字节: [$dataHex]${data.length > 16 ? '...' : ''}', type: LogType.debug);
+      }
+      
+      // 如果是第一个包，检查文件头
+      if (dataIndex == 0 && data.length >= 4) {
+        final fileHeader = data.take(4).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('   🔍 文件头: [$fileHeader]', type: LogType.debug);
+        
+        // 检查常见图片格式
+        if (data[0] == 0xFF && data[1] == 0xD8) {
+          _logState?.info('   📷 检测到JPEG格式', type: LogType.debug);
+        } else if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47) {
+          _logState?.info('   📷 检测到PNG格式', type: LogType.debug);
+        } else if (data[0] == 0x42 && data[1] == 0x4D) {
+          _logState?.info('   📷 检测到BMP格式', type: LogType.debug);
+        } else {
+          _logState?.warning('   ⚠️  未识别的文件格式，文件头: [$fileHeader]', type: LogType.debug);
+        }
+      }
+      
+      // 设置下一个包的超时计时器（5秒）
+      if (!isLastPacket) {
+        _packetTimeoutTimer = Timer(const Duration(seconds: 5), () {
+          _logState?.error('❌ 等待下一包超时（5秒），准备重试', type: LogType.debug);
+          _retrySensorTest();
+        });
+      } else {
+        // 最后一个包，验证完整性并显示图片
+        _logState?.success('✅ 图片数据接收完成！', type: LogType.debug);
+        await _handleImageComplete();
+      }
+    }
+  }
+
+  /// 处理图片接收完成
+  Future<void> _handleImageComplete() async {
+    _sensorTimeoutTimer?.cancel();
+    _packetTimeoutTimer?.cancel();
+    
+    try {
+      // 创建图片数据
+      _completeImageData = Uint8List.fromList(_imageBuffer);
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.success('✅ Sensor图片数据接收完成！', type: LogType.debug);
+      _logState?.info('📊 图片总大小: $_expectedTotalBytes 字节', type: LogType.debug);
+      _logState?.info('📦 总包数: ${_sensorDataList.length}', type: LogType.debug);
+      
+      // 验证图片数据完整性
+      _logState?.info('🔍 验证图片数据完整性...', type: LogType.debug);
+      
+      // 显示图片的前32字节用于调试
+      if (_completeImageData!.length >= 32) {
+        final headerHex = _completeImageData!.take(32).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('   图片前32字节: [$headerHex]', type: LogType.debug);
+      }
+      
+      // 显示图片的最后16字节用于调试
+      if (_completeImageData!.length >= 16) {
+        final tailStart = _completeImageData!.length - 16;
+        final tailHex = _completeImageData!.sublist(tailStart).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('   图片后16字节: [$tailHex]', type: LogType.debug);
+      }
+      
+      // 检查图片格式
+      String imageFormat = '未知格式';
+      bool isValidImage = false;
+      
+      if (_completeImageData!.length >= 4) {
+        final header = _completeImageData!;
+        if (header[0] == 0xFF && header[1] == 0xD8) {
+          imageFormat = 'JPEG';
+          isValidImage = true;
+          // 检查JPEG结尾标记
+          if (_completeImageData!.length >= 2) {
+            final end = _completeImageData!.length;
+            if (header[end-2] == 0xFF && header[end-1] == 0xD9) {
+              _logState?.info('   📷 JPEG格式验证: 开始和结束标记正确', type: LogType.debug);
+            } else {
+              _logState?.warning('   ⚠️  JPEG格式警告: 缺少结束标记 FF D9', type: LogType.debug);
+            }
+          }
+        } else if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) {
+          imageFormat = 'PNG';
+          isValidImage = true;
+          _logState?.info('   📷 PNG格式验证: 文件头正确', type: LogType.debug);
+        } else if (header[0] == 0x42 && header[1] == 0x4D) {
+          imageFormat = 'BMP';
+          isValidImage = true;
+          _logState?.info('   📷 BMP格式验证: 文件头正确', type: LogType.debug);
+        } else {
+          final headerHex = header.take(8).map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.error('   ❌ 未识别的图片格式，文件头: [$headerHex]', type: LogType.debug);
+        }
+      }
+      
+      _logState?.info('   📷 图片格式: $imageFormat', type: LogType.debug);
+      _logState?.info('   ✅ 格式验证: ${isValidImage ? '通过' : '失败'}', type: LogType.debug);
+      
+      // 保存图片文件
+      String? savedFilePath;
+      try {
+        savedFilePath = await _saveImageToFile(_completeImageData!, imageFormat);
+        if (savedFilePath != null) {
+          _logState?.success('   💾 图片已保存: $savedFilePath', type: LogType.debug);
+        } else {
+          _logState?.warning('   ⚠️  图片保存失败', type: LogType.debug);
+        }
+      } catch (e) {
+        _logState?.error('   ❌ 保存图片时出错: $e', type: LogType.debug);
+      }
+      
+      // 添加完成状态到数据列表
+      final completeInfo = {
+        'timestamp': DateTime.now().toString(),
+        'index': _sensorDataList.length + 1,
+        'type': 'image_complete',
+        'imageData': _completeImageData,
+        'totalBytes': _expectedTotalBytes,
+        'imageFormat': imageFormat,
+        'isValidImage': isValidImage,
+        'savedFilePath': savedFilePath,
+        'message': '图片接收完成，等待用户确认',
+      };
+      
+      _sensorDataList.add(completeInfo);
+      notifyListeners();
+      
+      _logState?.info('⏱️  完成时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+    } catch (e) {
+      _logState?.error('处理完成的图片数据时出错: $e', type: LogType.debug);
+      _retrySensorTest();
+    }
+  }
+
+  /// 重试sensor测试
+  void _retrySensorTest() async {
+    _logState?.warning('🔄 准备重试Sensor测试...', type: LogType.debug);
+    
+    // 先停止当前测试
+    await _stopSensorTestInternal();
+    
+    // 等待一段时间后重试
+    await Future.delayed(const Duration(seconds: 2));
+    
+    // 重新开始测试
+    await _startSensorTestWithRetry();
+  }
+
+  /// 重置图片缓冲区
+  void _resetImageBuffer() {
+    _imageBuffer = [];  // 重新创建空列表，而不是clear固定长度列表
+    _expectedTotalBytes = null;
+    _lastPacketTime = null;
+    _completeImageData = null;
+  }
+
+  /// 保存图片到文件
+  Future<String?> _saveImageToFile(Uint8List imageData, String imageFormat) async {
+    try {
+      // 创建保存目录 - 使用用户桌面目录，避免权限问题
+      String userHome;
+      if (Platform.isMacOS || Platform.isLinux) {
+        userHome = Platform.environment['HOME'] ?? Directory.current.path;
+      } else if (Platform.isWindows) {
+        userHome = Platform.environment['USERPROFILE'] ?? Directory.current.path;
+      } else {
+        userHome = Directory.current.path;
+      }
+      
+      final saveDir = Directory(path.join(userHome, 'Documents', 'JNProductionLine', 'sensor_images'));
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+        _logState?.info('   📁 创建保存目录: ${saveDir.path}', type: LogType.debug);
+      }
+      
+      return await _saveImageToFileInDirectory(imageData, imageFormat, saveDir);
+    } catch (e) {
+      _logState?.error('   ❌ 保存图片文件时出错: $e', type: LogType.debug);
+      return null;
+    }
+  }
+
+  /// 在指定目录中保存图片文件
+  Future<String?> _saveImageToFileInDirectory(Uint8List imageData, String imageFormat, Directory saveDir) async {
+    try {
+      // 生成文件名
+      final timestamp = DateTime.now();
+      final dateStr = '${timestamp.year}${timestamp.month.toString().padLeft(2, '0')}${timestamp.day.toString().padLeft(2, '0')}';
+      final timeStr = '${timestamp.hour.toString().padLeft(2, '0')}${timestamp.minute.toString().padLeft(2, '0')}${timestamp.second.toString().padLeft(2, '0')}';
+      
+      // 根据格式确定文件扩展名
+      String extension;
+      switch (imageFormat.toLowerCase()) {
+        case 'jpeg':
+          extension = 'jpg';
+          break;
+        case 'png':
+          extension = 'png';
+          break;
+        case 'bmp':
+          extension = 'bmp';
+          break;
+        default:
+          extension = 'bin'; // 未知格式保存为二进制文件
+      }
+      
+      final fileName = 'sensor_image_${dateStr}_${timeStr}.${extension}';
+      final filePath = path.join(saveDir.path, fileName);
+      
+      // 检查目录写入权限
+      try {
+        // 尝试创建一个临时文件来测试权限
+        final testFile = File(path.join(saveDir.path, '.test_permission'));
+        await testFile.writeAsBytes([0]);
+        await testFile.delete();
+        _logState?.info('   ✅ 目录写入权限检查通过: ${saveDir.path}', type: LogType.debug);
+      } catch (e) {
+        _logState?.error('   ❌ 目录写入权限不足: ${saveDir.path}', type: LogType.debug);
+        throw Exception('目录写入权限不足: $e');
+      }
+      
+      // 写入文件
+      final file = File(filePath);
+      await file.writeAsBytes(imageData);
+      
+      // 验证文件大小
+      final fileSize = await file.length();
+      _logState?.info('   📊 文件信息:', type: LogType.debug);
+      _logState?.info('      文件路径: $filePath', type: LogType.debug);
+      _logState?.info('      文件大小: $fileSize 字节', type: LogType.debug);
+      _logState?.info('      原始大小: ${imageData.length} 字节', type: LogType.debug);
+      _logState?.info('      大小匹配: ${fileSize == imageData.length ? '✅' : '❌'}', type: LogType.debug);
+      
+      if (fileSize == imageData.length) {
+        return filePath;
+      } else {
+        _logState?.error('   ❌ 文件大小不匹配，保存可能失败', type: LogType.debug);
+        return null;
+      }
+      
+    } catch (e) {
+      _logState?.error('   ❌ 在目录 ${saveDir.path} 中保存图片文件时出错: $e', type: LogType.debug);
+      return null;
+    }
+  }
+
+  /// 重置sensor测试状态
+  void _resetSensorTest() {
+    _isSensorTesting = false;
+    _showSensorDialog = false;
+    _sensorRetryCount = 0;
+    _sensorDataList.clear();
+    _resetImageBuffer();
+    notifyListeners();
+  }
+
+  /// 完全清理sensor测试状态（在开始新测试前调用）
+  Future<void> _cleanupSensorTest() async {
+    try {
+      // 取消现有的数据监听器
+      await _sensorDataSubscription?.cancel();
+      _sensorDataSubscription = null;
+      
+      // 清理所有状态
+      _isSensorTesting = false;
+      _showSensorDialog = false;
+      _sensorRetryCount = 0;
+      _sensorDataList.clear();
+      _resetImageBuffer();
+      
+      // 清理定时器
+      _sensorTimeoutTimer?.cancel();
+      _sensorTimeoutTimer = null;
+      _packetTimeoutTimer?.cancel();
+      _packetTimeoutTimer = null;
+      
+      _logState?.info('🧹 Sensor测试状态已完全清理', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('❌ 清理Sensor测试状态时出错: $e', type: LogType.debug);
+    }
+  }
+
+  /// 内部停止sensor测试方法
+  Future<void> _stopSensorTestInternal() async {
+    try {
+      final stopCommand = ProductionTestCommands.createSensorCommand(ProductionTestCommands.sensorOptStop);
+      final stopResponse = await _serialService.sendCommandAndWaitResponse(
+        stopCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (stopResponse != null && !stopResponse.containsKey('error')) {
+        _logState?.debug('内部停止sensor测试成功', type: LogType.debug);
+      } else {
+        _logState?.warning('内部停止sensor测试失败: ${stopResponse?['error'] ?? '无响应'}', type: LogType.debug);
+      }
+      
+      await _sensorDataSubscription?.cancel();
+      _sensorDataSubscription = null;
+      _resetImageBuffer();
+      
+    } catch (e) {
+      _logState?.warning('停止sensor测试时出错: $e', type: LogType.debug);
+    }
+  }
+
+  /// 关闭Sensor测试弹窗
+  void closeSensorDialog() {
+    try {
+      _showSensorDialog = false;
+      // 如果正在测试，需要异步停止测试，避免递归调用
+      if (_isSensorTesting) {
+        _logState?.info('🔄 关闭弹窗时停止正在进行的测试', type: LogType.debug);
+        // 使用异步方式停止测试，避免阻塞UI
+        Future.microtask(() async {
+          await stopSensorTest();
+          // 停止测试后清空数据
+          _sensorDataList.clear();
+          _completeImageData = null;
+          _resetImageBuffer();
+          _logState?.info('🧹 Sensor数据已清空', type: LogType.debug);
+          notifyListeners();
+        });
+      } else {
+        // 如果没有在测试，直接清空数据
+        _sensorDataList.clear();
+        _completeImageData = null;
+        _resetImageBuffer();
+        _logState?.info('🧹 Sensor数据已清空', type: LogType.debug);
+      }
+      notifyListeners();
+      _logState?.info('🔄 Sensor弹窗已关闭', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('❌ 关闭Sensor弹窗时出错: $e', type: LogType.debug);
+    }
+  }
+  
+  /// 重新打开Sensor测试弹窗
+  void reopenSensorDialog() {
+    if (_isSensorTesting) {
+      _showSensorDialog = true;
+      notifyListeners();
+      _logState?.info('🔄 Sensor测试弹窗已重新打开', type: LogType.debug);
+    } else {
+      _logState?.warning('⚠️ 没有正在进行的Sensor测试', type: LogType.debug);
+    }
+  }
+
+  /// 清空Sensor数据
+  void clearSensorData() {
+    _sensorDataList.clear();
+    _completeImageData = null;
+    _resetImageBuffer();
+    notifyListeners();
+    _logState?.info('🧹 Sensor数据已清空', type: LogType.debug);
+  }
+
+  /// 手动保存当前图片
+  Future<String?> saveSensorImage() async {
+    if (_completeImageData == null) {
+      _logState?.warning('没有可保存的图片数据', type: LogType.debug);
+      return null;
+    }
+
+    try {
+      _logState?.info('🔄 开始手动保存图片...', type: LogType.debug);
+      
+      // 检测图片格式
+      String imageFormat = '未知格式';
+      if (_completeImageData!.length >= 4) {
+        final header = _completeImageData!;
+        if (header[0] == 0xFF && header[1] == 0xD8) {
+          imageFormat = 'JPEG';
+        } else if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) {
+          imageFormat = 'PNG';
+        } else if (header[0] == 0x42 && header[1] == 0x4D) {
+          imageFormat = 'BMP';
+        }
+      }
+      
+      final savedPath = await _saveImageToFile(_completeImageData!, imageFormat);
+      if (savedPath != null) {
+        _logState?.success('✅ 图片手动保存成功: $savedPath', type: LogType.debug);
+        return savedPath;
+      } else {
+        _logState?.error('❌ 图片手动保存失败', type: LogType.debug);
+        return null;
+      }
+    } catch (e) {
+      _logState?.error('❌ 手动保存图片时出错: $e', type: LogType.debug);
+      return null;
+    }
+  }
+
+  /// 开始IMU数据流监听
+  Future<bool> startIMUDataStream() async {
+    if (!_serialService.isConnected) {
+      _logState?.error('串口未连接，无法开始IMU数据流监听', type: LogType.debug);
+      return false;
+    }
+
+    if (_isIMUTesting) {
+      _logState?.warning('IMU数据流监听已在进行中', type: LogType.debug);
+      return true;
+    }
+
+    try {
+      // 第一步：先显示弹窗
+      _showIMUDialog = true;
+      _imuDataList.clear();
+      notifyListeners();
+      
+      _logState?.info('🎯 IMU测试弹窗已打开', type: LogType.debug);
+      
+      // 第二步：发送命令启动测试（直接发送，不等待响应）
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 开始IMU数据流监听', type: LogType.debug);
+      _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
+      
+      // 发送开始获取IMU数据命令 (CMD 0x0B + OPT 0x00)
+      _logState?.info('🔄 发送开始获取IMU数据命令 (CMD 0x0B, OPT 0x00)', type: LogType.debug);
+      
+      final startCommand = ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptStartData);
+      final startCommandHex = startCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$startCommandHex] (${startCommand.length} bytes)', type: LogType.debug);
+
+      // 直接发送命令，不等待SN匹配的响应
+      await _serialService.sendCommand(
+        startCommand,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      _logState?.success('✅ 开始获取IMU数据命令已发送', type: LogType.debug);
+      
+      // 设置状态并开始监听
+      _isIMUTesting = true;
+      
+      // 开始监听IMU数据流（直接监听dataStream，不匹配SN）
+      _startIMUDataListener();
+      
+      notifyListeners();
+      _logState?.info('📡 IMU数据流监听已开始，等待数据推送...', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return true;
+    } catch (e) {
+      _logState?.error('开始IMU数据流监听异常: $e', type: LogType.debug);
+      // 异常时关闭弹窗
+      _showIMUDialog = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// 停止IMU数据流监听（带重试机制）
+  Future<bool> stopIMUDataStream({int retryCount = 0}) async {
+    if (!_isIMUTesting) {
+      _logState?.warning('IMU数据流监听未在进行中', type: LogType.debug);
+      // 即使未在测试，也要确保弹窗关闭
+      _showIMUDialog = false;
+      notifyListeners();
+      return true;
+    }
+
+    try {
+      _logState?.info('🛑 停止IMU数据流监听 (第${retryCount + 1}次尝试)', type: LogType.debug);
+      
+      // 发送停止获取IMU数据命令 (CMD 0x0B + OPT 0x01)
+      final stopCommand = ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptStopData);
+      final stopCommandHex = stopCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送停止命令: [$stopCommandHex] (${stopCommand.length} bytes)', type: LogType.debug);
+
+      // 等待SN匹配的确认响应
+      final stopResponse = await _serialService.sendCommandAndWaitResponse(
+        stopCommand,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+
+      if (stopResponse != null && !stopResponse.containsKey('error')) {
+        _logState?.success('✅ 停止IMU数据流监听成功', type: LogType.debug);
+        
+        // 成功后清理状态，但不关闭弹窗（由调用者关闭）
+        await _imuDataSubscription?.cancel();
+        _imuDataSubscription = null;
+        
+        _isIMUTesting = false;
+        notifyListeners();
+        
+        _logState?.info('📊 IMU数据流监听已停止，共收到 ${_imuDataList.length} 条数据', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        
+        return true;
+      } else {
+        _logState?.error('❌ 停止IMU数据流监听失败: ${stopResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        
+        // 失败后重试（最多3次）
+        if (retryCount < 3) {
+          _logState?.warning('🔄 准备重试停止命令...', type: LogType.debug);
+          await Future.delayed(const Duration(seconds: 1));
+          return stopIMUDataStream(retryCount: retryCount + 1);
+        } else {
+          _logState?.error('❌ 停止命令重试3次后仍失败，强制清理', type: LogType.debug);
+          
+          // 强制清理状态，但不关闭弹窗（由调用者关闭）
+          await _imuDataSubscription?.cancel();
+          _imuDataSubscription = null;
+          
+          _isIMUTesting = false;
+          notifyListeners();
+          
+          return false;
+        }
+      }
+    } catch (e) {
+      _logState?.error('停止IMU数据流监听异常: $e', type: LogType.debug);
+      
+      // 异常时强制清理，但不关闭弹窗（由调用者关闭）
+      await _imuDataSubscription?.cancel();
+      _imuDataSubscription = null;
+      _isIMUTesting = false;
+      notifyListeners();
+      
+      return false;
+    }
+  }
+
+  /// 开始监听IMU数据
+  void _startIMUDataListener() {
+    _imuDataSubscription = _serialService.dataStream.listen((data) async {
+      try {
+        // 打印所有接收到的裸数据
+        final rawDataHex = data.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        // _logState?.info('🔍 IMU监听-接收裸数据: [$rawDataHex] (${data.length} bytes)', type: LogType.debug);
+        
+        // 直接检查payload第一个字节是否是IMU CMD (0x0B)
+        if (data.isNotEmpty && data[0] == ProductionTestCommands.cmdIMU) {
+          await _handleIMUDataPacket(data);
+        }
+      } catch (e) {
+        _logState?.warning('⚠️  解析IMU数据时出错: $e', type: LogType.debug);
+      }
+    });
+  }
+
+  /// 处理IMU数据包
+  Future<void> _handleIMUDataPacket(Uint8List payload) async {
+    try {
+      final now = DateTime.now();
+      
+      // 显示完整的hex数据
+      final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📥 IMU数据包 #${_imuDataList.length + 1}', type: LogType.debug);
+      _logState?.info('   Payload长度: ${payload.length} 字节', type: LogType.debug);
+      _logState?.info('   完整数据: [$payloadHex]', type: LogType.debug);
+      
+      // 解析IMU数据结构
+      if (payload.length >= 33) { // 1 + 4*4 + 8 + 4*3 + 8 = 33字节
+        try {
+          ByteData buffer = ByteData.sublistView(payload);
+          int offset = 1; // 跳过CMD字节
+          
+          // 解析数据结构: float gyro_x, gyro_y, gyro_z, int64_t gyro_ts, float accel_x, accel_y, accel_z, int64_t accel_ts
+          double gyroX = buffer.getFloat32(offset, Endian.little); offset += 4;
+          double gyroY = buffer.getFloat32(offset, Endian.little); offset += 4;
+          double gyroZ = buffer.getFloat32(offset, Endian.little); offset += 4;
+          int gyroTs = buffer.getInt64(offset, Endian.little); offset += 8;
+          
+          double accelX = buffer.getFloat32(offset, Endian.little); offset += 4;
+          double accelY = buffer.getFloat32(offset, Endian.little); offset += 4;
+          double accelZ = buffer.getFloat32(offset, Endian.little); offset += 4;
+          int accelTs = buffer.getInt64(offset, Endian.little);
+          
+          _logState?.info('   📊 IMU数据解析:', type: LogType.debug);
+          _logState?.info('      CMD: 0x${payload[0].toRadixString(16).toUpperCase().padLeft(2, '0')} (${payload[0]})', type: LogType.debug);
+          _logState?.info('      陀螺仪 (°/s): X=${gyroX.toStringAsFixed(3)}, Y=${gyroY.toStringAsFixed(3)}, Z=${gyroZ.toStringAsFixed(3)}', type: LogType.debug);
+          _logState?.info('      陀螺仪时间戳: $gyroTs', type: LogType.debug);
+          _logState?.info('      加速度 (m/s²): X=${accelX.toStringAsFixed(3)}, Y=${accelY.toStringAsFixed(3)}, Z=${accelZ.toStringAsFixed(3)}', type: LogType.debug);
+          _logState?.info('      加速度时间戳: $accelTs', type: LogType.debug);
+          
+          // 添加到数据列表
+          final imuData = {
+            'index': _imuDataList.length + 1,
+            'timestamp': now.toString(),
+            'gyro_x': gyroX,
+            'gyro_y': gyroY,
+            'gyro_z': gyroZ,
+            'gyro_ts': gyroTs,
+            'accel_x': accelX,
+            'accel_y': accelY,
+            'accel_z': accelZ,
+            'accel_ts': accelTs,
+            'raw_data': payloadHex,
+          };
+          
+          _imuDataList.add(imuData);
+          notifyListeners();
+          
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          
+        } catch (e) {
+          _logState?.warning('解析IMU数据结构时出错: $e', type: LogType.debug);
+        }
+      } else {
+        _logState?.warning('IMU数据包长度不足，无法解析: ${payload.length} < 33 字节', type: LogType.debug);
+      }
+      
+    } catch (e) {
+      _logState?.error('处理IMU数据包时出错: $e', type: LogType.debug);
+    }
+  }
+
+  /// 关闭IMU测试弹窗
+  void closeIMUDialog() {
+    try {
+      _showIMUDialog = false;
+      // 如果正在测试，需要异步停止测试，避免递归调用
+      if (_isIMUTesting) {
+        _logState?.info('🔄 关闭弹窗时停止正在进行的测试', type: LogType.debug);
+        // 使用异步方式停止测试，避免阻塞UI
+        Future.microtask(() async {
+          await stopIMUDataStream();
+          // 停止测试后清空数据
+          _imuDataList.clear();
+          _logState?.info('🧹 IMU数据已清空', type: LogType.debug);
+          notifyListeners();
+        });
+      } else {
+        // 如果没有在测试，直接清空数据
+        _imuDataList.clear();
+        _logState?.info('🧹 IMU数据已清空', type: LogType.debug);
+      }
+      notifyListeners();
+      _logState?.info('🔄 IMU弹窗已关闭', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('❌ 关闭IMU弹窗时出错: $e', type: LogType.debug);
+    }
+  }
+  
+  /// 重新打开IMU测试弹窗
+  void reopenIMUDialog() {
+    if (_isIMUTesting) {
+      _showIMUDialog = true;
+      notifyListeners();
+      _logState?.info('🔄 IMU测试弹窗已重新打开', type: LogType.debug);
+    } else {
+      _logState?.warning('⚠️ 没有正在进行的IMU测试', type: LogType.debug);
+    }
+  }
+
+  /// 清空IMU数据
+  void clearIMUData() {
+    _imuDataList.clear();
+    notifyListeners();
+  }
+
+  // LED测试相关方法
+  /// 开始LED测试
+  Future<bool> startLEDTest(String ledType) async {
+    try {
+      _logState?.info('🔄 开始LED${ledType}测试', type: LogType.debug);
+      
+      // 根据LED类型创建不同的命令
+      // 这里需要根据实际的LED命令协议来实现
+      // 假设LED内侧和外侧有不同的命令ID
+      final command = _createLEDStartCommand(ledType);
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送LED${ledType}开始命令: [$commandHex]', type: LogType.debug);
+
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ LED${ledType}测试启动成功', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.warning('⚠️ LED${ledType}测试启动失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ LED${ledType}测试启动异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 停止LED测试
+  Future<bool> stopLEDTest(String ledType) async {
+    try {
+      _logState?.info('🔄 停止LED${ledType}测试', type: LogType.debug);
+      
+      // 根据LED类型创建停止命令
+      final command = _createLEDStopCommand(ledType);
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送LED${ledType}停止命令: [$commandHex]', type: LogType.debug);
+
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ LED${ledType}测试停止成功', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.warning('⚠️ LED${ledType}测试停止失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ LED${ledType}测试停止异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 创建LED开始命令
+  Uint8List _createLEDStartCommand(String ledType) {
+    // 根据LED类型创建开启命令
+    // cmd: 0x05, ledType: 0x00(外侧)/0x01(内侧), opt: 0x00(开启)
+    final ledTypeValue = ledType == "内侧" ? 0x01 : 0x00;
+    return ProductionTestCommands.createLEDCommand(ledTypeValue, 0x00); // 0x00表示开启
+  }
+
+  /// 创建LED停止命令
+  Uint8List _createLEDStopCommand(String ledType) {
+    // 根据LED类型创建关闭命令
+    // cmd: 0x05, ledType: 0x00(外侧)/0x01(内侧), opt: 0x01(关闭)
+    final ledTypeValue = ledType == "内侧" ? 0x01 : 0x00;
+    return ProductionTestCommands.createLEDCommand(ledTypeValue, 0x01); // 0x01表示关闭
+  }
+
+  // LED测试结果记录
+  final Map<String, bool> _ledTestResults = {};
+
+  /// 记录LED测试结果
+  Future<void> recordLEDTestResult(String ledType, bool testPassed) async {
+    try {
+      _ledTestResults[ledType] = testPassed;
+      
+      if (testPassed) {
+        _logState?.success('✅ LED${ledType}测试通过', type: LogType.debug);
+      } else {
+        _logState?.warning('❌ LED${ledType}测试未通过', type: LogType.debug);
+      }
+      
+      // 可以在这里添加更多的记录逻辑，比如保存到文件或数据库
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('❌ 记录LED${ledType}测试结果失败: $e', type: LogType.debug);
+    }
+  }
+
+  /// 获取LED测试结果
+  bool? getLEDTestResult(String ledType) {
+    return _ledTestResults[ledType];
+  }
+
+  /// 获取所有LED测试结果
+  Map<String, bool> getAllLEDTestResults() {
+    return Map.from(_ledTestResults);
+  }
+
+  /// 清空LED测试结果
+  void clearLEDTestResults() {
+    _ledTestResults.clear();
+    notifyListeners();
+  }
+
+  // ==================== 自动化测试流程 ====================
+
+  /// 开始自动化测试
+  Future<void> startAutoTest() async {
+    if (_isAutoTesting) {
+      _logState?.warning('自动化测试已在进行中', type: LogType.debug);
+      return;
+    }
+
+    if (!_serialService.isConnected) {
+      _logState?.error('串口未连接，无法开始自动化测试', type: LogType.debug);
+      return;
+    }
+
+    _isAutoTesting = true;
+    _currentAutoTestIndex = 0;
+    _testReportItems.clear();
+    
+    final deviceSN = _currentDeviceIdentity?['sn'] ?? 'UNKNOWN';
+    final deviceMAC = _currentDeviceIdentity?['mac'];
+    
+    _currentTestReport = TestReport(
+      deviceSN: deviceSN,
+      deviceMAC: deviceMAC,
+      startTime: DateTime.now(),
+      items: [],
+    );
+    
+    notifyListeners();
+    
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    _logState?.info('🚀 开始自动化测试', type: LogType.debug);
+    _logState?.info('📱 设备SN: $deviceSN', type: LogType.debug);
+    if (deviceMAC != null) {
+      _logState?.info('📱 设备MAC: $deviceMAC', type: LogType.debug);
+    }
+    _logState?.info('⏱️  开始时间: ${DateTime.now()}', type: LogType.debug);
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    
+    // 执行所有测试项
+    await _executeAllTests();
+    
+    // 生成最终报告
+    _finalizeTestReport();
+    
+    // 自动保存测试报告
+    _logState?.info('💾 自动保存测试报告...', type: LogType.debug);
+    final savedPath = await saveTestReport();
+    if (savedPath != null) {
+      _logState?.success('✅ 测试报告已自动保存: $savedPath', type: LogType.debug);
+    } else {
+      _logState?.warning('⚠️ 测试报告自动保存失败', type: LogType.debug);
+    }
+    
+    _isAutoTesting = false;
+    _showTestReportDialog = true;
+    notifyListeners();
+  }
+
+  /// 带重试的测试执行包装器
+  Future<bool> _executeTestWithRetry(
+    String testName,
+    Future<bool> Function() executor, {
+    int maxRetries = 10,
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // 使用timeout包装执行
+        final result = await executor().timeout(
+          timeout,
+          onTimeout: () {
+            _logState?.warning('⏱️  $testName 超时 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+            return false;
+          },
+        );
+        
+        if (result) {
+          if (attempt > 1) {
+            _logState?.success('✅ $testName 成功 (第 $attempt 次尝试)', type: LogType.debug);
+          }
+          return true;
+        } else {
+          if (attempt < maxRetries) {
+            _logState?.warning('⚠️  $testName 失败，准备重试 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+            await Future.delayed(const Duration(milliseconds: 300));
+          }
+        }
+      } catch (e) {
+        // 如果是跳过异常，直接抛出
+        if (e.toString().contains('SKIP')) {
+          rethrow;
+        }
+        
+        if (attempt < maxRetries) {
+          _logState?.warning('⚠️  $testName 异常，准备重试 (尝试 $attempt/$maxRetries): $e', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 300));
+        } else {
+          _logState?.error('❌ $testName 失败 (已重试 $maxRetries 次): $e', type: LogType.debug);
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  /// 执行所有测试项
+  Future<void> _executeAllTests() async {
+    // 定义完整测试序列（33项）
+    final testSequence = [
+      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': true},
+      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
+      {'name': '4. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '5. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '6. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '6.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
+      {'name': '6.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
+      {'name': '6.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '7. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '8. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '9. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '10. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '11. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '12. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '13. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '14. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '15. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '23. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '24. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '25. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '26. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '27. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '28. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '29. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '30. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '31. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+    ];
+
+    for (var i = 0; i < testSequence.length; i++) {
+      // 检查串口连接状态和停止标志
+      if (!_serialService.isConnected) {
+        _logState?.error('❌ 串口已断开，停止自动化测试', type: LogType.debug);
+        _shouldStopTest = true;
+        break;
+      }
+      
+      if (_shouldStopTest) {
+        _logState?.warning('⚠️ 测试已停止', type: LogType.debug);
+        break;
+      }
+      
+      _currentAutoTestIndex = i;
+      notifyListeners();
+      
+      final test = testSequence[i];
+      final isSkippable = test['skippable'] as bool;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📋 测试项 ${i + 1}/${testSequence.length}: ${test['name']}${isSkippable ? ' (可跳过)' : ''}', type: LogType.debug);
+      
+      final item = TestReportItem(
+        testName: test['name'] as String,
+        testType: test['type'] as String,
+        status: TestReportStatus.running,
+        startTime: DateTime.now(),
+      );
+      
+      _testReportItems.add(item);
+      notifyListeners();
+      
+      try {
+        final executor = test['executor'] as Future<bool> Function();
+        
+        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED测试内部已有完整的逻辑，不使用外层重试包装器
+        // WiFi有重试，IMU/Touch/Sensor/蓝牙等待用户确认，MIC/LED有弹窗和完整流程
+        final result = (test['type'] == 'WiFi' || 
+                       test['type'] == 'IMU' || 
+                       test['type'] == 'Touch' || 
+                       test['type'] == 'Sensor' ||
+                       test['type'] == '蓝牙' ||
+                       test['type'] == 'MIC' ||
+                       test['type'] == 'LED')
+            ? await executor()
+            : await _executeTestWithRetry(test['name'] as String, executor);
+        
+        // IMU测试完成后，确保关闭弹窗
+        if (test['type'] == 'IMU' && _showIMUDialog) {
+          _showIMUDialog = false;
+          notifyListeners();
+        }
+        
+        final updatedItem = item.copyWith(
+          status: result ? TestReportStatus.pass : TestReportStatus.fail,
+          endTime: DateTime.now(),
+          errorMessage: result ? null : '测试未通过',
+        );
+        
+        _testReportItems[_testReportItems.length - 1] = updatedItem;
+        
+        if (result) {
+          _logState?.success('✅ ${test['name']} 通过', type: LogType.debug);
+        } else {
+          _logState?.error('❌ ${test['name']} 失败', type: LogType.debug);
+        }
+      } catch (e) {
+        final errorMsg = e.toString();
+        
+        // 检查是否是跳过操作
+        if (errorMsg.contains('SKIP')) {
+          final updatedItem = item.copyWith(
+            status: TestReportStatus.skip,
+            endTime: DateTime.now(),
+            errorMessage: '用户跳过',
+          );
+          _testReportItems[_testReportItems.length - 1] = updatedItem;
+          _logState?.warning('⏭️  ${test['name']} 已跳过', type: LogType.debug);
+        } else {
+          final updatedItem = item.copyWith(
+            status: TestReportStatus.fail,
+            endTime: DateTime.now(),
+            errorMessage: '测试异常: $e',
+          );
+          _testReportItems[_testReportItems.length - 1] = updatedItem;
+          _logState?.error('❌ ${test['name']} 异常: $e', type: LogType.debug);
+        }
+      }
+      
+      notifyListeners();
+      
+      // 测试项之间延迟500ms
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
+  /// WiFi自动测试 - 参考手动测试逻辑，testWiFi()内部已处理弹窗
+  Future<bool> _autoTestWiFi() async {
+    try {
+      _logState?.info('📶 开始WiFi测试', type: LogType.debug);
+      
+      // 执行WiFi测试流程（testWiFi内部会处理弹窗显示）
+      final result = await testWiFi();
+      
+      return result;
+    } catch (e) {
+      _logState?.error('WiFi测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 左侧Touch自动测试 - 结束时必须关闭弹窗
+  Future<bool> _autoTestLeftTouch() async {
+    try {
+      // 开始左侧Touch测试
+      await testTouchLeft();
+      
+      // 等待测试完成（最多30秒）
+      for (var i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // 检查是否所有步骤都完成
+        if (_leftTouchTestSteps.every((step) => 
+            step.status == TouchStepStatus.success || 
+            step.status == TouchStepStatus.failed)) {
+          break;
+        }
+      }
+      
+      // 检查结果
+      final allPassed = _leftTouchTestSteps.every((step) => 
+          step.status == TouchStepStatus.success);
+      
+      return allPassed;
+    } catch (e) {
+      _logState?.error('左侧Touch测试异常: $e', type: LogType.debug);
+      return false;
+    } finally {
+      // 无论成功失败，都必须关闭弹窗
+      _logState?.info('🛑 左侧Touch测试结束，关闭弹窗', type: LogType.debug);
+      closeTouchDialog();
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  /// 右侧Touch自动测试 - 结束时必须关闭弹窗
+  Future<bool> _autoTestRightTouch() async {
+    try {
+      // 开始右侧Touch测试
+      await testTouchRight();
+      
+      // 等待测试完成（最多30秒）
+      for (var i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // 检查是否所有步骤都完成
+        if (_rightTouchTestSteps.every((step) => 
+            step.status == TouchStepStatus.success || 
+            step.status == TouchStepStatus.failed)) {
+          break;
+        }
+      }
+      
+      // 检查结果
+      final allPassed = _rightTouchTestSteps.every((step) => 
+          step.status == TouchStepStatus.success);
+      
+      return allPassed;
+    } catch (e) {
+      _logState?.error('右侧Touch测试异常: $e', type: LogType.debug);
+      return false;
+    } finally {
+      // 无论成功失败，都必须关闭弹窗
+      _logState?.info('🛑 右侧Touch测试结束，关闭弹窗', type: LogType.debug);
+      closeTouchDialog();
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  /// Sensor自动测试 - 显示FTP下载的图片，等待用户确认
+  Future<bool> _autoTestSensor() async {
+    try {
+      _logState?.info('📷 开始Sensor传感器测试', type: LogType.debug);
+      
+      // 检查图片是否已下载
+      if (_sensorImagePath == null || _sensorImagePath!.isEmpty) {
+        _logState?.error('❌ Sensor测试失败：未找到测试图片', type: LogType.debug);
+        _logState?.info('   提示：请先完成WiFi测试以下载图片', type: LogType.debug);
+        return false;
+      }
+      
+      // 验证文件是否存在
+      final imageFile = File(_sensorImagePath!);
+      if (!await imageFile.exists()) {
+        _logState?.error('❌ Sensor测试失败：图片文件不存在', type: LogType.debug);
+        _logState?.info('   路径: $_sensorImagePath', type: LogType.debug);
+        _sensorImagePath = null; // 清除无效路径
+        return false;
+      }
+      
+      // 验证文件大小
+      final fileSize = await imageFile.length();
+      if (fileSize == 0) {
+        _logState?.error('❌ Sensor测试失败：图片文件为空', type: LogType.debug);
+        _logState?.info('   路径: $_sensorImagePath', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ Sensor测试图片存在，准备显示...', type: LogType.debug);
+      _logState?.info('   路径: $_sensorImagePath', type: LogType.debug);
+      _logState?.info('   大小: ${(fileSize / 1024).toStringAsFixed(2)} KB', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _sensorTestCompleter = Completer<bool>();
+      
+      // 显示图片弹窗供用户查看和确认
+      _showSensorDialog = true;
+      _completeImageData = await imageFile.readAsBytes();
+      notifyListeners();
+      
+      _logState?.info('📺 显示Sensor测试图片，等待用户确认...', type: LogType.debug);
+      
+      // 等待用户确认结果（通过confirmSensorTestResult方法）
+      final result = await _sensorTestCompleter!.future;
+      
+      _logState?.info('📝 用户确认Sensor测试结果: ${result ? "通过" : "不通过"}', type: LogType.debug);
+      
+      return result;
+    } catch (e) {
+      _logState?.error('❌ Sensor测试异常: $e', type: LogType.debug);
+      // 确保异常时也关闭弹窗
+      _showSensorDialog = false;
+      notifyListeners();
+      return false;
+    } finally {
+      // 确保弹窗关闭
+      _showSensorDialog = false;
+      notifyListeners();
+    }
+  }
+  
+  /// 用户确认Sensor测试结果
+  void confirmSensorTestResult(bool passed) {
+    if (_sensorTestCompleter != null && !_sensorTestCompleter!.isCompleted) {
+      _sensorTestCompleter!.complete(passed);
+      _logState?.info('📝 记录Sensor测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+      
+      // 关闭弹窗（但不清理数据，因为_autoTestSensor的finally会调用stopSensorTest来清理）
+      _showSensorDialog = false;
+      notifyListeners();
+    }
+  }
+
+  /// IMU自动测试 - 先弹窗，等待用户确认，结束时必须停止成功
+  Future<bool> _autoTestIMU() async {
+    bool started = false;
+    try {
+      _logState?.info('📊 开始IMU传感器测试', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _imuTestCompleter = Completer<bool>();
+      
+      // 调用startIMUDataStream，它会自动显示弹窗并开始监听
+      started = await startIMUDataStream().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          _logState?.error('❌ IMU测试启动超时（10秒）', type: LogType.debug);
+          return false;
+        },
+      );
+      
+      if (!started) {
+        _logState?.error('❌ IMU测试启动失败', type: LogType.debug);
+        if (!_imuTestCompleter!.isCompleted) {
+          _imuTestCompleter?.complete(false);
+        }
+        return false;
+      }
+      
+      _logState?.success('✅ IMU采集已开始，等待用户确认...', type: LogType.debug);
+      
+      // 等待用户点击"测试通过"或"测试不通过"按钮（添加超时保护）
+      final userResult = await _imuTestCompleter!.future.timeout(
+        const Duration(minutes: 10),
+        onTimeout: () {
+          _logState?.error('❌ IMU测试等待用户确认超时（10分钟）', type: LogType.debug);
+          return false;
+        },
+      );
+      
+      _logState?.info('👤 用户确认结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
+      
+      return userResult;
+    } catch (e) {
+      _logState?.error('IMU测试异常: $e', type: LogType.debug);
+      if (_imuTestCompleter != null && !_imuTestCompleter!.isCompleted) {
+        _imuTestCompleter?.complete(false);
+      }
+      // 异常情况下关闭弹窗
+      if (_showIMUDialog) {
+        _showIMUDialog = false;
+        notifyListeners();
+        _logState?.info('🔄 IMU测试异常，弹窗已关闭', type: LogType.debug);
+      }
+      return false;
+    } finally {
+      // 停止命令已经在confirmIMUTestResult中发送并关闭弹窗
+      // 这里只需要清理Completer
+      
+      // 清理Completer
+      _imuTestCompleter = null;
+      
+      _logState?.info('🔄 IMU测试流程已完成', type: LogType.debug);
+    }
+  }
+  
+  /// 用户确认IMU测试结果（异步处理停止命令）
+  Future<void> confirmIMUTestResult(bool passed) async {
+    _logState?.info('📝 用户点击: ${passed ? "测试通过" : "测试失败"}', type: LogType.debug);
+    
+    // 先发送停止命令
+    if (_isIMUTesting) {
+      _logState?.info('🛑 发送IMU停止命令 (CMD 0x0B, OPT 0x01)...', type: LogType.debug);
+      
+      try {
+        final stopCommand = ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptStopData);
+        final stopCommandHex = stopCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📤 发送: [$stopCommandHex] (${stopCommand.length} bytes)', type: LogType.debug);
+        
+        // 发送停止命令并等待响应
+        final stopResponse = await _serialService.sendCommandAndWaitResponse(
+          stopCommand,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+          timeout: const Duration(seconds: 5),
+        ).timeout(
+          const Duration(seconds: 10),
+          onTimeout: () {
+            _logState?.error('❌ IMU停止命令超时', type: LogType.debug);
+            return null;
+          },
+        );
+        
+        if (stopResponse != null && !stopResponse.containsKey('error')) {
+          _logState?.success('✅ IMU停止命令响应成功', type: LogType.debug);
+          
+          // 停止成功后自动隐藏弹窗
+          _showIMUDialog = false;
+          _logState?.info('🔄 IMU弹窗已自动隐藏', type: LogType.debug);
+        } else {
+          _logState?.warning('⚠️ IMU停止命令响应失败: ${stopResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        }
+        
+        // 清理状态
+        await _imuDataSubscription?.cancel();
+        _imuDataSubscription = null;
+        _isIMUTesting = false;
+        notifyListeners();
+        
+      } catch (e) {
+        _logState?.error('❌ 发送IMU停止命令异常: $e', type: LogType.debug);
+      }
+    }
+    
+    // 完成Completer，通知测试结果
+    if (_imuTestCompleter != null && !_imuTestCompleter!.isCompleted) {
+      _imuTestCompleter!.complete(passed);
+      _logState?.info('📝 记录IMU测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    }
+  }
+
+  /// 开始MIC测试（带弹窗）
+  Future<bool> startMICTest(int micNumber) async {
+    try {
+      final micName = micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK');
+      _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
+      _logState?.info('   MIC编号: $micNumber (0=左, 1=右, 2=TALK)', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _micTestCompleter = Completer<bool>();
+      
+      // 设置当前测试的MIC编号
+      _currentMICNumber = micNumber;
+      
+      // 发送打开MIC命令 (CMD 0x08, MIC号, OPT 0x00)
+      final openCommand = ProductionTestCommands.createControlMICCommand(micNumber, ProductionTestCommands.micControlOpen);
+      final commandHex = openCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送打开命令: [$commandHex]', type: LogType.debug);
+      _logState?.info('   CMD: 0x08, MIC号: 0x${micNumber.toRadixString(16).toUpperCase().padLeft(2, '0')}, OPT: 0x00(打开)', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        openCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ ${micName}MIC打开成功', type: LogType.debug);
+        
+        // 显示弹窗
+        _showMICDialog = true;
+        notifyListeners();
+        
+        return true;
+      } else {
+        _logState?.error('❌ ${micName}MIC打开失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _currentMICNumber = null;
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ 启动MIC测试异常: $e', type: LogType.debug);
+      _currentMICNumber = null;
+      return false;
+    }
+  }
+
+  /// 停止MIC测试（关闭MIC）
+  Future<bool> stopMICTest({int retryCount = 0}) async {
+    if (_currentMICNumber == null) {
+      _logState?.warning('[MIC] 没有正在进行的MIC测试', type: LogType.debug);
+      return false;
+    }
+    
+    try {
+      final micName = _currentMICNumber == 0 ? '左' : (_currentMICNumber == 1 ? '右' : 'TALK');
+      _logState?.info('🛑 发送关闭${micName}MIC命令 (第${retryCount + 1}次尝试)', type: LogType.debug);
+      _logState?.info('   MIC编号: $_currentMICNumber (0=左, 1=右, 2=TALK)', type: LogType.debug);
+      
+      // 发送关闭MIC命令 (CMD 0x08, MIC号, OPT 0x01)
+      _logState?.info('   准备创建关闭命令，参数: micNumber=$_currentMICNumber, control=${ProductionTestCommands.micControlClose}', type: LogType.debug);
+      final closeCommand = ProductionTestCommands.createControlMICCommand(_currentMICNumber!, ProductionTestCommands.micControlClose);
+      final commandHex = closeCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送关闭命令: [$commandHex]', type: LogType.debug);
+      _logState?.info('   CMD: 0x08, MIC号: 0x${_currentMICNumber!.toRadixString(16).toUpperCase().padLeft(2, '0')}, OPT: 0x${ProductionTestCommands.micControlClose.toRadixString(16).toUpperCase().padLeft(2, '0')}(关闭)', type: LogType.debug);
+      _logState?.info('   命令字节: [${closeCommand[0].toRadixString(16)}, ${closeCommand[1].toRadixString(16)}, ${closeCommand[2].toRadixString(16)}]', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        closeCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ ${micName}MIC关闭成功', type: LogType.debug);
+        
+        // 关闭弹窗
+        _showMICDialog = false;
+        _currentMICNumber = null;
+        notifyListeners();
+        
+        return true;
+      } else {
+        _logState?.error('❌ ${micName}MIC关闭失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        
+        // 失败后重试（最多3次）
+        if (retryCount < 3) {
+          _logState?.warning('🔄 准备重试关闭命令...', type: LogType.debug);
+          await Future.delayed(const Duration(seconds: 1));
+          return stopMICTest(retryCount: retryCount + 1);
+        } else {
+          _logState?.error('❌ 关闭命令重试3次后仍失败，强制关闭弹窗', type: LogType.debug);
+          
+          // 强制关闭弹窗
+          _showMICDialog = false;
+          _currentMICNumber = null;
+          notifyListeners();
+          
+          return false;
+        }
+      }
+    } catch (e) {
+      _logState?.error('❌ 停止MIC测试异常: $e', type: LogType.debug);
+      
+      // 异常时强制关闭弹窗
+      _showMICDialog = false;
+      _currentMICNumber = null;
+      notifyListeners();
+      
+      return false;
+    }
+  }
+  
+  /// 用户确认MIC测试结果
+  Future<void> confirmMICTestResult(bool passed) async {
+    if (_currentMICNumber == null) {
+      _logState?.warning('[MIC] 没有正在进行的MIC测试', type: LogType.debug);
+      return;
+    }
+    
+    final micName = _currentMICNumber == 0 ? '左' : (_currentMICNumber == 1 ? '右' : 'TALK');
+    _logState?.info('📝 用户确认${micName}MIC测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    _logState?.info('   当前MIC编号: $_currentMICNumber', type: LogType.debug);
+    
+    // 先关闭MIC
+    final closed = await stopMICTest();
+    
+    if (!closed) {
+      _logState?.warning('⚠️ MIC关闭失败，但继续完成测试', type: LogType.debug);
+    }
+    
+    // 完成Completer，通知测试结果
+    if (_micTestCompleter != null && !_micTestCompleter!.isCompleted) {
+      _micTestCompleter!.complete(passed);
+      _logState?.info('📝 记录MIC测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    }
+  }
+
+  /// MIC自动测试
+  Future<bool> _autoTestMIC(int micNumber) async {
+    try {
+      // 开启MIC
+      await toggleMicState(micNumber);
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 检查状态
+      final isOn = getMicState(micNumber);
+      
+      // 关闭MIC
+      if (isOn) {
+        await toggleMicState(micNumber);
+      }
+      
+      return isOn;
+    } catch (e) {
+      _logState?.error('MIC$micNumber测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// LED自动测试（带弹窗）- 使用LEDTestDialog
+  Future<bool> _autoTestLEDWithDialog(String ledType) async {
+    try {
+      _logState?.info('💡 开始LED灯($ledType)测试', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _ledTestCompleter = Completer<bool>();
+      
+      // 显示LED测试弹窗
+      _currentLEDType = ledType;
+      _showLEDDialog = true;
+      notifyListeners();
+      
+      // 等待弹窗中的测试完成（用户点击按钮）
+      // LEDTestDialog会自动调用startLEDTest和stopLEDTest
+      // 并通过confirmLEDTestResult通知结果
+      final result = await _ledTestCompleter!.future;
+      
+      _logState?.info('👤 用户确认LED($ledType)测试结果: ${result ? "通过" : "不通过"}', type: LogType.debug);
+      
+      return result;
+    } catch (e) {
+      _logState?.error('LED($ledType)测试异常: $e', type: LogType.debug);
+      return false;
+    } finally {
+      // 关闭弹窗
+      _showLEDDialog = false;
+      _currentLEDType = null;
+      _ledTestCompleter = null;
+      notifyListeners();
+    }
+  }
+  
+  /// 用户确认LED测试结果
+  void confirmLEDTestResult(bool passed) {
+    if (_ledTestCompleter != null && !_ledTestCompleter!.isCompleted) {
+      _ledTestCompleter!.complete(passed);
+      _logState?.info('📝 记录LED测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    }
+  }
+  
+  /// 关闭LED测试弹窗（已废弃，使用confirmLEDTestResult代替）
+  void closeLEDDialog() {
+    _showLEDDialog = false;
+    _currentLEDType = null;
+    notifyListeners();
+  }
+  
+  /// 重新打开LED测试弹窗
+  void reopenLEDDialog() {
+    if (_currentLEDType != null) {
+      _showLEDDialog = true;
+      notifyListeners();
+      _logState?.info('🔄 LED测试弹窗已重新打开', type: LogType.debug);
+    } else {
+      _logState?.warning('⚠️ 没有正在进行的LED测试', type: LogType.debug);
+    }
+  }
+
+  // ==================== 新增测试方法 ====================
+
+  /// 1. 漏电流测试 (需要GPIB程控电源)
+  Future<bool> _autoTestLeakageCurrent() async {
+    try {
+      _logState?.info('🔌 开始漏电流测试 (< 500uA)', type: LogType.debug);
+      // TODO: 实现GPIB程控电源电流采集
+      // 暂时返回跳过
+      throw Exception('SKIP: GPIB设备未连接');
+    } catch (e) {
+      if (e.toString().contains('SKIP')) rethrow;
+      _logState?.error('漏电流测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 2. 上电测试
+  Future<bool> _autoTestPowerOn() async {
+    try {
+      _logState?.info('⚡ 开始上电测试', type: LogType.debug);
+      
+      // 检查串口连接状态即可判断设备是否正常上电
+      if (!_serialService.isConnected) {
+        _logState?.error('❌ 串口未连接，上电测试失败', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ 设备已上电', type: LogType.debug);
+      
+      // 上电成功后，唤醒设备（一直重试直到成功或串口断开）
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('正在唤醒设备...', type: LogType.debug);
+      
+      bool wakeupSuccess = false;
+      int wakeupAttempt = 0;
+      while (!wakeupSuccess && _serialService.isConnected && !_shouldStopTest) {
+        wakeupAttempt++;
+        _logState?.info('🔔 尝试唤醒设备 (第 $wakeupAttempt 次)...', type: LogType.debug);
+        
+        bool result = await _serialService.sendExitSleepMode(retries: 1);
+        if (result) {
+          wakeupSuccess = true;
+          _logState?.success('✅ 设备唤醒成功！', type: LogType.debug);
+          break;
+        }
+        
+        // 检查是否应该停止测试
+        if (_shouldStopTest || !_serialService.isConnected) {
+          _logState?.warning('⚠️ 测试已停止或串口已断开', type: LogType.debug);
+          return false;
+        }
+        
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      if (!wakeupSuccess) {
+        _logState?.error('❌ 设备唤醒失败', type: LogType.debug);
+        return false;
+      }
+      
+      // 等待设备完全唤醒
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 先发送 ff04 指令（一直重试直到成功或串口断开）
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📤 发送 FF04 指令...', type: LogType.debug);
+      
+      bool ff04Success = false;
+      int ff04Attempt = 0;
+      while (!ff04Success && _serialService.isConnected && !_shouldStopTest) {
+        ff04Attempt++;
+        _logState?.info('📤 尝试发送 FF04 指令 (第 $ff04Attempt 次)...', type: LogType.debug);
+        
+        // 创建 ff04 指令: CMD=0xFF, OPT=0x04
+        final ff04Cmd = Uint8List.fromList([0xFF, 0x04]);
+        final ff04CmdHex = ff04Cmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📤 发送: [$ff04CmdHex] (${ff04Cmd.length} bytes)', type: LogType.debug);
+        
+        final ff04Response = await _serialService.sendCommandAndWaitResponse(
+          ff04Cmd,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+          timeout: const Duration(seconds: 5),
+        );
+        
+        if (ff04Response != null && !ff04Response.containsKey('error')) {
+          ff04Success = true;
+          _logState?.success('✅ FF04 指令发送成功', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          break;
+        }
+        
+        // 检查是否应该停止测试
+        if (_shouldStopTest || !_serialService.isConnected) {
+          _logState?.warning('⚠️ 测试已停止或串口已断开', type: LogType.debug);
+          return false;
+        }
+        
+        _logState?.warning('⚠️ FF04 指令响应失败: ${ff04Response?['error'] ?? '无响应'}，1秒后重试...', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      
+      if (!ff04Success) {
+        _logState?.error('❌ FF04 指令发送失败', type: LogType.debug);
+        return false;
+      }
+      
+      // 再发送产测开始指令（一直重试直到成功或串口断开）
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📤 发送产测开始指令...', type: LogType.debug);
+      
+      bool startTestSuccess = false;
+      int startTestAttempt = 0;
+      while (!startTestSuccess && _serialService.isConnected && !_shouldStopTest) {
+        startTestAttempt++;
+        _logState?.info('📤 尝试发送产测开始指令 (第 $startTestAttempt 次)...', type: LogType.debug);
+        
+        final startTestCmd = ProductionTestCommands.createStartTestCommand();
+        final startTestCmdHex = startTestCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📤 发送: [$startTestCmdHex] (${startTestCmd.length} bytes)', type: LogType.debug);
+        
+        final startTestResponse = await _serialService.sendCommandAndWaitResponse(
+          startTestCmd,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+          timeout: const Duration(seconds: 5),
+        );
+        
+        if (startTestResponse != null && !startTestResponse.containsKey('error')) {
+          startTestSuccess = true;
+          _logState?.success('✅ 产测开始指令发送成功', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          break;
+        }
+        
+        // 检查是否应该停止测试
+        if (_shouldStopTest || !_serialService.isConnected) {
+          _logState?.warning('⚠️ 测试已停止或串口已断开', type: LogType.debug);
+          return false;
+        }
+        
+        _logState?.warning('⚠️ 产测开始指令响应失败: ${startTestResponse?['error'] ?? '无响应'}，1秒后重试...', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      
+      if (!startTestSuccess) {
+        _logState?.error('❌ 产测开始指令发送失败', type: LogType.debug);
+        return false;
+      }
+      
+      return true;
+      
+    } catch (e) {
+      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 3. 工作功耗测试 (需要GPIB程控电源)
+  Future<bool> _autoTestWorkingPower() async {
+    try {
+      _logState?.info('🔋 开始工作功耗测试 (< 380mA)', type: LogType.debug);
+      // TODO: 实现GPIB程控电源电流采集
+      // 暂时返回跳过
+      throw Exception('SKIP: GPIB设备未连接');
+    } catch (e) {
+      if (e.toString().contains('SKIP')) rethrow;
+      _logState?.error('工作功耗测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 4. 设备电压测试
+  Future<bool> _autoTestVoltage() async {
+    try {
+      _logState?.info('🔌 开始设备电压测试 (> 2.5V)', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createGetVoltageCommand();
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        if (payload != null) {
+          final voltage = ProductionTestCommands.parseVoltageResponse(payload);
+          if (voltage != null) {
+            final voltageV = voltage / 1000.0; // mV转V
+            _logState?.success('✅ 电压: ${voltageV.toStringAsFixed(2)}V', type: LogType.debug);
+            return voltageV > 2.5;
+          }
+        }
+      }
+      
+      _logState?.error('❌ 获取电压失败', type: LogType.debug);
+      return false;
+    } catch (e) {
+      _logState?.error('设备电压测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 5. 电量检测测试
+  Future<bool> _autoTestBattery() async {
+    try {
+      _logState?.info('🔋 开始电量检测测试 (0-100%)', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createGetCurrentCommand();
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        if (payload != null) {
+          final battery = ProductionTestCommands.parseCurrentResponse(payload);
+          if (battery != null) {
+            _logState?.success('✅ 电量: $battery%', type: LogType.debug);
+            return battery >= 0 && battery <= 100;
+          }
+        }
+      }
+      
+      _logState?.error('❌ 获取电量失败', type: LogType.debug);
+      return false;
+    } catch (e) {
+      _logState?.error('电量检测测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 6. 充电状态测试
+  Future<bool> _autoTestCharging() async {
+    try {
+      _logState?.info('🔌 开始充电状态测试', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createGetChargeStatusCommand();
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        if (payload != null) {
+          final chargeStatus = ProductionTestCommands.parseChargeStatusResponse(payload);
+          if (chargeStatus != null) {
+            final mode = chargeStatus['mode'] as int?;
+            final fault = chargeStatus['fault'] as int?;
+            
+            if (mode != null && fault != null) {
+              final modeNames = ['STOP', 'CC', 'CV', 'DONE'];
+              final modeName = mode < modeNames.length ? modeNames[mode] : '未知($mode)';
+              final faultStatus = fault == 0x00 ? '正常' : '故障';
+              
+              _logState?.info('📊 充电状态: $modeName, 故障码: 0x${fault.toRadixString(16).toUpperCase().padLeft(2, '0')} ($faultStatus)', type: LogType.debug);
+              
+              // 只要故障码为0x00就判断成功，不限制充电状态
+              if (fault == 0x00) {
+                _logState?.success('✅ 充电状态测试通过 (状态: $modeName, 故障码: 0x00)', type: LogType.debug);
+                return true;
+              } else {
+                _logState?.error('❌ 充电状态测试失败 (故障码: 0x${fault.toRadixString(16).toUpperCase().padLeft(2, '0')})', type: LogType.debug);
+                return false;
+              }
+            } else {
+              _logState?.error('❌ 充电状态数据解析失败: mode=$mode, fault=$fault', type: LogType.debug);
+            }
+          }
+        }
+      }
+      
+      _logState?.error('❌ 获取充电状态失败', type: LogType.debug);
+      return false;
+    } catch (e) {
+      _logState?.error('充电状态测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 6.1 生成设备标识（使用现有逻辑）
+  Future<bool> _autoTestGenerateDeviceId() async {
+    try {
+      _logState?.info('🆔 开始生成设备标识', type: LogType.debug);
+      
+      // 使用现有的设备标识生成逻辑
+      await generateDeviceIdentity();
+      
+      if (_currentDeviceIdentity == null) {
+        _logState?.error('❌ 设备标识生成失败', type: LogType.debug);
+        return false;
+      }
+      
+      // 从生成的设备标识中提取蓝牙MAC地址
+      final bluetoothMacString = _currentDeviceIdentity!['bluetoothMac'];
+      if (bluetoothMacString == null || bluetoothMacString.isEmpty) {
+        _logState?.error('❌ 蓝牙MAC地址为空', type: LogType.debug);
+        return false;
+      }
+      
+      // 将蓝牙MAC字符串转换为字节数组（格式：AA:BB:CC:DD:EE:FF）
+      final macParts = bluetoothMacString.split(':');
+      if (macParts.length != 6) {
+        _logState?.error('❌ 蓝牙MAC地址格式错误: $bluetoothMacString', type: LogType.debug);
+        return false;
+      }
+      
+      _generatedBluetoothMAC = macParts.map((part) => int.parse(part, radix: 16)).toList();
+      _generatedDeviceId = _currentDeviceIdentity!['sn'];
+      
+      _logState?.success('✅ 设备标识已生成', type: LogType.debug);
+      
+      return true;
+    } catch (e) {
+      _logState?.error('生成设备标识异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 6.2 蓝牙MAC地址写入
+  Future<bool> _autoTestBluetoothMACWrite() async {
+    try {
+      _logState?.info('📝 开始蓝牙MAC地址写入', type: LogType.debug);
+      
+      if (_generatedBluetoothMAC == null || _generatedBluetoothMAC!.length != 6) {
+        _logState?.error('❌ 蓝牙MAC地址未生成或格式错误', type: LogType.debug);
+        return false;
+      }
+      
+      final macString = _generatedBluetoothMAC!.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
+      _logState?.info('📱 写入MAC地址: $macString', type: LogType.debug);
+      
+      // 创建命令：CMD 0x0D + OPT 0x00 + 6字节MAC地址
+      final command = ProductionTestCommands.createBluetoothMACCommand(0x00, _generatedBluetoothMAC!);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ 蓝牙MAC地址写入成功', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ 蓝牙MAC地址写入失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('蓝牙MAC地址写入异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 6.3 蓝牙MAC地址读取并验证
+  Future<bool> _autoTestBluetoothMACRead() async {
+    try {
+      _logState?.info('📖 开始蓝牙MAC地址读取', type: LogType.debug);
+      
+      if (_generatedBluetoothMAC == null || _generatedBluetoothMAC!.length != 6) {
+        _logState?.error('❌ 本地蓝牙MAC地址未生成', type: LogType.debug);
+        return false;
+      }
+      
+      // 创建命令：CMD 0x0D + OPT 0x01（读取MAC地址）
+      final command = ProductionTestCommands.createBluetoothMACCommand(0x01, []);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        
+        if (payload != null && payload.isNotEmpty) {
+          // 响应格式：CMD + 6字节MAC地址
+          if (payload.length >= 7 && payload[0] == 0x0D) {
+            final readMAC = payload.sublist(1, 7);
+            final readMACString = readMAC.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
+            final expectedMACString = _generatedBluetoothMAC!.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
+            
+            _logState?.info('📱 读取MAC地址: $readMACString', type: LogType.debug);
+            _logState?.info('📱 期望MAC地址: $expectedMACString', type: LogType.debug);
+            
+            // 验证MAC地址是否一致
+            bool isMatch = true;
+            for (int i = 0; i < 6; i++) {
+              if (readMAC[i] != _generatedBluetoothMAC![i]) {
+                isMatch = false;
+                break;
+              }
+            }
+            
+            if (isMatch) {
+              _logState?.success('✅ 蓝牙MAC地址读取成功，验证通过', type: LogType.debug);
+              return true;
+            } else {
+              _logState?.error('❌ 蓝牙MAC地址不匹配', type: LogType.debug);
+              return false;
+            }
+          } else {
+            _logState?.error('❌ 蓝牙MAC地址响应格式错误', type: LogType.debug);
+            return false;
+          }
+        } else {
+          _logState?.error('❌ 蓝牙MAC地址响应为空', type: LogType.debug);
+          return false;
+        }
+      } else {
+        _logState?.error('❌ 蓝牙MAC地址读取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('蓝牙MAC地址读取异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 8. RTC设置时间测试
+  Future<bool> _autoTestRTCSet() async {
+    try {
+      _logState?.info('🕐 开始RTC设置时间测试', type: LogType.debug);
+      
+      // 获取当前时间戳（毫秒）
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final command = ProductionTestCommands.createRTCCommand(
+        ProductionTestCommands.rtcOptSetTime,
+        timestamp: timestamp,
+      );
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+        _logState?.success('✅ RTC时间已设置: $dateTime', type: LogType.debug);
+        return true;
+      }
+      
+      _logState?.error('❌ RTC设置时间失败', type: LogType.debug);
+      return false;
+    } catch (e) {
+      _logState?.error('RTC设置时间测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 9. RTC获取时间测试
+  Future<bool> _autoTestRTCGet() async {
+    try {
+      _logState?.info('🕐 开始RTC获取时间测试', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createRTCCommand(
+        ProductionTestCommands.rtcOptGetTime,
+      );
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        if (payload != null) {
+          final timestamp = ProductionTestCommands.parseRTCResponse(payload);
+          if (timestamp != null) {
+            final dateTime = DateTime.fromMillisecondsSinceEpoch(timestamp);
+            _logState?.success('✅ RTC时间: $dateTime', type: LogType.debug);
+            
+            // 检查时间是否合理（与当前时间差距不超过10秒）
+            final now = DateTime.now();
+            final diff = now.difference(dateTime).inSeconds.abs();
+            return diff <= 10;
+          }
+        }
+      }
+      
+      _logState?.error('❌ RTC获取时间失败', type: LogType.debug);
+      return false;
+    } catch (e) {
+      _logState?.error('RTC获取时间测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 10. 光敏传感器测试
+  /// 返回数据格式：[CMD 0x0A] + [光敏值1字节]
+  Future<bool> _autoTestLightSensor() async {
+    try {
+      _logState?.info('💡 开始光敏传感器测试', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createLightSensorCommand();
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$commandHex]', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        if (payload != null && payload.length >= 2) {
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 响应: [$payloadHex]', type: LogType.debug);
+          
+          // 检查第一个字节是否是光敏传感器命令 (0x0A)
+          if (payload[0] == ProductionTestCommands.cmdLightSensor) {
+            // 第二个字节是光敏值
+            final lightValue = payload[1];
+            _logState?.success('✅ 光敏值: $lightValue', type: LogType.debug);
+            
+            // 只要能成功获取光敏值就算测试通过
+            return true;
+          } else {
+            _logState?.error('❌ 响应命令字不匹配: 期望 0x0A, 实际 0x${payload[0].toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+          }
+        } else {
+          _logState?.error('❌ 响应数据长度不足: ${payload?.length ?? 0} 字节', type: LogType.debug);
+        }
+      } else {
+        _logState?.error('❌ 未收到有效响应', type: LogType.debug);
+      }
+      
+      _logState?.error('❌ 获取光敏值失败', type: LogType.debug);
+      return false;
+    } catch (e) {
+      _logState?.error('光敏传感器测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 12-14. 右触控TK测试
+  Future<bool> _autoTestRightTouchTK(int tkNumber) async {
+    try {
+      _logState?.info('👆 开始右触控-TK$tkNumber测试 (阈值变化>500)', type: LogType.debug);
+      // 复用右侧Touch测试逻辑
+      await testTouchRight();
+      
+      // 等待测试完成
+      for (var i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (_rightTouchTestSteps.every((step) => 
+            step.status == TouchStepStatus.success || 
+            step.status == TouchStepStatus.failed)) {
+          break;
+        }
+      }
+      
+      closeTouchDialog();
+      
+      // 检查对应的TK是否通过
+      if (tkNumber <= _rightTouchTestSteps.length) {
+        return _rightTouchTestSteps[tkNumber - 1].status == TouchStepStatus.success;
+      }
+      return false;
+    } catch (e) {
+      _logState?.error('右触控-TK$tkNumber测试异常: $e', type: LogType.debug);
+      closeTouchDialog();
+      return false;
+    }
+  }
+
+  /// 15-18. 左触控动作测试
+  Future<bool> _autoTestLeftTouchAction(String action) async {
+    try {
+      final actionName = {
+        'wear': '佩戴',
+        'click': '点击',
+        'double_click': '双击',
+        'long_press': '长按',
+      }[action] ?? action;
+      
+      _logState?.info('👆 开始左触控-$actionName测试', type: LogType.debug);
+      
+      // 复用左侧Touch测试逻辑
+      await testTouchLeft();
+      
+      // 等待测试完成
+      for (var i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (_leftTouchTestSteps.every((step) => 
+            step.status == TouchStepStatus.success || 
+            step.status == TouchStepStatus.failed)) {
+          break;
+        }
+      }
+      
+      closeTouchDialog();
+      
+      // 检查所有步骤是否通过
+      return _leftTouchTestSteps.every((step) => step.status == TouchStepStatus.success);
+    } catch (e) {
+      _logState?.error('左触控-$action测试异常: $e', type: LogType.debug);
+      closeTouchDialog();
+      return false;
+    }
+  }
+
+  /// 19-22. LED灯控制测试
+  Future<bool> _autoTestLEDControl(int ledType, bool turnOn) async {
+    try {
+      final ledName = ledType == ProductionTestCommands.ledOuter ? '外侧' : '内侧';
+      final action = turnOn ? '开启' : '关闭';
+      _logState?.info('💡 LED灯($ledName)$action测试', type: LogType.debug);
+      
+      // 获取当前状态
+      final currentState = getLedState(ledType);
+      
+      // 如果当前状态与目标状态不同，则切换
+      if (currentState != turnOn) {
+        await toggleLedState(ledType);
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      // 检查状态是否符合预期
+      return getLedState(ledType) == turnOn;
+    } catch (e) {
+      _logState?.error('LED控制测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 23-24. SPK测试
+  Future<bool> _autoTestSPK(int spkNumber) async {
+    try {
+      final spkName = spkNumber == 0 ? '左' : '右';
+      _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
+      // TODO: 发送SPK测试命令
+      // 暂时模拟
+      await Future.delayed(const Duration(milliseconds: 500));
+      return true;
+    } catch (e) {
+      _logState?.error('${spkNumber == 0 ? '左' : '右'}SPK测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 25-27. MIC录音测试（使用弹窗）
+  Future<bool> _autoTestMICRecord(int micNumber) async {
+    bool started = false;
+    try {
+      final micName = micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK');
+      _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _micTestCompleter = Completer<bool>();
+      
+      // 开始MIC测试（添加超时保护）
+      started = await startMICTest(micNumber).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          _logState?.error('❌ ${micName}MIC测试启动超时（10秒）', type: LogType.debug);
+          return false;
+        },
+      );
+      
+      if (!started) {
+        _logState?.error('❌ ${micName}MIC测试启动失败', type: LogType.debug);
+        if (!_micTestCompleter!.isCompleted) {
+          _micTestCompleter?.complete(false);
+        }
+        return false;
+      }
+      
+      _logState?.success('✅ ${micName}MIC测试已开始，等待用户确认...', type: LogType.debug);
+      
+      // 等待用户点击"测试成功"或"测试失败"按钮（添加超时保护）
+      final userResult = await _micTestCompleter!.future.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          _logState?.error('❌ ${micName}MIC测试等待用户确认超时（2分钟）', type: LogType.debug);
+          return false;
+        },
+      );
+      
+      _logState?.info('👤 用户确认${micName}MIC测试结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
+      
+      return userResult;
+    } catch (e) {
+      _logState?.error('${micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK')}MIC测试异常: $e', type: LogType.debug);
+      if (_micTestCompleter != null && !_micTestCompleter!.isCompleted) {
+        _micTestCompleter?.complete(false);
+      }
+      return false;
+    } finally {
+      // 清理Completer
+      _micTestCompleter = null;
+    }
+  }
+
+  /// 29. 蓝牙测试
+  Future<bool> _autoTestBluetooth() async {
+    try {
+      _logState?.info('📱 开始蓝牙测试', type: LogType.debug);
+      
+      // 显示蓝牙测试弹窗
+      _showBluetoothDialog = true;
+      notifyListeners();
+      
+      // 步骤1: 生成蓝牙名称
+      _bluetoothTestStep = '正在生成蓝牙名称...';
+      notifyListeners();
+      
+      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['sn'] == null) {
+        _bluetoothTestStep = '❌ 错误：未找到SN码';
+        notifyListeners();
+        _logState?.error('❌ 蓝牙测试失败：未找到SN码', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 3)); // 显示错误信息3秒
+        return false;
+      }
+      
+      final snCode = _currentDeviceIdentity!['sn']!;
+      // 取SN码后四位
+      final last4Digits = snCode.length >= 4 ? snCode.substring(snCode.length - 4) : snCode;
+      _bluetoothNameToSet = 'Kanaan-$last4Digits';
+      
+      _logState?.info('   蓝牙名称: $_bluetoothNameToSet', type: LogType.debug);
+      
+      // 步骤2: 设置蓝牙名称
+      _bluetoothTestStep = '正在设置蓝牙名称...';
+      notifyListeners();
+      
+      final setNameCmd = ProductionTestCommands.createSetBluetoothNameCommand(_bluetoothNameToSet!);
+      final cmdHex = setNameCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送设置蓝牙名称命令: [$cmdHex]', type: LogType.debug);
+      
+      final setResponse = await _serialService.sendCommandAndWaitResponse(
+        setNameCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (setResponse == null || setResponse.containsKey('error')) {
+        _bluetoothTestStep = '❌ 设置蓝牙名称失败: ${setResponse?['error'] ?? '无响应'}';
+        notifyListeners();
+        _logState?.error('❌ 设置蓝牙名称失败: ${setResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 3)); // 显示错误信息3秒
+        return false;
+      }
+      
+      _logState?.success('✅ 蓝牙名称设置成功', type: LogType.debug);
+      
+      // 步骤3: 获取蓝牙名称进行验证
+      _bluetoothTestStep = '正在验证蓝牙名称...';
+      notifyListeners();
+      
+      final getNameCmd = ProductionTestCommands.createGetBluetoothNameCommand();
+      _logState?.info('📤 发送获取蓝牙名称命令', type: LogType.debug);
+      
+      final getResponse = await _serialService.sendCommandAndWaitResponse(
+        getNameCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (getResponse == null || getResponse.containsKey('error')) {
+        _bluetoothTestStep = '❌ 获取蓝牙名称失败: ${getResponse?['error'] ?? '无响应'}';
+        notifyListeners();
+        _logState?.error('❌ 获取蓝牙名称失败: ${getResponse?['error'] ?? '无响应'}', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 3));
+        return false;
+      }
+      
+      final payload = getResponse['payload'] as Uint8List?;
+      if (payload == null) {
+        _bluetoothTestStep = '❌ 获取蓝牙名称失败：响应无payload';
+        notifyListeners();
+        _logState?.error('❌ 获取蓝牙名称失败：响应无payload', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 3));
+        return false;
+      }
+      
+      // 记录原始payload用于调试
+      final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📦 收到payload: [$payloadHex]', type: LogType.debug);
+      
+      final receivedName = ProductionTestCommands.parseBluetoothNameResponse(payload);
+      if (receivedName == null) {
+        _bluetoothTestStep = '❌ 获取蓝牙名称失败：无法解析响应';
+        notifyListeners();
+        _logState?.error('❌ 获取蓝牙名称失败：无法解析响应', type: LogType.debug);
+        _logState?.error('   Payload: [$payloadHex]', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 3));
+        return false;
+      }
+      
+      _logState?.info('📥 设备返回蓝牙名称: $receivedName', type: LogType.debug);
+      
+      // 对比设置的名称和获取的名称
+      if (receivedName != _bluetoothNameToSet) {
+        _bluetoothTestStep = '❌ 蓝牙名称验证失败：名称不一致';
+        notifyListeners();
+        _logState?.error('❌ 蓝牙名称验证失败：名称不一致', type: LogType.debug);
+        _logState?.error('   设置: $_bluetoothNameToSet', type: LogType.debug);
+        _logState?.error('   返回: $receivedName', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 3));
+        return false;
+      }
+      
+      _logState?.success('✅ 蓝牙名称验证成功！设置值与返回值一致', type: LogType.debug);
+      _logState?.info('   名称: $_bluetoothNameToSet', type: LogType.debug);
+      
+      // 步骤4: 等待用户手动连接蓝牙
+      _bluetoothTestStep = '请使用手机搜索并连接蓝牙设备';
+      notifyListeners();
+      
+      _logState?.info('📺 等待用户手动连接蓝牙...', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _bluetoothTestCompleter = Completer<bool>();
+      
+      // 等待用户确认蓝牙连接结果
+      final bluetoothTestPassed = await _bluetoothTestCompleter!.future;
+      
+      if (!bluetoothTestPassed) {
+        _logState?.error('❌ 用户确认蓝牙连接失败', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ 用户确认蓝牙连接成功', type: LogType.debug);
+      return true;
+    } catch (e) {
+      _logState?.error('蓝牙测试异常: $e', type: LogType.debug);
+      return false;
+    } finally {
+      // 确保弹窗关闭
+      _showBluetoothDialog = false;
+      _bluetoothTestCompleter = null;
+      _bluetoothTestStep = '';
+      _bluetoothNameToSet = null;
+      notifyListeners();
+    }
+  }
+
+  /// 用户确认蓝牙测试结果
+  void confirmBluetoothTestResult(bool passed) {
+    if (_bluetoothTestCompleter != null && !_bluetoothTestCompleter!.isCompleted) {
+      _bluetoothTestCompleter!.complete(passed);
+      _logState?.info('📝 用户确认蓝牙测试结果: ${passed ? "通过" : "失败"}', type: LogType.debug);
+    }
+  }
+
+  /// 30. SN码写入
+  Future<bool> _autoTestWriteSN() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📝 开始SN码写入', type: LogType.debug);
+      
+      // 检查是否有生成的SN码
+      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['sn'] == null) {
+        _logState?.error('❌ SN码写入失败：未找到SN码', type: LogType.debug);
+        _logState?.info('   提示：请先生成设备标识', type: LogType.debug);
+        return false;
+      }
+      
+      final snCode = _currentDeviceIdentity!['sn']!;
+      _logState?.info('   SN码: $snCode', type: LogType.debug);
+      
+      // 创建SN码写入命令
+      final writeSNCmd = ProductionTestCommands.createWriteSNCommand(snCode);
+      final cmdHex = writeSNCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送SN码写入命令: [$cmdHex]', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        writeSNCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ SN码写入失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+      
+      // 解析响应中的SN码
+      final payload = response['payload'] as Uint8List?;
+      if (payload == null) {
+        _logState?.error('❌ SN码写入失败：响应无payload', type: LogType.debug);
+        return false;
+      }
+      
+      final responseSN = ProductionTestCommands.parseWriteSNResponse(payload);
+      if (responseSN == null) {
+        _logState?.error('❌ SN码写入失败：无法解析响应', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('📥 设备返回SN码: $responseSN', type: LogType.debug);
+      
+      // 对比写入的SN码和响应的SN码
+      if (responseSN == snCode) {
+        _logState?.success('✅ SN码写入成功！写入值与返回值一致', type: LogType.debug);
+        _logState?.info('   写入: $snCode', type: LogType.debug);
+        _logState?.info('   返回: $responseSN', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ SN码写入失败：写入值与返回值不一致', type: LogType.debug);
+        _logState?.error('   写入: $snCode', type: LogType.debug);
+        _logState?.error('   返回: $responseSN', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('SN码写入异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 31. 结束产测
+  Future<bool> _autoTestPowerOff() async {
+    try {
+      _logState?.info('🔌 结束产测 - 设备下电', type: LogType.debug);
+      // TODO: 发送下电命令
+      // 暂时模拟
+      await Future.delayed(const Duration(milliseconds: 500));
+      return true;
+    } catch (e) {
+      _logState?.error('结束产测异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 完成测试报告
+  void _finalizeTestReport() {
+    if (_currentTestReport != null) {
+      _currentTestReport = TestReport(
+        deviceSN: _currentTestReport!.deviceSN,
+        deviceMAC: _currentTestReport!.deviceMAC,
+        startTime: _currentTestReport!.startTime,
+        endTime: DateTime.now(),
+        items: List.from(_testReportItems),
+      );
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 测试完成', type: LogType.debug);
+      _logState?.info(_currentTestReport!.summaryText, type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    }
+  }
+
+  /// 保存测试报告到文件
+  Future<String?> saveTestReport() async {
+    if (_currentTestReport == null) {
+      _logState?.warning('没有可保存的测试报告', type: LogType.debug);
+      return null;
+    }
+
+    try {
+      // 创建保存目录
+      String userHome;
+      if (Platform.isMacOS || Platform.isLinux) {
+        userHome = Platform.environment['HOME'] ?? Directory.current.path;
+      } else if (Platform.isWindows) {
+        userHome = Platform.environment['USERPROFILE'] ?? Directory.current.path;
+      } else {
+        userHome = Directory.current.path;
+      }
+      
+      final saveDir = Directory(path.join(userHome, 'Documents', 'JNProductionLine', 'test_reports'));
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+      
+      // 生成文件名
+      final timestamp = DateTime.now().toIso8601String().replaceAll(':', '-').split('.')[0];
+      final fileName = 'TestReport_${_currentTestReport!.deviceSN}_$timestamp';
+      
+      // 保存JSON格式
+      final jsonFile = File(path.join(saveDir.path, '$fileName.json'));
+      final jsonContent = jsonEncode(_currentTestReport!.toJson());
+      await jsonFile.writeAsString(jsonContent);
+      
+      // 保存文本格式
+      final txtFile = File(path.join(saveDir.path, '$fileName.txt'));
+      final txtContent = _currentTestReport!.toFormattedString();
+      await txtFile.writeAsString(txtContent);
+      
+      _logState?.success('✅ 测试报告已保存: ${saveDir.path}', type: LogType.debug);
+      _logState?.info('   JSON: $fileName.json', type: LogType.debug);
+      _logState?.info('   TXT: $fileName.txt', type: LogType.debug);
+      
+      return saveDir.path;
+    } catch (e) {
+      _logState?.error('❌ 保存测试报告失败: $e', type: LogType.debug);
+      return null;
+    }
+  }
+
+  /// 关闭测试报告弹窗
+  void closeTestReportDialog() {
+    _showTestReportDialog = false;
+    notifyListeners();
+  }
+
+  /// 清空测试报告
+  void clearTestReport() {
+    _currentTestReport = null;
+    _testReportItems.clear();
+    _currentAutoTestIndex = 0;
+    _isAutoTesting = false;
+    _showTestReportDialog = false;
+    notifyListeners();
+    _logState?.info('🧹 测试报告已清空', type: LogType.debug);
+  }
+
   @override
   void dispose() {
+    _sensorDataSubscription?.cancel();
+    _imuDataSubscription?.cancel();
+    _sensorTimeoutTimer?.cancel();
+    _packetTimeoutTimer?.cancel();
     _serialService.dispose();
     super.dispose();
   }

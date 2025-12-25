@@ -8,7 +8,7 @@ void main() async {
   
   // 设置配置
   await SNMacConfig.setProductLine('637'); // AI拍摄眼镜
-  await SNMacConfig.setFactory('1'); // 代工厂A
+  await SNMacConfig.setFactory('1'); // 工厂A
   await SNMacConfig.setProductionLine(1); // 产线1
   
   print('当前配置:');

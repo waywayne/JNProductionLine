@@ -12,8 +12,8 @@ class SNMacConfig {
   
   // 工厂代码
   static const Map<String, String> factories = {
-    '1': '代工厂A',
-    '2': '代工厂B',
+    '1': '工厂A',
+    '2': '工厂B',
   };
   
   // WiFi MAC地址范围: 48-08-EB-50-00-00 到 48-08-EB-5F-FF-FF

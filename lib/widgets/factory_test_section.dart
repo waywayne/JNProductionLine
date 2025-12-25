@@ -70,32 +70,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
               // Tab 1: 自动测试
               Consumer<TestState>(
                 builder: (context, state, _) {
-                  // 如果没有连接或没有测试组，显示提示信息
-                  if (state.currentTestGroup == null) {
-                    return Center(
-                      child: Text(
-                        '请先连接串口设备',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    );
-                  }
-                  
-                  // 显示单个测试组
-                  return Column(
-                    children: [
-                      Expanded(
-                        child: _TestGroupWidget(
-                          group: state.currentTestGroup!,
-                          onStart: state.startTest,
-                          testState: state,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                  );
+                  return _buildAutoTestTab(context, state);
                 },
               ),
               // Tab 2: 手动测试
@@ -105,6 +80,408 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
         ),
       ],
     );
+  }
+
+  Widget _buildAutoTestTab(BuildContext context, TestState state) {
+    if (!state.isConnected) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.cable, size: 64, color: Colors.grey[400]),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '请先连接串口设备',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '连接设备后即可开始自动化测试',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.grey[50]!, Colors.white],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 设备信息卡片 - 优化样式
+            if (state.currentDeviceIdentity != null)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.blue[600]!, Colors.blue[400]!],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.blue.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.devices, color: Colors.white, size: 32),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '当前测试设备',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white70,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'SN: ${state.currentDeviceIdentity!['sn'] ?? 'N/A'}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (state.currentDeviceIdentity!['mac'] != null)
+                            Text(
+                              'MAC: ${state.currentDeviceIdentity!['mac']}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.white,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            
+            const SizedBox(height: 20),
+            
+            // 自动化测试按钮 - 优化样式
+            Container(
+              height: 64,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: state.isAutoTesting
+                    ? []
+                    : [
+                        BoxShadow(
+                          color: Colors.green.withOpacity(0.3),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+              ),
+              child: ElevatedButton(
+                onPressed: state.isAutoTesting ? null : () => state.startAutoTest(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: state.isAutoTesting ? Colors.grey[400] : Colors.green[600],
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (state.isAutoTesting)
+                      const SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    else
+                      const Icon(Icons.play_circle_filled, size: 32),
+                    const SizedBox(width: 12),
+                    Text(
+                      state.isAutoTesting ? '测试进行中...' : '开始自动化测试',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 20),
+          
+          // 测试进度显示 - 优化样式
+          if (state.isAutoTesting || state.testReportItems.isNotEmpty)
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // 进度标题 - 优化样式
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.grey[100]!, Colors.grey[50]!],
+                        ),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(12),
+                          topRight: Radius.circular(12),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[100],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(Icons.assignment, size: 20, color: Colors.blue[700]),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
+                            '测试进度',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (state.testReportItems.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.green[50],
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.green[200]!),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${state.testReportItems.where((item) => item.status.toString().contains('pass')).length}/${state.testReportItems.length}',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.green[700],
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    
+                    // 测试项列表 - 优化样式
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: state.testReportItems.length,
+                        separatorBuilder: (context, index) => const SizedBox(height: 4),
+                        itemBuilder: (context, index) {
+                          final item = state.testReportItems[index];
+                          final isCurrentTest = state.isAutoTesting && index == state.currentAutoTestIndex;
+                          
+                          return Container(
+                            decoration: BoxDecoration(
+                              color: isCurrentTest ? Colors.blue[50] : Colors.grey[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isCurrentTest ? Colors.blue[300]! : Colors.grey[200]!,
+                                width: isCurrentTest ? 2 : 1,
+                              ),
+                            ),
+                            child: ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              leading: _buildStatusIcon(item.status, isCurrentTest),
+                              title: Text(
+                                item.testName,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: isCurrentTest ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                              subtitle: item.errorMessage != null
+                                  ? Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        item.errorMessage!,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.red[700],
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    )
+                                  : null,
+                              trailing: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: _getStatusColor(item.status).withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: _getStatusColor(item.status),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Text(
+                                  item.statusText,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: _getStatusColor(item.status),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusIcon(dynamic status, bool isCurrentTest) {
+    if (isCurrentTest) {
+      return Container(
+        width: 28,
+        height: 28,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.blue[100],
+          shape: BoxShape.circle,
+        ),
+        child: const CircularProgressIndicator(
+          strokeWidth: 2.5,
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+        ),
+      );
+    }
+
+    final statusStr = status.toString();
+    if (statusStr.contains('pass')) {
+      return Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: Colors.green[50],
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(Icons.check_circle, color: Colors.green, size: 24),
+      );
+    } else if (statusStr.contains('fail')) {
+      return Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: Colors.red[50],
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(Icons.cancel, color: Colors.red, size: 24),
+      );
+    } else if (statusStr.contains('skip')) {
+      return Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: Colors.orange[50],
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.skip_next, color: Colors.orange[700], size: 24),
+      );
+    } else if (statusStr.contains('running')) {
+      return Container(
+        width: 28,
+        height: 28,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.blue[100],
+          shape: BoxShape.circle,
+        ),
+        child: const CircularProgressIndicator(
+          strokeWidth: 2.5,
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+        ),
+      );
+    } else {
+      return Icon(Icons.radio_button_unchecked, color: Colors.grey[400], size: 24);
+    }
+  }
+
+  Color _getStatusColor(dynamic status) {
+    final statusStr = status.toString();
+    if (statusStr.contains('pass')) {
+      return Colors.green;
+    } else if (statusStr.contains('fail')) {
+      return Colors.red;
+    } else if (statusStr.contains('skip')) {
+      return Colors.orange;
+    } else if (statusStr.contains('running')) {
+      return Colors.blue;
+    } else {
+      return Colors.grey;
+    }
   }
 }
 

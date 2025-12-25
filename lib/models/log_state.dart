@@ -40,7 +40,7 @@ class LogEntry {
 
 class LogState extends ChangeNotifier {
   final List<LogEntry> _logs = [];
-  static const int maxLogs = 1000; // 最多保留1000条日志
+  static const int maxLogs = 1000; // 最多保留10000条日志
   bool _showRawHex = false; // 是否显示原始 hex 数据
 
   List<LogEntry> get logs => _logs;

@@ -23,6 +23,7 @@ class SerialService {
   Uint8List _buffer = Uint8List(0);
   int _packetCount = 0;
   
+  
   // 序列号跟踪
   int _sequenceNumber = 0;
   final Map<int, Completer<Map<String, dynamic>?>> _pendingResponses = {};
@@ -210,22 +211,43 @@ class SerialService {
       // 读取 Length 字段 (位置 5-6, Little Endian)
       final length = ByteData.view(_buffer.buffer).getUint16(5, Endian.little);
       
-      // 计算完整包的长度: Preamble(4) + Length字段包含的内容 + CRC32(4)
-      final totalLength = 4 + length + 4;
+      // 计算完整包的长度: Preamble(4) + Length
+      // Length 是从 Version 到 CRC32 的字节数（包含）
+      final totalLength = 4 + length;
       
       if (_buffer.length < totalLength) {
         // 数据不够，等待更多数据
         break;
       }
       
+      // 粘包检测：检查是否有下一个 PREAMBLE 在当前帧范围内
+      int nextPreamblePos = -1;
+      final searchStart = 12; // 从 Payload 开始位置搜索
+      for (int i = searchStart; i < totalLength && i < _buffer.length - 3; i++) {
+        if (_buffer[i] == 0xD0 && 
+            _buffer[i+1] == 0xD2 && 
+            _buffer[i+2] == 0xC5 && 
+            _buffer[i+3] == 0xC2) {
+          nextPreamblePos = i;
+          break;
+        }
+      }
+      
+      int actualLength = totalLength;
+      if (nextPreamblePos != -1 && nextPreamblePos < totalLength) {
+        // 发现粘包！下一帧的 PREAMBLE 在当前帧的预期范围内
+        actualLength = nextPreamblePos;
+        _logState?.warning('⚠️ 粘包检测: Length字段=$length, 预期帧长=$totalLength, 实际帧长=$actualLength', type: LogType.debug);
+      }
+      
       // 提取完整的 GTP 包
-      final packet = _buffer.sublist(0, totalLength);
+      final packet = _buffer.sublist(0, actualLength);
       
       // 解析这个完整的包
       _parseCompleteGTPPacket(packet);
       
       // 从缓冲区移除已处理的数据
-      _buffer = _buffer.sublist(totalLength);
+      _buffer = _buffer.sublist(actualLength);
     }
   }
   
@@ -241,6 +263,27 @@ class SerialService {
       final fc = packet[8];
       final seq = ByteData.view(packet.buffer).getUint16(9, Endian.little);
       final crc8 = packet[11];
+      
+      // CRC验证（可选，暂时不严格验证以避免因丢包导致的误判）
+      // 提取header（不含CRC8）用于验证
+      final headerWoCrc8 = packet.sublist(4, 11); // Version到Seq
+      // 计算CRC8
+      // final calcCrc8 = _calculateCRC8(headerWoCrc8);
+      // final crc8Ok = (calcCrc8 == crc8);
+      
+      // 提取Payload
+      final payloadLength = length - 7 - 1 - 4; // length - header - crc8 - crc32
+      if (payloadLength < 0 || packet.length < 12 + payloadLength) {
+        _logState?.warning('⚠️ Payload长度异常: payloadLength=$payloadLength, packet.length=${packet.length}', type: LogType.debug);
+        return;
+      }
+      final payload = packet.sublist(12, 12 + payloadLength);
+      
+      // 验证CRC32（可选）
+      // final crc32Data = headerWoCrc8 + [crc8] + payload;
+      // final calcCrc32 = _calculateCRC32(crc32Data);
+      // final recvCrc32 = ByteData.view(packet.buffer).getUint32(12 + payloadLength, Endian.little);
+      // final crc32Ok = (calcCrc32 == recvCrc32);
       
       // 处理响应匹配
       bool isResponse = false;
@@ -264,12 +307,12 @@ class SerialService {
       // _logState?.debug('  CRC8: 0x${crc8.toRadixString(16).padLeft(2, '0').toUpperCase()}');
       
       // 解析日志消息（Type 0x02）
-      if (type == 0x02 && packet.length >= 12 + 10) {
-        _parseDebugLog(packet.sublist(12));
+      if (type == 0x02 && payload.length >= 10) {
+        _parseDebugLog(payload);
       }
       // 解析 CLI 消息（如果存在且 Type 是 CLI）
-      else if (type == 0x03 && packet.length >= 12 + 2) {
-        final cliStart = packet.sublist(12); // CLI 从位置 12 开始
+      else if (type == 0x03 && payload.length >= 2) {
+        final cliStart = payload; // CLI payload
         
         // 如果勾选了显示原始 hex 数据，直接打印完整的 hex 数据
         if (_logState?.showRawHex ?? false) {
@@ -294,8 +337,12 @@ class SerialService {
                       
                       // 先提取 payload 数据
                       Uint8List? payload;
+                      _logState?.info('🔍 Payload提取检查: cliStart.length=${cliStart.length}, payloadLength=$payloadLength, cliStart 至少需要长度=${14 + payloadLength}', type: LogType.debug);
+                      
                       if (cliStart.length >= 14 + payloadLength) {
+                        _logState?.info('✅ CLI数据包长度足够提取payload', type: LogType.debug);
                         if (payloadLength > 0) {
+                          _logState?.info('✅ PayloadLength > 0，开始提取payload...', type: LogType.debug);
                           payload = cliStart.sublist(14, 14 + payloadLength);
                           // 显示Payload长度和内容
                           final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
@@ -303,7 +350,13 @@ class SerialService {
                           
                           // 尝试解析 Payload 内容
                           _parsePayload(moduleId, messageId, payload, result);
+                        } else {
+                          _logState?.warning('❌ PayloadLength = 0，没有payload数据', type: LogType.debug);
                         }
+                      } else {
+                        _logState?.warning('❌ CLI数据包长度不足以提取payload: 实际=${cliStart.length}, 需要=${14 + payloadLength}', type: LogType.debug);
+                        // 数据包长度不足，跳过处理
+                        return;
                       }
                       
                       if (isAckResponse || isTypeResponse || hasPendingRequest) {
@@ -327,7 +380,16 @@ class SerialService {
                             _logState?.warning('⚠️  Completer 已完成或为空 (SN: $sn)', type: LogType.debug);
                           }
                         } else {
-                          _logState?.warning('⚠️  未找到匹配的等待序列号 (SN: $sn)', type: LogType.debug);
+                          _logState?.info('🔍 没有匹配的待处理响应 (SN: $sn)，检查是否为主动推送数据...', type: LogType.debug);
+                          _logState?.info('🔍 Payload状态检查: payload=${payload != null ? 'not null' : 'null'}, isEmpty=${payload?.isEmpty ?? true}', type: LogType.debug);
+                          
+                          if (payload != null && payload.isNotEmpty) {
+                            _logState?.info('✅ Payload有数据，推送到dataStream...', type: LogType.debug);
+                            _dataController.add(payload);
+                            _logState?.info('✅ Payload已推送到dataController', type: LogType.debug);
+                          } else {
+                            _logState?.warning('❌ Payload为null或为空，无法进行主动推送数据处理', type: LogType.debug);
+                          }
                         }
                       }
                     }
@@ -666,6 +728,17 @@ class SerialService {
     return await sendGTPCommand(command, moduleId: moduleId, messageId: messageId, sequenceNumber: sequenceNumber);
   }
   
+  /// Send command without waiting for response
+  Future<bool> sendCommand(
+    Uint8List command, {
+    int? moduleId,
+    int? messageId,
+    int? sequenceNumber,
+  }) async {
+    // 直接发送命令，不等待响应
+    return await sendProductionTestCommand(command, moduleId: moduleId, messageId: messageId, sequenceNumber: sequenceNumber);
+  }
+
   /// Send command and wait for response
   Future<Map<String, dynamic>?> sendCommandAndWaitResponse(
     Uint8List command, {
@@ -703,7 +776,7 @@ class SerialService {
     // 发送命令
     bool sent = await sendProductionTestCommand(command, moduleId: moduleId, messageId: messageId, sequenceNumber: sn);
     if (!sent) {
-      timer.cancel();
+      timer?.cancel();
       _pendingResponses.remove(sn);
       _logState?.error('❌ 命令发送失败', type: LogType.debug);
       return {'error': 'Failed to send command'};
@@ -713,7 +786,12 @@ class SerialService {
     
     // 等待响应
     final response = await completer.future;
-    timer.cancel();
+    
+    // 立即取消Timer，避免竞态条件
+    timer?.cancel();
+    
+    // 确保从pending列表中移除（如果还在的话）
+    _pendingResponses.remove(sn);
     
     if (response == null) {
       // 已经在超时处理中记录了

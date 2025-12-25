@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../screens/gpib_test_screen.dart';
+import 'sn_mac_config_section.dart';
 
 class MenuBarWidget extends StatelessWidget {
   const MenuBarWidget({super.key});
@@ -17,14 +18,6 @@ class MenuBarWidget extends StatelessWidget {
       child: Row(
         children: [
           _MenuButton(
-            title: 'Edit',
-            onPressed: () {},
-          ),
-          _MenuButton(
-            title: 'Log',
-            onPressed: () {},
-          ),
-          _MenuButton(
             title: 'GPIB Test',
             onPressed: () {
               Navigator.push(
@@ -33,7 +26,51 @@ class MenuBarWidget extends StatelessWidget {
               );
             },
           ),
+          _MenuButton(
+            title: 'SN/MAC配置',
+            onPressed: () {
+              _showSNMacConfigDialog(context);
+            },
+          ),
+          const Spacer(),
         ],
+      ),
+    );
+  }
+
+  static void _showSNMacConfigDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Container(
+          width: 800,
+          height: 600,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'SN码和MAC地址配置',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const Divider(),
+              const Expanded(
+                child: SNMacConfigSection(),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/test_state.dart';
 import '../models/log_state.dart';
 
@@ -17,10 +18,47 @@ class _SerialPortSectionState extends State<SerialPortSection> {
   @override
   void initState() {
     super.initState();
-    // 初始化时刷新串口列表
+    // 初始化时刷新串口列表并加载上次选择的串口
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadLastSelectedPort();
       _refreshPorts();
     });
+  }
+
+  Future<void> _loadLastSelectedPort() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastPort = prefs.getString('last_selected_port');
+      if (lastPort != null) {
+        final testState = context.read<TestState>();
+        final availablePorts = testState.availablePorts;
+        
+        // 检查上次选择的串口是否仍然可用
+        if (availablePorts.contains(lastPort)) {
+          setState(() {
+            _selectedPort = lastPort;
+          });
+          
+          // 自动连接到上次选择的串口
+          final logState = context.read<LogState>();
+          logState.info('检测到上次使用的串口: $lastPort，正在自动连接...');
+          
+          await testState.connectToPort(lastPort);
+        }
+      }
+    } catch (e) {
+      // 忽略加载错误
+      debugPrint('加载上次选择的串口失败: $e');
+    }
+  }
+
+  Future<void> _saveSelectedPort(String port) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('last_selected_port', port);
+    } catch (e) {
+      debugPrint('保存串口选择失败: $e');
+    }
   }
   
   void _refreshPorts() {
@@ -137,7 +175,10 @@ class _SerialPortSectionState extends State<SerialPortSection> {
                             });
                           } else {
                             bool success = await state.connectToPort(_selectedPort!);
-                            if (!success && mounted) {
+                            if (success) {
+                              // 连接成功时保存串口选择
+                              await _saveSelectedPort(_selectedPort!);
+                            } else if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('Failed to connect to $_selectedPort'),

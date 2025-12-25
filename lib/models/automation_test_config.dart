@@ -220,13 +220,13 @@ class AutoTestSteps {
         expectedResult: '点击左侧触控，返回点击检测值，测试OK',
         type: AutoTestStepType.semiAuto,
       ),
-      const AutoTestStep(
-        id: 'left_touch_long',
-        name: '左触控-长按测试',
-        description: '左触控长按功能测试',
-        expectedResult: '双击左侧触控，返回双击检测值，测试OK',
-        type: AutoTestStepType.semiAuto,
-      ),
+      // const AutoTestStep(
+      //   id: 'left_touch_long',
+      //   name: '左触控-长按测试',
+      //   description: '左触控长按功能测试',
+      //   expectedResult: '双击左侧触控，返回双击检测值，测试OK',
+      //   type: AutoTestStepType.semiAuto,
+      // ),
       const AutoTestStep(
         id: 'left_touch_wear',
         name: '左触控-佩戴测试',
