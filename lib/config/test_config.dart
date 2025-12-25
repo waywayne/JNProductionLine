@@ -46,5 +46,5 @@ class TestConfig {
   static const double leakageCurrentThresholdUa = 500.0;
   
   /// 工作功耗测试阈值 (mA)
-  static const double workingCurrentThresholdMa = 380.0;
+  static const double workingCurrentThresholdMa = 450.0;
 }
