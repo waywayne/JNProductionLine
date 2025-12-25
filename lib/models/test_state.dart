@@ -1922,19 +1922,27 @@ class TestState extends ChangeNotifier {
   }
 
   /// 漏电流手动测试
-  Future<void> testLeakageCurrent() async {
+  Future<bool> testLeakageCurrent() async {
     try {
+      // 同时输出到 debug 和 gpib 日志
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('🔌 开始漏电流测试', type: LogType.debug);
       _logState?.info('🔌 开始漏电流测试', type: LogType.gpib);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.debug);
       _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+      _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.debug);
       _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.gpib);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
       
       // 检查GPIB是否就绪
       if (!_isGpibReady) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
         _logState?.error('❌ GPIB设备未就绪', type: LogType.gpib);
+        _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.debug);
         _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.gpib);
-        return;
+        return false;
       }
       
       // 使用GPIB测量电流（不发送任何串口指令）
@@ -1944,26 +1952,40 @@ class TestState extends ChangeNotifier {
       );
       
       if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
         _logState?.error('❌ 电流测量失败', type: LogType.gpib);
-        return;
+        return false;
       }
       
       // 转换为微安 (uA)
       final currentUa = currentA * 1000000;
       
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('📊 漏电流测试结果:', type: LogType.debug);
       _logState?.info('📊 漏电流测试结果:', type: LogType.gpib);
+      _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.debug);
       _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.gpib);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.debug);
       _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
       
       if (currentUa < TestConfig.leakageCurrentThresholdUa) {
+        _logState?.success('✅ 漏电流测试通过', type: LogType.debug);
         _logState?.success('✅ 漏电流测试通过', type: LogType.gpib);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+        return true;
       } else {
+        _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.debug);
         _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.gpib);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+        return false;
       }
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
     } catch (e) {
+      _logState?.error('❌ 漏电流测试异常: $e', type: LogType.debug);
       _logState?.error('❌ 漏电流测试异常: $e', type: LogType.gpib);
+      return false;
     }
   }
 
@@ -4300,13 +4322,20 @@ class TestState extends ChangeNotifier {
     int maxRetries = 10,
     Duration timeout = const Duration(seconds: 2),
   }) async {
+    // 根据测试名称调整超时时间
+    Duration actualTimeout = timeout;
+    if (testName.contains('工作功耗测试') || testName.contains('漏电流测试')) {
+      // GPIB 电流测试需要更长时间（20次采样 × 10秒 + 间隔）
+      actualTimeout = const Duration(seconds: 240); // 4分钟
+    }
+    
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // 使用timeout包装执行
         final result = await executor().timeout(
-          timeout,
+          actualTimeout,
           onTimeout: () {
-            _logState?.warning('⏱️  $testName 超时 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+            _logState?.warning('⏱️  $testName 超时 (尝试 $attempt/$maxRetries, 超时时间: ${actualTimeout.inSeconds}秒)', type: LogType.debug);
             return false;
           },
         );

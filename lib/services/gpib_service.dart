@@ -437,10 +437,12 @@ except Exception as e:
       
       for (int i = 0; i < sampleCount; i++) {
         // 查询当前电流值 (MEAS:CURR? 或 READ?)
-        final response = await query('MEAS:CURR?', timeout: const Duration(seconds: 3));
+        _logState?.debug('正在采样 ${i + 1}/$sampleCount...', type: LogType.gpib);
+        final response = await query('MEAS:CURR?', timeout: const Duration(seconds: 10));
         
         if (response == null || response == 'TIMEOUT') {
-          _logState?.warning('采样 ${i + 1}/$sampleCount 超时', type: LogType.gpib);
+          _logState?.warning('采样 ${i + 1}/$sampleCount 超时（10秒）', type: LogType.gpib);
+          _logState?.warning('可能原因：GPIB设备响应慢或未正确连接', type: LogType.gpib);
           continue;
         }
         
@@ -559,8 +561,8 @@ def main():
         print(f"INFO: Connecting to {address}...", file=sys.stderr)
         instrument = rm.open_resource(address)
         
-        # 设置超时
-        instrument.timeout = 5000  # 5秒超时
+        # 设置超时（增加到15秒，因为电流测量可能需要更长时间）
+        instrument.timeout = 15000  # 15秒超时
         
         # 测试连接 - 发送 *IDN? 查询
         try:
@@ -626,6 +628,12 @@ def main():
                             print(f"{command_id}|OK")
                         
                         sys.stdout.flush()
+                    except pyvisa.errors.VisaIOError as e:
+                        # VISA 超时或通信错误
+                        error_msg = str(e).replace('|', '_')
+                        print(f"{command_id}|TIMEOUT")
+                        sys.stdout.flush()
+                        print(f"ERROR: VISA error for command '{command}': {e}", file=sys.stderr)
                     except Exception as e:
                         error_msg = str(e).replace('|', '_')
                         print(f"{command_id}|ERROR:{error_msg}")

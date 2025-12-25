@@ -39,7 +39,18 @@ class ManualTestSection extends StatelessWidget {
                 context,
                 '漏电流测试',
                 Icons.electric_bolt,
-                () => state.testLeakageCurrent(),
+                () async {
+                  final success = await state.testLeakageCurrent();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ 漏电流测试通过' : '❌ 漏电流测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
                 color: Colors.purple,
               ),
               _buildTestButton(
