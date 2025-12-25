@@ -212,42 +212,92 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                         ),
                       ],
               ),
-              child: ElevatedButton(
-                onPressed: state.isAutoTesting ? null : () => state.startAutoTest(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: state.isAutoTesting ? Colors.grey[400] : Colors.green[600],
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (state.isAutoTesting)
-                      const SizedBox(
-                        width: 28,
-                        height: 28,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              child: state.isAutoTesting
+                  ? Row(
+                      children: [
+                        // 停止按钮
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () async {
+                              // 显示确认对话框
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('确认停止'),
+                                  content: const Text('确定要停止自动化测试吗？\n停止后将不会生成测试报告。'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.of(context).pop(false),
+                                      child: const Text('取消'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.of(context).pop(true),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.red,
+                                      ),
+                                      child: const Text('停止'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              
+                              if (confirm == true) {
+                                await state.stopAutoTest();
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red[600],
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(Icons.stop_circle, size: 32),
+                                SizedBox(width: 12),
+                                Text(
+                                  '停止测试',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      )
-                    else
-                      const Icon(Icons.play_circle_filled, size: 32),
-                    const SizedBox(width: 12),
-                    Text(
-                      state.isAutoTesting ? '测试进行中...' : '开始自动化测试',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.5,
+                      ],
+                    )
+                  : ElevatedButton(
+                      onPressed: () => state.startAutoTest(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green[600],
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.play_circle_filled, size: 32),
+                          SizedBox(width: 12),
+                          Text(
+                            '开始自动化测试',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
             ),
             
             const SizedBox(height: 20),

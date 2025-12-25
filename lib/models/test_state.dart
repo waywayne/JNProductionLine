@@ -428,9 +428,52 @@ class TestState extends ChangeNotifier {
   }
 
   /// 停止自动化测试
-  void stopAutoTest() {
+  Future<void> stopAutoTest() async {
+    if (!_isAutoTesting) {
+      _logState?.warning('⚠️  当前没有正在进行的自动化测试', type: LogType.debug);
+      return;
+    }
+    
     _shouldStopTest = true;
-    _logState?.warning('⚠️  用户请求停止自动化测试', type: LogType.debug);
+    _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    _logState?.warning('🛑 用户请求停止自动化测试', type: LogType.debug);
+    _logState?.warning('正在停止所有测试和监听...', type: LogType.debug);
+    
+    // 停止所有正在进行的测试
+    try {
+      // 停止 IMU 测试
+      if (_isIMUTesting) {
+        await stopIMUTest();
+      }
+      
+      // 停止 Sensor 测试
+      if (_isSensorTesting) {
+        await stopSensorTest();
+      }
+      
+      // 停止 LED 测试
+      if (_currentLEDType != null) {
+        await stopLEDTest(_currentLEDType!);
+      }
+      
+      // 停止 MIC 测试
+      if (_currentMICNumber != null) {
+        await closeMIC(_currentMICNumber!);
+      }
+      
+      // 关闭所有弹窗
+      _showIMUDialog = false;
+      _showSensorDialog = false;
+      _showBluetoothTestDialog = false;
+      
+    } catch (e) {
+      _logState?.error('停止测试时出错: $e', type: LogType.debug);
+    }
+    
+    _logState?.warning('✅ 自动化测试已停止', type: LogType.debug);
+    _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    
+    notifyListeners();
   }
   
   /// 重试单个测试项
@@ -4299,6 +4342,22 @@ class TestState extends ChangeNotifier {
     
     // 执行所有测试项
     await _executeAllTests();
+    
+    // 检查是否被用户停止
+    if (_shouldStopTest) {
+      _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.warning('🛑 自动化测试已被用户停止，不生成测试报告', type: LogType.debug);
+      _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 清理状态
+      _isAutoTesting = false;
+      _shouldStopTest = false;
+      _currentTestReport = null;
+      _testReportItems.clear();
+      _currentAutoTestIndex = 0;
+      notifyListeners();
+      return;
+    }
     
     // 生成最终报告
     _finalizeTestReport();
