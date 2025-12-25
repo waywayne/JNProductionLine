@@ -443,7 +443,7 @@ class TestState extends ChangeNotifier {
     try {
       // 停止 IMU 测试
       if (_isIMUTesting) {
-        await stopIMUTest();
+        await stopIMUDataStream();
       }
       
       // 停止 Sensor 测试
@@ -458,13 +458,14 @@ class TestState extends ChangeNotifier {
       
       // 停止 MIC 测试
       if (_currentMICNumber != null) {
-        await closeMIC(_currentMICNumber!);
+        await stopMICTest();
       }
       
       // 关闭所有弹窗
       _showIMUDialog = false;
       _showSensorDialog = false;
-      _showBluetoothTestDialog = false;
+      _showBluetoothDialog = false;
+      _showMICDialog = false;
       
     } catch (e) {
       _logState?.error('停止测试时出错: $e', type: LogType.debug);
