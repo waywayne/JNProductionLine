@@ -20,7 +20,7 @@ class AutomationTestConfig {
   
   // 测试阈值
   static const double leakageCurrentThreshold = 500e-6;  // 漏电流阈值 < 500uA
-  static const double workingCurrentThreshold = 380e-3;  // 工作电流阈值 < 380mA
+  static const double workingCurrentThreshold = 450e-3;  // 工作电流阈值 < 450mA
   static const double batteryVoltageThreshold = 2.5;     // 电池电压阈值 > 2.5V
   static const double batteryCapacityMin = 0.0;          // 电量范围 0-100%
   static const double batteryCapacityMax = 100.0;

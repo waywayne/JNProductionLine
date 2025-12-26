@@ -25,7 +25,7 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
   void initState() {
     super.initState();
     _addressController = TextEditingController(
-      text: widget.initialAddress ?? 'GPIB0::10::INSTR',
+      text: widget.initialAddress ?? 'GPIB0::5::INSTR',
     );
     // 初始化当前设置
     _skipGpibTests = AutomationTestConfig.skipGpibTests;
@@ -148,7 +148,7 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
               controller: _addressController,
               enabled: !_isConnecting,
               decoration: InputDecoration(
-                hintText: '例如: GPIB0::10::INSTR',
+                hintText: '例如: GPIB0::5::INSTR',
                 prefixIcon: const Icon(Icons.cable),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),

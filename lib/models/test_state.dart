@@ -6182,7 +6182,7 @@ class TestState extends ChangeNotifier {
       _gpibService.setLogState(_logState!);
 
       // 1. 检查Python环境
-      _logState?.info('📋 步骤 1/4: 检查Python环境', type: LogType.gpib);
+      _logState?.info('📋 步骤 1/5: 检查Python环境', type: LogType.gpib);
       final envCheck = await _gpibService.checkPythonEnvironment();
       
       if (!(envCheck['pythonInstalled'] as bool)) {
@@ -6194,7 +6194,7 @@ class TestState extends ChangeNotifier {
       // 2. 检查并安装依赖
       if (!(envCheck['pyvisaInstalled'] as bool)) {
         _logState?.warning('⚠️  PyVISA未安装，开始自动安装...', type: LogType.gpib);
-        _logState?.info('📋 步骤 2/4: 安装Python依赖', type: LogType.gpib);
+        _logState?.info('📋 步骤 2/5: 安装Python依赖', type: LogType.gpib);
         
         final installSuccess = await _gpibService.installPythonDependencies();
         if (!installSuccess) {
@@ -6202,11 +6202,11 @@ class TestState extends ChangeNotifier {
           return false;
         }
       } else {
-        _logState?.success('✅ 步骤 2/4: Python依赖已就绪', type: LogType.gpib);
+        _logState?.success('✅ 步骤 2/5: Python依赖已就绪', type: LogType.gpib);
       }
 
       // 3. 连接GPIB设备
-      _logState?.info('📋 步骤 3/4: 连接GPIB设备', type: LogType.gpib);
+      _logState?.info('📋 步骤 3/5: 连接GPIB设备', type: LogType.gpib);
       final connected = await _gpibService.connect(address);
       
       if (!connected) {
@@ -6215,7 +6215,7 @@ class TestState extends ChangeNotifier {
       }
 
       // 4. 初始化设备参数
-      _logState?.info('📋 步骤 4/4: 初始化设备参数', type: LogType.gpib);
+      _logState?.info('📋 步骤 4/5: 初始化设备参数', type: LogType.gpib);
       
       // 设置电压为5V
       _logState?.debug('设置电压: 5.0V', type: LogType.gpib);
@@ -6230,6 +6230,42 @@ class TestState extends ChangeNotifier {
       if (idn != null && idn != 'TIMEOUT') {
         _logState?.info('设备信息: $idn', type: LogType.gpib);
       }
+
+      // 5. 漏电流测试
+      _logState?.info('📋 步骤 5/5: 漏电流测试', type: LogType.gpib);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+      _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.gpib);
+      
+      // 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 漏电流测量失败', type: LogType.gpib);
+        _isGpibReady = false;
+        notifyListeners();
+        return false;
+      }
+      
+      // 转换为微安 (uA)
+      final currentUa = currentA * 1000000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('📊 漏电流测试结果:', type: LogType.gpib);
+      _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.gpib);
+      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+      
+      if (currentUa >= TestConfig.leakageCurrentThresholdUa) {
+        _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.gpib);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+        _isGpibReady = false;
+        notifyListeners();
+        return false;
+      }
+      
+      _logState?.success('✅ 漏电流测试通过', type: LogType.gpib);
 
       // 标记GPIB就绪
       _isGpibReady = true;

@@ -12,7 +12,7 @@ class GpibDetectionDialog extends StatefulWidget {
 
 class _GpibDetectionDialogState extends State<GpibDetectionDialog> {
   final TextEditingController _addressController = TextEditingController(
-    text: 'GPIB0::10::INSTR',
+    text: 'GPIB0::5::INSTR',
   );
   bool _isConnecting = false;
 
@@ -157,6 +157,7 @@ class _GpibDetectionDialogState extends State<GpibDetectionDialog> {
                   _buildInfoItem('2. 自动安装 PyVISA 依赖'),
                   _buildInfoItem('3. 连接 GPIB 设备'),
                   _buildInfoItem('4. 初始化参数 (5V, 1A)'),
+                  _buildInfoItem('5. 漏电流测试'),
                 ],
               ),
             ),
@@ -175,7 +176,7 @@ class _GpibDetectionDialogState extends State<GpibDetectionDialog> {
               controller: _addressController,
               enabled: !_isConnecting && !state.isGpibReady,
               decoration: InputDecoration(
-                hintText: '例如: GPIB0::10::INSTR',
+                hintText: '例如: GPIB0::5::INSTR',
                 prefixIcon: Icon(
                   Icons.cable,
                   color: state.isGpibReady ? Colors.green : null,

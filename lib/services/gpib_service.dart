@@ -198,7 +198,7 @@ except Exception as e:
   }
   
   /// 连接到 GPIB 设备
-  /// address: GPIB 地址，格式如 "GPIB0::10::INSTR"
+  /// address: GPIB 地址，格式如 "GPIB0::5::INSTR"
   Future<bool> connect(String address) async {
     try {
       _logState?.info('开始连接 GPIB 设备: $address', type: LogType.gpib);

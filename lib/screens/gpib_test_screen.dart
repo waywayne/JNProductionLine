@@ -18,7 +18,7 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
   final GpibService _gpibService = GpibService();
   late GpibCommands _gpibCommands;
   
-  final TextEditingController _addressController = TextEditingController(text: 'GPIB0::10::INSTR');
+  final TextEditingController _addressController = TextEditingController(text: 'GPIB0::5::INSTR');
   final TextEditingController _voltageController = TextEditingController(text: '5.0');
   final TextEditingController _currentLimitController = TextEditingController(text: '1.5');
   final TextEditingController _currentRangeController = TextEditingController(text: '1.0');
@@ -266,7 +266,7 @@ class _GpibTestScreenState extends State<GpibTestScreen> {
               controller: _addressController,
               decoration: const InputDecoration(
                 labelText: 'GPIB 地址',
-                hintText: 'GPIB0::10::INSTR',
+                hintText: 'GPIB0::5::INSTR',
                 border: OutlineInputBorder(),
               ),
               enabled: !_gpibService.isConnected,
