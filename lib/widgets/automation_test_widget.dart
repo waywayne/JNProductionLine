@@ -4,8 +4,15 @@ import '../models/automation_test_state.dart';
 import '../models/automation_test_config.dart';
 import 'gpib_address_dialog.dart';
 
-class AutomationTestWidget extends StatelessWidget {
+class AutomationTestWidget extends StatefulWidget {
   const AutomationTestWidget({super.key});
+
+  @override
+  State<AutomationTestWidget> createState() => _AutomationTestWidgetState();
+}
+
+class _AutomationTestWidgetState extends State<AutomationTestWidget> {
+  bool _showSettings = false;
 
   @override
   Widget build(BuildContext context) {
@@ -37,10 +44,30 @@ class AutomationTestWidget extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
+                  // 设置按钮
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _showSettings = !_showSettings;
+                      });
+                    },
+                    icon: Icon(
+                      _showSettings ? Icons.settings : Icons.settings_outlined,
+                      color: _showSettings ? Colors.orange.shade600 : Colors.grey.shade600,
+                    ),
+                    tooltip: '测试设置',
+                  ),
+                  const SizedBox(width: 8),
                   _buildControlButtons(context, state),
                 ],
               ),
               const SizedBox(height: 16),
+              
+              // 设置面板
+              if (_showSettings) ...[
+                _buildSettingsPanel(),
+                const SizedBox(height: 16),
+              ],
               
               // 状态信息
               _buildStatusInfo(state),
@@ -63,6 +90,151 @@ class AutomationTestWidget extends StatelessWidget {
     );
   }
   
+  Widget _buildSettingsPanel() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.orange.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.tune,
+                color: Colors.orange.shade700,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '测试跳过选项（临时开关）',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () {
+                  setState(() {
+                    AutomationTestConfig.skipGpibTests = false;
+                    AutomationTestConfig.skipLeakageCurrentTest = false;
+                    AutomationTestConfig.skipPowerOnTest = false;
+                    AutomationTestConfig.skipWorkingCurrentTest = false;
+                  });
+                },
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('全部重置'),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.orange.shade700,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              _buildSkipSwitch(
+                label: '跳过GPIB检测',
+                value: AutomationTestConfig.skipGpibTests,
+                onChanged: (value) {
+                  setState(() {
+                    AutomationTestConfig.skipGpibTests = value;
+                  });
+                },
+                icon: Icons.cable,
+              ),
+              _buildSkipSwitch(
+                label: '跳过漏电流测试',
+                value: AutomationTestConfig.skipLeakageCurrentTest,
+                onChanged: (value) {
+                  setState(() {
+                    AutomationTestConfig.skipLeakageCurrentTest = value;
+                  });
+                },
+                icon: Icons.electrical_services,
+              ),
+              _buildSkipSwitch(
+                label: '跳过工作功耗测试',
+                value: AutomationTestConfig.skipWorkingCurrentTest,
+                onChanged: (value) {
+                  setState(() {
+                    AutomationTestConfig.skipWorkingCurrentTest = value;
+                  });
+                },
+                icon: Icons.power,
+              ),
+              _buildSkipSwitch(
+                label: '跳过上电测试',
+                value: AutomationTestConfig.skipPowerOnTest,
+                onChanged: (value) {
+                  setState(() {
+                    AutomationTestConfig.skipPowerOnTest = value;
+                  });
+                },
+                icon: Icons.power_settings_new,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkipSwitch({
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: value ? Colors.orange.shade100 : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: value ? Colors.orange.shade400 : Colors.grey.shade300,
+          width: value ? 2 : 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 16,
+            color: value ? Colors.orange.shade700 : Colors.grey.shade600,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: value ? FontWeight.w600 : FontWeight.normal,
+              color: value ? Colors.orange.shade700 : Colors.grey.shade700,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Transform.scale(
+            scale: 0.8,
+            child: Switch(
+              value: value,
+              onChanged: onChanged,
+              activeColor: Colors.orange.shade600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildControlButtons(BuildContext context, AutomationTestState state) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -150,6 +322,41 @@ class AutomationTestWidget extends StatelessWidget {
             ],
           ),
           const Spacer(),
+          
+          // 跳过状态指示器
+          if (AutomationTestConfig.skipGpibTests ||
+              AutomationTestConfig.skipLeakageCurrentTest ||
+              AutomationTestConfig.skipWorkingCurrentTest ||
+              AutomationTestConfig.skipPowerOnTest) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.skip_next,
+                    size: 14,
+                    color: Colors.orange.shade700,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '已启用跳过',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.orange.shade700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
           
           // 测试结果统计
           if (state.totalCount > 0) ...[
