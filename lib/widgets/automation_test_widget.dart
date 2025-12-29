@@ -12,7 +12,16 @@ class AutomationTestWidget extends StatefulWidget {
 }
 
 class _AutomationTestWidgetState extends State<AutomationTestWidget> {
-  bool _showSettings = false;
+  bool _showSettings = true;  // 默认展开设置面板
+
+  // 检查是否有任何跳过选项启用
+  bool _hasSkipEnabled() {
+    return AutomationTestConfig.skipGpibTests ||
+        AutomationTestConfig.skipGpibReadyCheck ||
+        AutomationTestConfig.skipLeakageCurrentTest ||
+        AutomationTestConfig.skipWorkingCurrentTest ||
+        AutomationTestConfig.skipPowerOnTest;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,17 +54,30 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
                   ),
                   const Spacer(),
                   // 设置按钮
-                  IconButton(
-                    onPressed: () {
-                      setState(() {
-                        _showSettings = !_showSettings;
-                      });
-                    },
-                    icon: Icon(
-                      _showSettings ? Icons.settings : Icons.settings_outlined,
-                      color: _showSettings ? Colors.orange.shade600 : Colors.grey.shade600,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: _hasSkipEnabled() 
+                          ? Colors.orange.shade100 
+                          : (_showSettings ? Colors.grey.shade100 : Colors.transparent),
+                      borderRadius: BorderRadius.circular(8),
+                      border: _hasSkipEnabled() 
+                          ? Border.all(color: Colors.orange.shade300, width: 2)
+                          : null,
                     ),
-                    tooltip: '测试设置',
+                    child: IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _showSettings = !_showSettings;
+                        });
+                      },
+                      icon: Icon(
+                        _showSettings ? Icons.settings : Icons.settings_outlined,
+                        color: _hasSkipEnabled() 
+                            ? Colors.orange.shade700 
+                            : (_showSettings ? Colors.blue.shade600 : Colors.grey.shade600),
+                      ),
+                      tooltip: _hasSkipEnabled() ? '测试设置 (已启用跳过)' : '测试设置',
+                    ),
                   ),
                   const SizedBox(width: 8),
                   _buildControlButtons(context, state),
@@ -109,19 +131,34 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
                 size: 20,
               ),
               const SizedBox(width: 8),
-              Text(
-                '测试跳过选项（临时开关）',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.orange.shade700,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '测试跳过选项（临时开关）',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '启用跳过选项后，可以不配置GPIB直接开始测试',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.orange.shade600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Spacer(),
               TextButton.icon(
                 onPressed: () {
                   setState(() {
                     AutomationTestConfig.skipGpibTests = false;
+                    AutomationTestConfig.skipGpibReadyCheck = false;
                     AutomationTestConfig.skipLeakageCurrentTest = false;
                     AutomationTestConfig.skipPowerOnTest = false;
                     AutomationTestConfig.skipWorkingCurrentTest = false;
@@ -150,6 +187,16 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
                   });
                 },
                 icon: Icons.cable,
+              ),
+              _buildSkipSwitch(
+                label: '跳过GPIB设备未就绪',
+                value: AutomationTestConfig.skipGpibReadyCheck,
+                onChanged: (value) {
+                  setState(() {
+                    AutomationTestConfig.skipGpibReadyCheck = value;
+                  });
+                },
+                icon: Icons.link_off,
               ),
               _buildSkipSwitch(
                 label: '跳过漏电流测试',
@@ -240,8 +287,21 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (!state.isRunning) ...[
+          // GPIB配置按钮
+          if (!AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) ...[
+            OutlinedButton.icon(
+              onPressed: () => _showGpibDialog(context, state),
+              icon: const Icon(Icons.settings_input_component, size: 18),
+              label: const Text('GPIB配置'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.blue.shade600,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          // 开始测试按钮
           ElevatedButton.icon(
-            onPressed: () => _showGpibDialog(context, state),
+            onPressed: () => _startTest(context, state),
             icon: const Icon(Icons.play_arrow),
             label: const Text('开始测试'),
           ),
@@ -325,6 +385,7 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
           
           // 跳过状态指示器
           if (AutomationTestConfig.skipGpibTests ||
+              AutomationTestConfig.skipGpibReadyCheck ||
               AutomationTestConfig.skipLeakageCurrentTest ||
               AutomationTestConfig.skipWorkingCurrentTest ||
               AutomationTestConfig.skipPowerOnTest) ...[
@@ -567,6 +628,40 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
     return color;
   }
   
+  // 开始测试
+  void _startTest(BuildContext context, AutomationTestState state) async {
+    // 如果需要GPIB但未配置，先弹出配置对话框
+    if (!AutomationTestConfig.skipGpibTests && 
+        !AutomationTestConfig.skipGpibReadyCheck && 
+        state.gpibAddress.isEmpty) {
+      await _showGpibDialog(context, state);
+      return;
+    }
+    
+    // 初始化测试步骤
+    state.initializeTestSteps();
+    
+    // 如果需要GPIB连接
+    if (!AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+      final connected = await state.connectGpib();
+      if (!connected) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('GPIB连接失败，请检查设备或启用跳过选项'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+    }
+    
+    // 开始自动化测试
+    await state.startAutomationTest();
+  }
+  
+  // 显示GPIB配置对话框
   void _showGpibDialog(BuildContext context, AutomationTestState state) async {
     final address = await showDialog<String>(
       context: context,
@@ -578,13 +673,6 @@ class _AutomationTestWidgetState extends State<AutomationTestWidget> {
     
     if (address != null && address.isNotEmpty) {
       state.setGpibAddress(address);
-      state.initializeTestSteps();
-      
-      // 连接GPIB并开始测试
-      final connected = await state.connectGpib();
-      if (connected) {
-        await state.startAutomationTest();
-      }
     }
   }
 }

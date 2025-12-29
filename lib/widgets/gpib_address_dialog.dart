@@ -17,6 +17,7 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
   late TextEditingController _addressController;
   bool _isConnecting = false;
   bool _skipGpibTests = false;
+  bool _skipGpibReadyCheck = false;
   bool _skipLeakageCurrentTest = false;
   bool _skipPowerOnTest = false;
   bool _skipWorkingCurrentTest = false;
@@ -29,6 +30,7 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
     );
     // 初始化当前设置
     _skipGpibTests = AutomationTestConfig.skipGpibTests;
+    _skipGpibReadyCheck = AutomationTestConfig.skipGpibReadyCheck;
     _skipLeakageCurrentTest = AutomationTestConfig.skipLeakageCurrentTest;
     _skipPowerOnTest = AutomationTestConfig.skipPowerOnTest;
     _skipWorkingCurrentTest = AutomationTestConfig.skipWorkingCurrentTest;
@@ -249,6 +251,18 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
                     contentPadding: EdgeInsets.zero,
                   ),
                   CheckboxListTile(
+                    title: const Text('跳过GPIB设备未就绪检查'),
+                    subtitle: const Text('允许在GPIB未连接时开始测试'),
+                    value: _skipGpibReadyCheck,
+                    onChanged: (value) {
+                      setState(() {
+                        _skipGpibReadyCheck = value ?? false;
+                      });
+                    },
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  CheckboxListTile(
                     title: const Text('跳过漏电流测试'),
                     subtitle: const Text('跳过设备漏电流测试'),
                     value: _skipLeakageCurrentTest,
@@ -377,10 +391,10 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
   
   void _startAutomationTest() async {
     final address = _addressController.text.trim();
-    if (address.isEmpty && !_skipGpibTests) {
+    if (address.isEmpty && !_skipGpibTests && !_skipGpibReadyCheck) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('请输入GPIB设备地址或选择跳过GPIB测试'),
+          content: Text('请输入GPIB设备地址或选择跳过GPIB测试/就绪检查'),
           backgroundColor: Colors.red,
         ),
       );
@@ -393,6 +407,7 @@ class _GpibAddressDialogState extends State<GpibAddressDialog> {
     
     // 保存跳过选项设置
     AutomationTestConfig.skipGpibTests = _skipGpibTests;
+    AutomationTestConfig.skipGpibReadyCheck = _skipGpibReadyCheck;
     AutomationTestConfig.skipLeakageCurrentTest = _skipLeakageCurrentTest;
     AutomationTestConfig.skipPowerOnTest = _skipPowerOnTest;
     AutomationTestConfig.skipWorkingCurrentTest = _skipWorkingCurrentTest;

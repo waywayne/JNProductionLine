@@ -5,6 +5,7 @@ class AutomationTestConfig {
   
   // 测试跳过开关
   static bool skipGpibTests = false;             // 跳过GPIB相关测试
+  static bool skipGpibReadyCheck = false;        // 跳过GPIB设备未就绪检查
   static bool skipLeakageCurrentTest = false;    // 跳过漏电流测试
   static bool skipPowerOnTest = false;           // 跳过上电测试
   static bool skipWorkingCurrentTest = false;    // 跳过工作电流测试

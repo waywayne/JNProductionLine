@@ -109,9 +109,14 @@ class AutomationTestState extends ChangeNotifier {
   
   /// 开始自动化测试
   Future<void> startAutomationTest() async {
-    if (!_isGpibConnected && !AutomationTestConfig.skipGpibTests) {
+    if (!_isGpibConnected && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
       _logState?.error('请先连接GPIB设备');
       return;
+    }
+    
+    // 如果跳过GPIB就绪检查，给出警告提示
+    if (!_isGpibConnected && AutomationTestConfig.skipGpibReadyCheck) {
+      _logState?.warning('⚠️  已跳过GPIB设备就绪检查（测试模式）');
     }
     
     _isRunning = true;

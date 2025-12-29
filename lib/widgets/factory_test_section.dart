@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
+import '../models/automation_test_config.dart';
 import 'manual_test_section.dart';
+import 'skip_settings_panel.dart';
 
 /// Show error dialog
 void _showErrorDialog(BuildContext context, String testName, String errorMessage) {
@@ -127,14 +129,14 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // 设备信息卡片 - 优化样式
             if (state.currentDeviceIdentity != null)
               Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Colors.blue[600]!, Colors.blue[400]!],
@@ -195,7 +197,12 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                 ),
               ),
             
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            
+            // 跳过设置面板
+            const SkipSettingsPanel(),
+            
+            const SizedBox(height: 16),
             
             // 自动化测试按钮 - 优化样式
             Container(
@@ -300,7 +307,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                     ),
             ),
             
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
           
           // 测试进度显示 - 优化样式
           if (state.isAutoTesting || state.testReportItems.isNotEmpty)

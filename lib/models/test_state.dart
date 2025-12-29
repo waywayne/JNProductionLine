@@ -14,6 +14,7 @@ import '../config/wifi_config.dart';
 import '../config/sn_mac_config.dart';
 import 'touch_test_step.dart';
 import 'test_report.dart';
+import 'automation_test_config.dart';
 
 enum TestStatus {
   waiting,
@@ -1980,12 +1981,19 @@ class TestState extends ChangeNotifier {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
       
-      // 检查GPIB是否就绪
-      if (!_isGpibReady) {
+      // 检查GPIB是否就绪（除非启用了跳过选项）
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
         _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
         _logState?.error('❌ GPIB设备未就绪', type: LogType.gpib);
-        _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.debug);
-        _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.gpib);
+        _logState?.error('请先点击"GPIB检测"按钮连接程控电源，或启用跳过选项', type: LogType.debug);
+        _logState?.error('请先点击"GPIB检测"按钮连接程控电源，或启用跳过选项', type: LogType.gpib);
+        return false;
+      }
+      
+      // 如果跳过GPIB检查，给出提示
+      if (!_isGpibReady && (AutomationTestConfig.skipGpibTests || AutomationTestConfig.skipGpibReadyCheck)) {
+        _logState?.warning('⚠️  已跳过GPIB检查，跳过漏电流测试', type: LogType.debug);
+        _logState?.warning('⚠️  已跳过GPIB检查，跳过漏电流测试', type: LogType.gpib);
         return false;
       }
       
@@ -4306,13 +4314,19 @@ class TestState extends ChangeNotifier {
       return;
     }
 
-    // 检查GPIB是否就绪
-    if (!_isGpibReady) {
+    // 检查GPIB是否就绪（除非启用了跳过选项）
+    if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
       _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.error('❌ GPIB设备未就绪，无法开始自动化测试', type: LogType.debug);
-      _logState?.error('请先点击"GPIB检测"按钮连接程控电源', type: LogType.debug);
+      _logState?.error('请先点击"GPIB检测"按钮连接程控电源，或在跳过设置中启用跳过选项', type: LogType.debug);
       _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       return;
+    }
+    
+    // 如果跳过GPIB检查，给出提示
+    if (!_isGpibReady && (AutomationTestConfig.skipGpibTests || AutomationTestConfig.skipGpibReadyCheck)) {
+      _logState?.warning('⚠️  已跳过GPIB设备就绪检查（测试模式）', type: LogType.debug);
+      _logState?.warning('⚠️  已跳过GPIB设备就绪检查（测试模式）', type: LogType.gpib);
     }
 
     _isAutoTesting = true;
@@ -5065,10 +5079,22 @@ class TestState extends ChangeNotifier {
       _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
+      // 检查是否跳过漏电流测试
+      if (AutomationTestConfig.skipLeakageCurrentTest) {
+        _logState?.warning('⚠️  已跳过漏电流测试（测试模式）', type: LogType.debug);
+        return true;  // 跳过时返回成功
+      }
+      
       // 检查GPIB是否就绪
-      if (!_isGpibReady) {
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
         _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
         return false;
+      }
+      
+      // 如果GPIB未就绪但启用了跳过，也跳过此测试
+      if (!_isGpibReady) {
+        _logState?.warning('⚠️  GPIB未就绪，跳过漏电流测试', type: LogType.debug);
+        return true;
       }
       
       // 使用GPIB测量电流
@@ -5110,6 +5136,12 @@ class TestState extends ChangeNotifier {
   Future<bool> _autoTestPowerOn() async {
     try {
       _logState?.info('⚡ 开始上电测试', type: LogType.debug);
+      
+      // 检查是否跳过上电测试
+      if (AutomationTestConfig.skipPowerOnTest) {
+        _logState?.warning('⚠️  已跳过上电测试（测试模式）', type: LogType.debug);
+        return true;  // 跳过时返回成功
+      }
       
       // 检查串口连接状态即可判断设备是否正常上电
       if (!_serialService.isConnected) {
@@ -5257,10 +5289,22 @@ class TestState extends ChangeNotifier {
       _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
+      // 检查是否跳过工作功耗测试
+      if (AutomationTestConfig.skipWorkingCurrentTest) {
+        _logState?.warning('⚠️  已跳过工作功耗测试（测试模式）', type: LogType.debug);
+        return true;  // 跳过时返回成功
+      }
+      
       // 检查GPIB是否就绪
-      if (!_isGpibReady) {
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
         _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
         return false;
+      }
+      
+      // 如果GPIB未就绪但启用了跳过，也跳过此测试
+      if (!_isGpibReady) {
+        _logState?.warning('⚠️  GPIB未就绪，跳过工作功耗测试', type: LogType.debug);
+        return true;
       }
       
       // 使用GPIB测量电流
