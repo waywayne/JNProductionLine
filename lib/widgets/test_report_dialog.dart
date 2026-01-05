@@ -72,30 +72,53 @@ class TestReportDialog extends StatelessWidget {
                 
                 const SizedBox(height: 16),
                 
+                // 自动保存提示
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '测试报告已自动保存',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[900],
+                              ),
+                            ),
+                            if (report.allTestsPassed) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                '设备信息已记录到全局文件 (device_records.csv)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.green[700],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 16),
+                
                 // 操作按钮
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-            TextButton.icon(
-              onPressed: () async {
-                final savedPath = await state.saveTestReport();
-                if (savedPath != null && context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('测试报告已保存到: $savedPath'),
-                      backgroundColor: Colors.green,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              },
-              icon: const Icon(Icons.save_alt),
-              label: const Text('保存报告'),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.blue[700],
-              ),
-            ),
-            const Spacer(),
             ElevatedButton.icon(
               onPressed: () async {
                 // 清空报告（会自动关闭弹窗并重置状态）

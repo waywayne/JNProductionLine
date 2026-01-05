@@ -4334,11 +4334,13 @@ class TestState extends ChangeNotifier {
     _testReportItems.clear();
     
     final deviceSN = _currentDeviceIdentity?['sn'] ?? 'UNKNOWN';
-    final deviceMAC = _currentDeviceIdentity?['mac'];
+    final bluetoothMAC = _currentDeviceIdentity?['bluetoothMac'];
+    final wifiMAC = _currentDeviceIdentity?['wifiMac'];
     
     _currentTestReport = TestReport(
       deviceSN: deviceSN,
-      deviceMAC: deviceMAC,
+      bluetoothMAC: bluetoothMAC,
+      wifiMAC: wifiMAC,
       startTime: DateTime.now(),
       items: [],
     );
@@ -4348,8 +4350,11 @@ class TestState extends ChangeNotifier {
     _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     _logState?.info('🚀 开始自动化测试', type: LogType.debug);
     _logState?.info('📱 设备SN: $deviceSN', type: LogType.debug);
-    if (deviceMAC != null) {
-      _logState?.info('📱 设备MAC: $deviceMAC', type: LogType.debug);
+    if (bluetoothMAC != null) {
+      _logState?.info('📶 蓝牙MAC: $bluetoothMAC', type: LogType.debug);
+    }
+    if (wifiMAC != null) {
+      _logState?.info('📡 WiFi MAC: $wifiMAC', type: LogType.debug);
     }
     _logState?.info('⏱️  开始时间: ${DateTime.now()}', type: LogType.debug);
     _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
@@ -5488,6 +5493,22 @@ class TestState extends ChangeNotifier {
       _generatedBluetoothMAC = macParts.map((part) => int.parse(part, radix: 16)).toList();
       _generatedDeviceId = _currentDeviceIdentity!['sn'];
       
+      // 更新测试报告中的设备信息
+      if (_currentTestReport != null) {
+        _currentTestReport = TestReport(
+          deviceSN: _currentDeviceIdentity!['sn'] ?? 'UNKNOWN',
+          bluetoothMAC: _currentDeviceIdentity!['bluetoothMac'],
+          wifiMAC: _currentDeviceIdentity!['wifiMac'],
+          startTime: _currentTestReport!.startTime,
+          endTime: _currentTestReport!.endTime,
+          items: _currentTestReport!.items,
+        );
+        _logState?.info('   📝 已更新测试报告设备信息', type: LogType.debug);
+        _logState?.info('      SN: ${_currentDeviceIdentity!["sn"]}', type: LogType.debug);
+        _logState?.info('      蓝牙MAC: ${_currentDeviceIdentity!["bluetoothMac"]}', type: LogType.debug);
+        _logState?.info('      WiFi MAC: ${_currentDeviceIdentity!["wifiMac"]}', type: LogType.debug);
+      }
+      
       _logState?.success('✅ 设备标识已生成', type: LogType.debug);
       
       return true;
@@ -6150,7 +6171,8 @@ class TestState extends ChangeNotifier {
     if (_currentTestReport != null) {
       _currentTestReport = TestReport(
         deviceSN: _currentTestReport!.deviceSN,
-        deviceMAC: _currentTestReport!.deviceMAC,
+        bluetoothMAC: _currentTestReport!.bluetoothMAC,
+        wifiMAC: _currentTestReport!.wifiMAC,
         startTime: _currentTestReport!.startTime,
         endTime: DateTime.now(),
         items: List.from(_testReportItems),
@@ -6160,6 +6182,70 @@ class TestState extends ChangeNotifier {
       _logState?.info('📊 测试完成', type: LogType.debug);
       _logState?.info(_currentTestReport!.summaryText, type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 如果测试全部通过，记录设备信息到全局文件
+      if (_currentTestReport!.allTestsPassed) {
+        _saveDeviceToGlobalRecord();
+      }
+    }
+  }
+
+  /// 保存设备信息到全局记录文件
+  Future<void> _saveDeviceToGlobalRecord() async {
+    try {
+      if (_currentDeviceIdentity == null) {
+        _logState?.warning('⚠️ 无设备标识信息，跳过全局记录', type: LogType.debug);
+        return;
+      }
+      
+      // 创建保存目录
+      String userHome;
+      if (Platform.isMacOS || Platform.isLinux) {
+        userHome = Platform.environment['HOME'] ?? Directory.current.path;
+      } else if (Platform.isWindows) {
+        userHome = Platform.environment['USERPROFILE'] ?? Directory.current.path;
+      } else {
+        userHome = Directory.current.path;
+      }
+      
+      final saveDir = Directory(path.join(userHome, 'Documents', 'JNProductionLine'));
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+      
+      final globalRecordFile = File(path.join(saveDir.path, 'device_records.csv'));
+      
+      // 检查文件是否存在，如果不存在则创建并写入表头
+      bool fileExists = await globalRecordFile.exists();
+      if (!fileExists) {
+        await globalRecordFile.writeAsString(
+          '时间戳,SN号,蓝牙MAC地址,WiFi MAC地址,测试结果,通过率\n',
+          mode: FileMode.write,
+        );
+      }
+      
+      // 准备记录数据
+      final timestamp = DateTime.now().toIso8601String();
+      final snCode = _currentDeviceIdentity!['sn'] ?? 'UNKNOWN';
+      final bluetoothMac = _currentDeviceIdentity!['bluetoothMac'] ?? 'UNKNOWN';
+      final wifiMac = _currentDeviceIdentity!['wifiMac'] ?? 'UNKNOWN';
+      final testResult = _currentTestReport?.allTestsPassed == true ? '通过' : '失败';
+      final passRate = _currentTestReport?.passRate.toStringAsFixed(1) ?? '0.0';
+      
+      // 追加记录到文件
+      final recordLine = '$timestamp,$snCode,$bluetoothMac,$wifiMac,$testResult,$passRate%\n';
+      await globalRecordFile.writeAsString(
+        recordLine,
+        mode: FileMode.append,
+      );
+      
+      _logState?.success('✅ 设备信息已记录到全局文件', type: LogType.debug);
+      _logState?.info('   📋 SN: $snCode', type: LogType.debug);
+      _logState?.info('   📶 蓝牙MAC: $bluetoothMac', type: LogType.debug);
+      _logState?.info('   📡 WiFi MAC: $wifiMac', type: LogType.debug);
+      _logState?.info('   📁 文件: ${globalRecordFile.path}', type: LogType.debug);
+    } catch (e) {
+      _logState?.error('❌ 保存全局设备记录失败: $e', type: LogType.debug);
     }
   }
 

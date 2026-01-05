@@ -118,15 +118,20 @@ enum TestReportStatus {
 /// 完整测试报告
 class TestReport {
   final String deviceSN;
-  final String? deviceMAC;
+  final String? bluetoothMAC;
+  final String? wifiMAC;
   final DateTime startTime;
   final DateTime? endTime;
   final List<TestReportItem> items;
   final String? notes;
   
+  // 向后兼容：保留 deviceMAC getter
+  String? get deviceMAC => bluetoothMAC;
+  
   TestReport({
     required this.deviceSN,
-    this.deviceMAC,
+    this.bluetoothMAC,
+    this.wifiMAC,
     required this.startTime,
     this.endTime,
     required this.items,
@@ -162,7 +167,8 @@ class TestReport {
   Map<String, dynamic> toJson() {
     return {
       'deviceSN': deviceSN,
-      'deviceMAC': deviceMAC,
+      'bluetoothMAC': bluetoothMAC,
+      'wifiMAC': wifiMAC,
       'startTime': startTime.toIso8601String(),
       'endTime': endTime?.toIso8601String(),
       'totalDuration': totalDuration?.inMilliseconds,
@@ -183,8 +189,11 @@ class TestReport {
     buffer.writeln('           测试报告');
     buffer.writeln('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     buffer.writeln('设备SN: $deviceSN');
-    if (deviceMAC != null) {
-      buffer.writeln('设备MAC: $deviceMAC');
+    if (bluetoothMAC != null) {
+      buffer.writeln('蓝牙MAC: $bluetoothMAC');
+    }
+    if (wifiMAC != null) {
+      buffer.writeln('WiFi MAC: $wifiMAC');
     }
     buffer.writeln('开始时间: ${_formatDateTime(startTime)}');
     if (endTime != null) {
