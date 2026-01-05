@@ -6107,10 +6107,40 @@ class TestState extends ChangeNotifier {
   /// 31. 结束产测
   Future<bool> _autoTestPowerOff() async {
     try {
-      _logState?.info('🔌 结束产测 - 设备下电', type: LogType.debug);
-      // TODO: 发送下电命令
-      // 暂时模拟
+      _logState?.info('🔌 结束产测 - 检查测试结果', type: LogType.debug);
+      
+      // 检查是否有任何测试项失败
+      final hasFailedTests = _testReportItems.any((item) => 
+        item.status == TestReportStatus.fail || 
+        item.status == TestReportStatus.timeout
+      );
+      
+      // 根据测试结果发送不同的命令
+      if (hasFailedTests) {
+        _logState?.warning('检测到测试失败项，发送产测失败命令 (CMD 0xFF, OPT 0x01)', type: LogType.debug);
+        final command = ProductionTestCommands.createEndTestCommand(opt: 0x01);
+        final packet = GtpProtocol.createPacket(
+          ProductionTestCommands.moduleId,
+          ProductionTestCommands.messageId,
+          command,
+        );
+        await _serialService.sendData(packet);
+        _logState?.info('已发送产测失败命令', type: LogType.debug);
+      } else {
+        _logState?.success('所有测试项通过，发送产测通过命令 (CMD 0xFF, OPT 0x00)', type: LogType.debug);
+        final command = ProductionTestCommands.createEndTestCommand(opt: 0x00);
+        final packet = GtpProtocol.createPacket(
+          ProductionTestCommands.moduleId,
+          ProductionTestCommands.messageId,
+          command,
+        );
+        await _serialService.sendData(packet);
+        _logState?.success('已发送产测通过命令', type: LogType.debug);
+      }
+      
+      // 等待设备响应
       await Future.delayed(const Duration(milliseconds: 500));
+      
       return true;
     } catch (e) {
       _logState?.error('结束产测异常: $e', type: LogType.debug);

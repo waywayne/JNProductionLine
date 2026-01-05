@@ -323,6 +323,7 @@ class ProductionTestCommands {
         snBytes = snBytes.sublist(0, snBytes.length - 1);
       }
       
+      
       return String.fromCharCodes(snBytes);
     } catch (e) {
       return null;
@@ -331,7 +332,11 @@ class ProductionTestCommands {
   
   /// Create end test command (0xFF)
   /// 产测结束 - 结束产测状态
-  static Uint8List createEndTestCommand() {
+  /// [opt] - 可选参数：0x00=产测通过, 0x01=产测失败
+  static Uint8List createEndTestCommand({int? opt}) {
+    if (opt != null) {
+      return Uint8List.fromList([cmdEndTest, opt]);
+    }
     return Uint8List.fromList([cmdEndTest]);
   }
   
