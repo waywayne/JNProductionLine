@@ -6111,30 +6111,27 @@ class TestState extends ChangeNotifier {
       
       // 检查是否有任何测试项失败
       final hasFailedTests = _testReportItems.any((item) => 
-        item.status == TestReportStatus.fail || 
-        item.status == TestReportStatus.timeout
+        item.status == TestReportStatus.fail
       );
       
       // 根据测试结果发送不同的命令
       if (hasFailedTests) {
         _logState?.warning('检测到测试失败项，发送产测失败命令 (CMD 0xFF, OPT 0x01)', type: LogType.debug);
         final command = ProductionTestCommands.createEndTestCommand(opt: 0x01);
-        final packet = GtpProtocol.createPacket(
-          ProductionTestCommands.moduleId,
-          ProductionTestCommands.messageId,
+        await _serialService.sendCommand(
           command,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
         );
-        await _serialService.sendData(packet);
         _logState?.info('已发送产测失败命令', type: LogType.debug);
       } else {
         _logState?.success('所有测试项通过，发送产测通过命令 (CMD 0xFF, OPT 0x00)', type: LogType.debug);
         final command = ProductionTestCommands.createEndTestCommand(opt: 0x00);
-        final packet = GtpProtocol.createPacket(
-          ProductionTestCommands.moduleId,
-          ProductionTestCommands.messageId,
+        await _serialService.sendCommand(
           command,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
         );
-        await _serialService.sendData(packet);
         _logState?.success('已发送产测通过命令', type: LogType.debug);
       }
       
@@ -6228,7 +6225,7 @@ class TestState extends ChangeNotifier {
     _isAutoTesting = false;
     _showTestReportDialog = false;
     notifyListeners();
-    _logState?.info('🧹 测试报告已清空', type: LogType.debug);
+    _logState?.info('测试报告已清空', type: LogType.debug);
   }
 
   // ==================== GPIB检测功能 ====================
