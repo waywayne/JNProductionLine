@@ -133,51 +133,28 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 设备信息卡片 - 优化样式
+            // 设备信息卡片 - 紧凑样式
             if (state.currentDeviceIdentity != null)
               Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Colors.blue[600]!, Colors.blue[400]!],
                   ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.blue.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.devices, color: Colors.white, size: 32),
-                    ),
-                    const SizedBox(width: 16),
+                    const Icon(Icons.devices, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            '当前测试设备',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.white70,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
                           Text(
                             'SN: ${state.currentDeviceIdentity!['sn'] ?? 'N/A'}',
                             style: const TextStyle(
-                              fontSize: 16,
+                              fontSize: 14,
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
                             ),
@@ -186,8 +163,8 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                             Text(
                               'MAC: ${state.currentDeviceIdentity!['mac']}',
                               style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.white,
+                                fontSize: 12,
+                                color: Colors.white70,
                               ),
                             ),
                         ],
@@ -197,7 +174,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                 ),
               ),
             
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             
             // 跳过设置面板
             const SkipSettingsPanel(),

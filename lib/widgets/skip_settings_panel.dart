@@ -10,7 +10,7 @@ class SkipSettingsPanel extends StatefulWidget {
 }
 
 class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
-  bool _showSettings = true;  // 默认展开
+  bool _showSettings = false;  // 默认折叠
 
   bool _hasSkipEnabled() {
     return AutomationTestConfig.skipGpibTests ||
@@ -26,21 +26,12 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
-        borderRadius: BorderRadius.circular(12),
+        color: hasSkipEnabled ? Colors.orange.shade50 : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: hasSkipEnabled ? Colors.orange.shade300 : Colors.orange.shade200,
-          width: hasSkipEnabled ? 2 : 1,
+          color: hasSkipEnabled ? Colors.orange.shade300 : Colors.grey.shade300,
+          width: 1,
         ),
-        boxShadow: hasSkipEnabled
-            ? [
-                BoxShadow(
-                  color: Colors.orange.withOpacity(0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ]
-            : [],
       ),
       child: Column(
         children: [
@@ -52,45 +43,50 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
               });
             },
             borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(12),
-              topRight: Radius.circular(12),
+              topLeft: Radius.circular(8),
+              topRight: Radius.circular(8),
             ),
             child: Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
                 children: [
                   Icon(
                     Icons.tune,
-                    color: Colors.orange.shade700,
-                    size: 22,
+                    color: hasSkipEnabled ? Colors.orange.shade700 : Colors.grey.shade600,
+                    size: 16,
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '测试跳过选项',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade700,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '启用跳过选项后，可以不配置GPIB直接开始测试',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.orange.shade600,
-                          ),
-                        ),
-                      ],
+                  const SizedBox(width: 8),
+                  Text(
+                    '测试跳过选项',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: hasSkipEnabled ? Colors.orange.shade700 : Colors.grey.shade700,
                     ),
                   ),
+                  if (hasSkipEnabled) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade600,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        '已启用',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const Spacer(),
                   Icon(
                     _showSettings ? Icons.expand_less : Icons.expand_more,
-                    color: Colors.orange.shade700,
+                    color: hasSkipEnabled ? Colors.orange.shade700 : Colors.grey.shade600,
+                    size: 18,
                   ),
                 ],
               ),
@@ -101,7 +97,7 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
           if (_showSettings) ...[
             const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
                   // 快捷操作按钮

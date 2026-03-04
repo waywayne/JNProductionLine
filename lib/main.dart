@@ -3,8 +3,14 @@ import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
 import 'models/test_state.dart';
 import 'models/log_state.dart';
+import 'config/production_config.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 初始化产测配置
+  await ProductionConfig().init();
+  
   runApp(const MyApp());
 }
 

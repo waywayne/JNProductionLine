@@ -337,24 +337,18 @@ class SerialService {
                       
                       // 先提取 payload 数据
                       Uint8List? payload;
-                      _logState?.info('🔍 Payload提取检查: cliStart.length=${cliStart.length}, payloadLength=$payloadLength, cliStart 至少需要长度=${14 + payloadLength}', type: LogType.debug);
                       
                       if (cliStart.length >= 14 + payloadLength) {
-                        _logState?.info('✅ CLI数据包长度足够提取payload', type: LogType.debug);
                         if (payloadLength > 0) {
-                          _logState?.info('✅ PayloadLength > 0，开始提取payload...', type: LogType.debug);
                           payload = cliStart.sublist(14, 14 + payloadLength);
-                          // 显示Payload长度和内容
+                          // 打印响应数据 (CMD + 数据)
                           final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-                          _logState?.debug('   Len: $payloadLength, Data: [$payloadHex]', type: LogType.debug);
+                          _logState?.info('📥 响应: [$payloadHex]', type: LogType.debug);
                           
                           // 尝试解析 Payload 内容
                           _parsePayload(moduleId, messageId, payload, result);
-                        } else {
-                          _logState?.warning('❌ PayloadLength = 0，没有payload数据', type: LogType.debug);
                         }
                       } else {
-                        _logState?.warning('❌ CLI数据包长度不足以提取payload: 实际=${cliStart.length}, 需要=${14 + payloadLength}', type: LogType.debug);
                         // 数据包长度不足，跳过处理
                         return;
                       }
@@ -675,18 +669,8 @@ class SerialService {
     }
     
     try {
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      _logState?.info('发送数据 (${data.length} bytes)');
-      
-      // 如果勾选了显示原始 hex 数据，则打印完整的 hex 数据
-      if (_logState?.showRawHex ?? false) {
-        _logState?.debug('完整数据包 (HEX):');
-        _logState?.debug(_formatHexData(data));
-      }
-      
       int bytesWritten = _port!.write(data);
       debugPrint('Sent $bytesWritten bytes');
-      _logState?.success('成功发送 $bytesWritten bytes');
       return bytesWritten == data.length;
     } catch (e) {
       debugPrint('Send error: $e');
@@ -699,24 +683,9 @@ class SerialService {
   Future<bool> sendGTPCommand(Uint8List cliPayload, {int? moduleId, int? messageId, int? sequenceNumber}) async {
     Uint8List gtpPacket = GTPProtocol.buildGTPPacket(cliPayload, moduleId: moduleId, messageId: messageId, sequenceNumber: sequenceNumber);
     
-    _logState?.info('📤 发送 GTP 命令', type: LogType.debug);
-    
-    // 如果勾选了显示原始 hex 数据，则打印完整的 GTP 数据包
-    if (_logState?.showRawHex ?? false) {
-      _logState?.debug('完整 GTP 数据包 (${gtpPacket.length} bytes):', type: LogType.debug);
-      _logState?.debug(_formatHexData(gtpPacket), type: LogType.debug);
-    } else {
-      // 否则只显示 CLI Payload
-      _logState?.debug('CLI Payload (${cliPayload.length} bytes):', type: LogType.debug);
-      _logState?.debug(_formatHexData(cliPayload), type: LogType.debug);
-    }
-    
-    // 解析 CLI 消息信息
-    if (moduleId != null && messageId != null) {
-      _logState?.debug('CLI Message:', type: LogType.debug);
-      _logState?.debug('  Module ID: 0x${moduleId.toRadixString(16).padLeft(4, '0').toUpperCase()}', type: LogType.debug);
-      _logState?.debug('  Message ID: 0x${messageId.toRadixString(16).padLeft(4, '0').toUpperCase()}', type: LogType.debug);
-    }
+    // 只打印命令数据 (CMD + OPT + 数据)
+    final cmdHex = _formatHexData(cliPayload);
+    _logState?.info('📤 发送: [$cmdHex]', type: LogType.debug);
     
     debugPrint('Sending GTP packet: ${gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
     
@@ -756,10 +725,7 @@ class SerialService {
     final completer = Completer<Map<String, dynamic>?>();
     _pendingResponses[sn] = completer;
     
-    // 记录命令发送
-    _logState?.debug('📤 发送命令 (SN: $sn, Module: ${moduleId ?? "N/A"}, Message: ${messageId ?? "N/A"})', type: LogType.debug);
-    _logState?.debug('   命令长度: ${command.length} bytes', type: LogType.debug);
-    _logState?.debug('   已注册等待序列号: $sn', type: LogType.debug);
+    // 简化日志：不打印详细信息
     
     // 设置超时
     Timer? timer;
@@ -782,7 +748,7 @@ class SerialService {
       return {'error': 'Failed to send command'};
     }
     
-    _logState?.debug('✅ 命令已发送 (SN: $sn)，等待响应...', type: LogType.debug);
+    // 简化日志：不打印等待信息
     
     // 等待响应
     final response = await completer.future;

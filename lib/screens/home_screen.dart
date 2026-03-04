@@ -15,6 +15,8 @@ import '../widgets/bluetooth_test_dialog.dart';
 import '../widgets/wifi_test_steps_widget.dart';
 import '../widgets/test_report_dialog.dart';
 import '../widgets/gpib_detection_dialog.dart';
+import '../widgets/test_mode_selector.dart';
+import '../widgets/connection_selector.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,13 +25,11 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _HomeScreenState extends State<HomeScreen> {
   
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 1, vsync: this);
     
     // 初始化时设置LogState和SN/MAC配置
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -40,12 +40,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       
       logState.info('应用启动');
     });
-  }
-  
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   @override
@@ -59,30 +53,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               body: Column(
                 children: [
                   const MenuBarWidget(),
-                  
-                  // 选项卡标签
-                  Container(
-                    color: Colors.grey.shade100,
-                    child: TabBar(
-                      controller: _tabController,
-                      tabs: const [
-                        Tab(
-                          icon: Icon(Icons.build),
-                          text: '生产测试',
-                        ),
-                      ],
-                    ),
-                  ),
-                  
-                  // 选项卡内容
+                  // 生产测试页面
                   Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        // 生产测试页面
-                        _buildManualTestPage(),
-                      ],
-                    ),
+                    child: _buildManualTestPage(),
                   ),
                 ],
               ),
@@ -162,42 +135,56 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
   
   Widget _buildManualTestPage() {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SerialPortSection(),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 600,
-              child: Row(
-                children: [
-                  // Factory Test Section (左侧)
-                  const Expanded(
-                    flex: 3,
-                    child: FactoryTestSection(),
-                  ),
-                  const SizedBox(width: 16),
-                  // Log Console Section (右侧)
-                  Expanded(
-                    flex: 2,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      padding: const EdgeInsets.all(12),
-                      child: const LogConsoleSection(),
-                    ),
-                  ),
-                ],
-              ),
+    return Column(
+      children: [
+        // 顶部紧凑配置区
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border(
+              bottom: BorderSide(color: Colors.grey.shade300),
             ),
-          ],
+          ),
+          child: Column(
+            children: [
+              // Test Mode Selector
+              const TestModeSelector(),
+              const SizedBox(height: 8),
+              // Connection Selector (adapts based on test mode)
+              const ConnectionSelector(),
+            ],
+          ),
         ),
-      ),
+        // 主要测试区域
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                // Factory Test Section (左侧)
+                const Expanded(
+                  flex: 3,
+                  child: FactoryTestSection(),
+                ),
+                const SizedBox(width: 12),
+                // Log Console Section (右侧)
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey[300]!),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(12),
+                    child: const LogConsoleSection(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
   

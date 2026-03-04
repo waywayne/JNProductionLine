@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../screens/gpib_test_screen.dart';
+import '../screens/production_config_screen.dart';
 import 'sn_mac_config_section.dart';
 
 class MenuBarWidget extends StatelessWidget {
@@ -30,6 +31,25 @@ class MenuBarWidget extends StatelessWidget {
             title: 'SN/MAC配置',
             onPressed: () {
               _showSNMacConfigDialog(context);
+            },
+          ),
+          _MenuButton(
+            title: '通用配置',
+            icon: Icons.settings,
+            onPressed: () async {
+              final result = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ProductionConfigScreen()),
+              );
+              // 如果配置已更新，可以在这里刷新相关状态
+              if (result == true && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('配置已更新，新的测试将使用新配置'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
             },
           ),
           const Spacer(),
@@ -79,10 +99,12 @@ class MenuBarWidget extends StatelessWidget {
 class _MenuButton extends StatefulWidget {
   final String title;
   final VoidCallback onPressed;
+  final IconData? icon;
 
   const _MenuButton({
     required this.title,
     required this.onPressed,
+    this.icon,
   });
 
   @override
@@ -102,12 +124,21 @@ class _MenuButtonState extends State<_MenuButton> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           color: _isHovered ? Colors.grey[300] : Colors.transparent,
-          child: Text(
-            widget.title,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.black87,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.icon != null) ...[
+                Icon(widget.icon, size: 16, color: Colors.black87),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                widget.title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
           ),
         ),
       ),

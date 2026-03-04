@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'dart:convert';
 import 'package:path/path.dart' as path;
 import '../services/serial_service.dart';
+import '../services/spp_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
@@ -15,6 +16,7 @@ import '../config/sn_mac_config.dart';
 import 'touch_test_step.dart';
 import 'test_report.dart';
 import 'automation_test_config.dart';
+import 'test_mode.dart';
 
 enum TestStatus {
   waiting,
@@ -126,7 +128,13 @@ class TestState extends ChangeNotifier {
   String _testScriptPath = 'Choose script file path';
   String _configFilePath = 'Choose config file path';
 
+  // Test mode selection
+  TestMode _testMode = TestMode.singleBoard;
+  
+  // Communication services
   final SerialService _serialService = SerialService();
+  final SppService _sppService = SppService();
+  
   String? _selectedPort;
   bool _isRunningTest = false;
   bool _shouldStopTest = false; // 测试停止标志
@@ -190,6 +198,13 @@ class TestState extends ChangeNotifier {
   StreamSubscription<Uint8List>? _imuDataSubscription;
   Completer<bool>? _imuTestCompleter; // 用于等待用户确认
   
+  // 功耗测试状态
+  bool _isPowerConsumptionTesting = false;
+  bool _showPowerConsumptionDialog = false;
+  int? _currentPowerConsumptionOpt; // 当前功耗测试选项
+  double? _currentPowerValue; // 当前功耗数值
+  Completer<bool>? _powerConsumptionTestCompleter; // 用于等待用户确认
+  
   // LED测试弹窗状态
   bool _showLEDDialog = false;
   String? _currentLEDType; // "内侧" 或 "外侧"
@@ -231,7 +246,12 @@ class TestState extends ChangeNotifier {
   String get testScriptPath => _testScriptPath;
   String get configFilePath => _configFilePath;
   TestGroup? get currentTestGroup => _currentTestGroup;
-  bool get isConnected => _serialService.isConnected;
+  
+  // Test mode getters
+  TestMode get testMode => _testMode;
+  bool get isConnected => _testMode.usesSerialPort 
+      ? _serialService.isConnected 
+      : _sppService.isConnected;
   String? get selectedPort => _selectedPort;
   bool get isRunningTest => _isRunningTest;
 
@@ -264,6 +284,12 @@ class TestState extends ChangeNotifier {
   bool get isIMUTesting => _isIMUTesting;
   bool get showIMUDialog => _showIMUDialog;
   List<Map<String, dynamic>> get imuDataList => _imuDataList;
+  
+  // 功耗测试状态getter
+  bool get isPowerConsumptionTesting => _isPowerConsumptionTesting;
+  bool get showPowerConsumptionDialog => _showPowerConsumptionDialog;
+  int? get currentPowerConsumptionOpt => _currentPowerConsumptionOpt;
+  double? get currentPowerValue => _currentPowerValue;
   
   // LED测试状态getter
   bool get showLEDDialog => _showLEDDialog;
@@ -304,6 +330,7 @@ class TestState extends ChangeNotifier {
   void setLogState(LogState logState) {
     _logState = logState;
     _serialService.setLogState(logState);
+    _sppService.setLogState(logState);
   }
   
   /// 关闭Touch测试弹窗
@@ -554,26 +581,31 @@ class TestState extends ChangeNotifier {
     return [
       {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
       {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '3. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
-      {'name': '4. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
-      {'name': '5. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
-      {'name': '6. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
-      {'name': '7. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
-      {'name': '8. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
-      {'name': '9. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
-      {'name': '10. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
-      {'name': '11. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '12. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '13. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '14. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '15. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '16. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '17. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '18. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '19. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '20. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '21. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '22. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
+      {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
+      {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false},
+      {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false},
+      {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '11. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '12. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '13. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '14. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '15. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '16. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '17. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '18. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '19. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '20. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '21. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '22. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '23. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '24. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '25. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '26. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '27. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -709,16 +741,67 @@ class TestState extends ChangeNotifier {
 
   /// Disconnect from serial port
   Future<void> disconnect() async {
-    _logState?.info('正在断开串口连接');
+    _logState?.info('正在断开连接');
     
     // 清理所有测试状态和关闭所有弹窗
     await _cleanupAllTestsAndDialogs();
     
-    await _serialService.disconnect();
+    if (_testMode.usesSerialPort) {
+      await _serialService.disconnect();
+      _logState?.info('串口已断开');
+    } else {
+      await _sppService.disconnect();
+      _logState?.info('SPP连接已断开');
+    }
+    
     _selectedPort = null;
     _currentTestGroup = null; // 断开连接时清空测试组
-    _logState?.info('串口已断开');
     notifyListeners();
+  }
+  
+  /// Switch test mode
+  Future<void> switchTestMode(TestMode mode) async {
+    if (_testMode == mode) return;
+    
+    // Disconnect current connection
+    if (isConnected) {
+      await disconnect();
+    }
+    
+    _testMode = mode;
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _logState?.info('🔄 切换测试模式: ${mode.displayName}');
+    _logState?.info('   ${mode.description}');
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    notifyListeners();
+  }
+  
+  /// Get available SPP devices
+  Future<List<dynamic>> getAvailableSppDevices() async {
+    return await _sppService.getAvailableDevices();
+  }
+  
+  /// Connect to SPP device
+  Future<bool> connectToSppDevice(dynamic device) async {
+    _logState?.info('正在连接SPP设备: ${device.name ?? "未知设备"}');
+    
+    bool success = await _sppService.connect(device);
+    
+    if (success) {
+      _selectedPort = device.address;
+      _logState?.success('SPP连接成功: ${device.name ?? "未知设备"}');
+      
+      // 创建测试组
+      _currentTestGroup = TestGroup(
+        name: device.name ?? device.address,
+        items: [],
+      );
+      notifyListeners();
+    } else {
+      _logState?.error('SPP连接失败');
+    }
+    
+    return success;
   }
   
   /// 清理所有测试状态和关闭所有弹窗
@@ -2038,6 +2121,149 @@ class TestState extends ChangeNotifier {
       _logState?.error('❌ 漏电流测试异常: $e', type: LogType.debug);
       _logState?.error('❌ 漏电流测试异常: $e', type: LogType.gpib);
       return false;
+    }
+  }
+
+  /// 物奇功耗手动测试 - 使用新功耗测试指令
+  Future<bool> testWuqiPower() async {
+    return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptWuqiOnly);
+  }
+
+  /// ISP工作功耗手动测试 - 使用新功耗测试指令
+  Future<bool> testIspWorkingPower() async {
+    return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptIsp);
+  }
+
+  /// EMMC容量检测手动测试
+  Future<bool> testEMMCCapacity() async {
+    return await _autoTestEMMCCapacity();
+  }
+
+  /// 完整功耗手动测试 - 使用新功耗测试指令
+  Future<bool> testFullPower() async {
+    return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptWifi);
+  }
+
+  /// ISP休眠功耗手动测试 - 使用新功耗测试指令
+  Future<bool> testIspSleepPower() async {
+    return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptSigmaSleep);
+  }
+  
+  /// 功耗测试通用方法 - 手动测试
+  /// [opt] - 功耗测试选项：0x00=物奇, 0x01=ISP, 0x02=Sigma休眠, 0x03=WiFi
+  Future<bool> testPowerConsumption(int opt) async {
+    if (!_serialService.isConnected) {
+      _logState?.error('[功耗测试] 串口未连接', type: LogType.debug);
+      return false;
+    }
+
+    try {
+      final optName = ProductionTestCommands.getPowerConsumptionOptionName(opt);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始$optName', type: LogType.debug);
+      _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+
+      // 设置状态
+      _isPowerConsumptionTesting = true;
+      _currentPowerConsumptionOpt = opt;
+      _currentPowerValue = null;
+      _showPowerConsumptionDialog = true;
+      notifyListeners();
+
+      // 等待弹窗显示
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // 发送功耗测试命令
+      _logState?.info('📤 发送功耗测试命令: $optName', type: LogType.debug);
+      final command = ProductionTestCommands.createPowerConsumptionCommand(opt);
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$commandHex] (${command.length} bytes)', type: LogType.debug);
+
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ 功耗测试命令发送失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _closePowerConsumptionDialog();
+        return false;
+      }
+
+      // 解析响应
+      if (response.containsKey('payload')) {
+        final payload = response['payload'] as Uint8List;
+        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📥 响应: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+
+        final result = ProductionTestCommands.parsePowerConsumptionResponse(payload);
+        if (result != null && result['success'] == true) {
+          if (result.containsKey('value')) {
+            _currentPowerValue = result['value'] as double;
+            _logState?.success('✅ 功耗数值: ${_currentPowerValue!.toStringAsFixed(2)} mA', type: LogType.debug);
+          } else {
+            _logState?.success('✅ 功耗测试命令执行成功', type: LogType.debug);
+          }
+          notifyListeners();
+        } else {
+          _logState?.error('❌ 功耗测试响应解析失败', type: LogType.debug);
+        }
+      }
+
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.success('✅ $optName完成', type: LogType.debug);
+      _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+
+      return true;
+    } catch (e) {
+      _logState?.error('功耗测试异常: $e', type: LogType.debug);
+      _closePowerConsumptionDialog();
+      return false;
+    }
+  }
+  
+  /// 关闭功耗测试弹窗
+  void _closePowerConsumptionDialog() {
+    _isPowerConsumptionTesting = false;
+    _showPowerConsumptionDialog = false;
+    _currentPowerConsumptionOpt = null;
+    _currentPowerValue = null;
+    notifyListeners();
+  }
+  
+  /// 用户确认功耗测试结束
+  void confirmPowerConsumptionTestEnd() async {
+    // 发送功耗测试结束命令
+    await _sendPowerConsumptionEndCommand();
+    _closePowerConsumptionDialog();
+  }
+  
+  /// 发送功耗测试结束命令 (0x04)
+  Future<void> _sendPowerConsumptionEndCommand() async {
+    try {
+      _logState?.info('📤 发送功耗测试结束命令', type: LogType.debug);
+      final command = ProductionTestCommands.createPowerConsumptionCommand(
+        ProductionTestCommands.powerConsumptionOptEnd
+      );
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ 功耗测试已结束', type: LogType.debug);
+      } else {
+        _logState?.warning('⚠️  功耗测试结束命令发送失败', type: LogType.debug);
+      }
+    } catch (e) {
+      _logState?.warning('⚠️  发送功耗测试结束命令异常: $e', type: LogType.debug);
     }
   }
 
@@ -4451,34 +4677,39 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（32项）
+    // 定义完整测试序列（37项）
     final testSequence = [
       {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
       {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '3. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
-      {'name': '4. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
-      {'name': '5. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
-      {'name': '5.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
-      {'name': '5.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
-      {'name': '5.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
-      {'name': '6. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
-      {'name': '7. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
-      {'name': '8. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
-      {'name': '9. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
-      {'name': '10. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '11. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '12. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '13. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '14. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '15. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '16. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '17. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '18. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '19. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '20. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
-      {'name': '21. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '22. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
-      {'name': '23. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
+      {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
+      {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false},
+      {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false},
+      {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '10.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
+      {'name': '10.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
+      {'name': '10.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '11. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '12. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '13. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '14. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '15. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '16. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '17. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '18. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '19. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '20. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '21. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '22. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '23. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '24. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '25. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '26. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '27. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '28. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
@@ -5347,6 +5578,417 @@ class TestState extends ChangeNotifier {
     }
   }
 
+  /// 3.1 物奇功耗测试 (只开启物奇) - 使用新CMD 0x0F
+  Future<bool> _autoTestWuqiPower() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始物奇功耗测试', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 1. 发送功耗测试命令：只物奇
+      _logState?.info('📤 发送功耗测试命令：只物奇', type: LogType.debug);
+      final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
+        ProductionTestCommands.powerConsumptionOptWuqiOnly
+      );
+      
+      final powerResponse = await _serialService.sendCommandAndWaitResponse(
+        powerCommand,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (powerResponse == null || powerResponse.containsKey('error')) {
+        _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
+        return false;
+      }
+      
+      final powerPayload = powerResponse['payload'] as Uint8List?;
+      if (powerPayload != null) {
+        final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
+        if (result == null || !(result['success'] as bool)) {
+          _logState?.error('❌ 物奇功耗测试启动失败', type: LogType.debug);
+          return false;
+        }
+        _logState?.success('✅ 物奇功耗测试已启动', type: LogType.debug);
+      }
+      
+      // 2. 等待设备稳定
+      _logState?.info('⏳ 等待设备稳定 (2秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // 3. 检查GPIB是否就绪
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        return false;
+      }
+      
+      if (!_isGpibReady) {
+        _logState?.warning('⚠️  GPIB未就绪，跳过物奇功耗测试', type: LogType.debug);
+        return true;
+      }
+      
+      // 4. 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        return false;
+      }
+      
+      final currentMa = currentA * 1000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 物奇功耗测试结果:', type: LogType.debug);
+      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+      
+      bool testPassed = false;
+      if (currentMa <= TestConfig.wuqiPowerThresholdMa) {
+        _logState?.success('✅ 物奇功耗测试通过', type: LogType.debug);
+        testPassed = true;
+      } else {
+        _logState?.error('❌ 物奇功耗测试失败: 超过阈值', type: LogType.debug);
+        testPassed = false;
+      }
+      
+      // 发送功耗测试结束命令
+      await _sendPowerConsumptionEndCommand();
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return testPassed;
+    } catch (e) {
+      _logState?.error('❌ 物奇功耗测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 3.2 ISP工作功耗测试 (开启ISP) - 使用新CMD 0x0F
+  Future<bool> _autoTestIspWorkingPower() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始ISP工作功耗测试', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 1. 发送功耗测试命令：ISP功耗测试
+      _logState?.info('📤 发送功耗测试命令：ISP功耗测试', type: LogType.debug);
+      final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
+        ProductionTestCommands.powerConsumptionOptIsp
+      );
+      
+      final powerResponse = await _serialService.sendCommandAndWaitResponse(
+        powerCommand,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (powerResponse == null || powerResponse.containsKey('error')) {
+        _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
+        return false;
+      }
+      
+      final powerPayload = powerResponse['payload'] as Uint8List?;
+      if (powerPayload != null) {
+        final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
+        if (result == null || !(result['success'] as bool)) {
+          _logState?.error('❌ ISP功耗测试启动失败', type: LogType.debug);
+          return false;
+        }
+        _logState?.success('✅ ISP功耗测试已启动', type: LogType.debug);
+      }
+      
+      // 2. 等待设备稳定
+      _logState?.info('⏳ 等待设备稳定 (2秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // 3. 检查GPIB是否就绪
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        return false;
+      }
+      
+      if (!_isGpibReady) {
+        _logState?.warning('⚠️  GPIB未就绪，跳过ISP工作功耗测试', type: LogType.debug);
+        return true;
+      }
+      
+      // 4. 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        return false;
+      }
+      
+      final currentMa = currentA * 1000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 ISP工作功耗测试结果:', type: LogType.debug);
+      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+      
+      bool testPassed = false;
+      if (currentMa <= TestConfig.ispWorkingPowerThresholdMa) {
+        _logState?.success('✅ ISP工作功耗测试通过', type: LogType.debug);
+        testPassed = true;
+      } else {
+        _logState?.error('❌ ISP工作功耗测试失败: 超过阈值', type: LogType.debug);
+        testPassed = false;
+      }
+      
+      // 发送功耗测试结束命令
+      await _sendPowerConsumptionEndCommand();
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return testPassed;
+    } catch (e) {
+      _logState?.error('❌ ISP工作功耗测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 3.3 EMMC容量检测测试
+  Future<bool> _autoTestEMMCCapacity() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('💾 开始EMMC容量检测测试', type: LogType.debug);
+      _logState?.info('   最小容量: ${TestConfig.emmcMinCapacityMb} MB', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 1. 发送获取EMMC容量命令 (CMD 0x0E)
+      _logState?.info('📤 发送获取EMMC容量命令', type: LogType.debug);
+      final getCapacityCommand = Uint8List.fromList([ProductionTestCommands.cmdEMMC]);
+      
+      final capacityResponse = await _serialService.sendCommandAndWaitResponse(
+        getCapacityCommand,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (capacityResponse == null || capacityResponse.containsKey('error')) {
+        _logState?.error('❌ 获取EMMC容量失败', type: LogType.debug);
+        return false;
+      }
+      
+      final capacityPayload = capacityResponse['payload'] as Uint8List?;
+      if (capacityPayload == null) {
+        _logState?.error('❌ EMMC容量响应数据为空', type: LogType.debug);
+        return false;
+      }
+      
+      final capacityResult = ProductionTestCommands.parseEMMCResponse(capacityPayload);
+      if (capacityResult == null || !(capacityResult['success'] as bool)) {
+        _logState?.error('❌ EMMC容量解析失败', type: LogType.debug);
+        return false;
+      }
+      
+      final capacityMbStr = capacityResult['capacity_mb'] as String;
+      final capacityGbStr = capacityResult['capacity_gb'] as String;
+      final capacityBytes = capacityResult['capacity_bytes'] as int;
+      
+      _logState?.info('📊 EMMC容量: $capacityGbStr GB ($capacityMbStr MB)', type: LogType.debug);
+      
+      // 2. 检查容量是否正常
+      final capacityMb = double.parse(capacityMbStr);
+      if (capacityMb < TestConfig.emmcMinCapacityMb) {
+        _logState?.error('❌ EMMC容量异常: $capacityMbStr MB < ${TestConfig.emmcMinCapacityMb} MB', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ EMMC容量检测测试通过', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return true;
+    } catch (e) {
+      _logState?.error('❌ EMMC容量检测测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 3.4 完整功耗测试 (开启物奇、Sigma和WiFi) - 使用新CMD 0x0F
+  Future<bool> _autoTestFullPower() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始完整功耗测试', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.fullPowerThresholdMa} mA', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 1. 发送功耗测试命令：物奇+Sigma+WiFi
+      _logState?.info('📤 发送功耗测试命令：物奇+Sigma+WiFi', type: LogType.debug);
+      final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
+        ProductionTestCommands.powerConsumptionOptWifi
+      );
+      
+      final powerResponse = await _serialService.sendCommandAndWaitResponse(
+        powerCommand,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (powerResponse == null || powerResponse.containsKey('error')) {
+        _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
+        return false;
+      }
+      
+      final powerPayload = powerResponse['payload'] as Uint8List?;
+      if (powerPayload != null) {
+        final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
+        if (result == null || !(result['success'] as bool)) {
+          _logState?.error('❌ 完整功耗测试启动失败', type: LogType.debug);
+          return false;
+        }
+        _logState?.success('✅ 物奇+Sigma+WiFi功耗测试已启动', type: LogType.debug);
+      }
+      
+      // 2. 等待设备稳定
+      _logState?.info('⏳ 等待设备稳定 (3秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 3));
+      
+      // 3. 检查GPIB是否就绪
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        return false;
+      }
+      
+      if (!_isGpibReady) {
+        _logState?.warning('⚠️  GPIB未就绪，跳过完整功耗测试', type: LogType.debug);
+        return true;
+      }
+      
+      // 4. 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        return false;
+      }
+      
+      final currentMa = currentA * 1000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 完整功耗测试结果:', type: LogType.debug);
+      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.fullPowerThresholdMa} mA', type: LogType.debug);
+      
+      bool testPassed = false;
+      if (currentMa <= TestConfig.fullPowerThresholdMa) {
+        _logState?.success('✅ 完整功耗测试通过', type: LogType.debug);
+        testPassed = true;
+      } else {
+        _logState?.error('❌ 完整功耗测试失败: 超过阈值', type: LogType.debug);
+        testPassed = false;
+      }
+      
+      // 发送功耗测试结束命令
+      await _sendPowerConsumptionEndCommand();
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return testPassed;
+    } catch (e) {
+      _logState?.error('❌ 完整功耗测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 3.5 Sigma休眠功耗测试 (开启物奇、Sigma休眠) - 使用新CMD 0x0F
+  Future<bool> _autoTestIspSleepPower() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始Sigma休眠功耗测试', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.ispSleepPowerThresholdMa} mA', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 1. 发送功耗测试命令：物奇+Sigma休眠
+      _logState?.info('📤 发送功耗测试命令：物奇+Sigma休眠', type: LogType.debug);
+      final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
+        ProductionTestCommands.powerConsumptionOptSigmaSleep
+      );
+      
+      final powerResponse = await _serialService.sendCommandAndWaitResponse(
+        powerCommand,
+        timeout: TestConfig.defaultTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (powerResponse == null || powerResponse.containsKey('error')) {
+        _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
+        return false;
+      }
+      
+      final powerPayload = powerResponse['payload'] as Uint8List?;
+      if (powerPayload != null) {
+        final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
+        if (result == null || !(result['success'] as bool)) {
+          _logState?.error('❌ Sigma休眠功耗测试启动失败', type: LogType.debug);
+          return false;
+        }
+        _logState?.success('✅ 物奇+Sigma休眠功耗测试已启动', type: LogType.debug);
+      }
+      
+      // 2. 等待设备稳定
+      _logState?.info('⏳ 等待设备稳定 (2秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // 3. 检查GPIB是否就绪
+      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        return false;
+      }
+      
+      if (!_isGpibReady) {
+        _logState?.warning('⚠️  GPIB未就绪，跳过ISP休眠功耗测试', type: LogType.debug);
+        return true;
+      }
+      
+      // 4. 使用GPIB测量电流
+      final currentA = await _gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
+      
+      if (currentA == null) {
+        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        return false;
+      }
+      
+      final currentMa = currentA * 1000;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 ISP休眠功耗测试结果:', type: LogType.debug);
+      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+      _logState?.info('   阈值: ≤ ${TestConfig.ispSleepPowerThresholdMa} mA', type: LogType.debug);
+      
+      bool testPassed = false;
+      if (currentMa <= TestConfig.ispSleepPowerThresholdMa) {
+        _logState?.success('✅ ISP休眠功耗测试通过', type: LogType.debug);
+        testPassed = true;
+      } else {
+        _logState?.error('❌ ISP休眠功耗测试失败: 超过阈值', type: LogType.debug);
+        testPassed = false;
+      }
+      
+      // 发送功耗测试结束命令
+      await _sendPowerConsumptionEndCommand();
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return testPassed;
+    } catch (e) {
+      _logState?.error('❌ ISP休眠功耗测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
   /// 4. 设备电压测试
   Future<bool> _autoTestVoltage() async {
     try {
@@ -5584,8 +6226,11 @@ class TestState extends ChangeNotifier {
             final readMACString = readMAC.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
             final expectedMACString = _generatedBluetoothMAC!.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
             
-            _logState?.info('📱 读取MAC地址: $readMACString', type: LogType.debug);
-            _logState?.info('📱 期望MAC地址: $expectedMACString', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            _logState?.info('📱 MAC地址对比:', type: LogType.debug);
+            _logState?.info('   写入的MAC: $expectedMACString', type: LogType.debug);
+            _logState?.info('   读取的MAC: $readMACString', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
             
             // 验证MAC地址是否一致
             bool isMatch = true;
@@ -5601,6 +6246,17 @@ class TestState extends ChangeNotifier {
               return true;
             } else {
               _logState?.error('❌ 蓝牙MAC地址不匹配', type: LogType.debug);
+              _logState?.error('   写入的MAC: $expectedMACString', type: LogType.debug);
+              _logState?.error('   读取的MAC: $readMACString', type: LogType.debug);
+              
+              // 显示每个字节的差异
+              final diff = StringBuffer('   差异详情: ');
+              for (int i = 0; i < 6; i++) {
+                if (readMAC[i] != _generatedBluetoothMAC![i]) {
+                  diff.write('字节$i [写入:0x${_generatedBluetoothMAC![i].toRadixString(16).toUpperCase().padLeft(2, '0')} != 读取:0x${readMAC[i].toRadixString(16).toUpperCase().padLeft(2, '0')}] ');
+                }
+              }
+              _logState?.error(diff.toString(), type: LogType.debug);
               return false;
             }
           } else {

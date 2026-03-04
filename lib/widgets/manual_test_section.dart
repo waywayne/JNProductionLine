@@ -55,6 +55,96 @@ class ManualTestSection extends StatelessWidget {
               ),
               _buildTestButton(
                 context,
+                '物奇功耗测试',
+                Icons.power,
+                () async {
+                  final success = await state.testWuqiPower();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ 物奇功耗测试通过' : '❌ 物奇功耗测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.teal,
+              ),
+              _buildTestButton(
+                context,
+                'ISP工作功耗测试',
+                Icons.memory,
+                () async {
+                  final success = await state.testIspWorkingPower();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ ISP工作功耗测试通过' : '❌ ISP工作功耗测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.indigo,
+              ),
+              _buildTestButton(
+                context,
+                'EMMC容量检测',
+                Icons.storage,
+                () async {
+                  final success = await state.testEMMCCapacity();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ EMMC容量检测通过' : '❌ EMMC容量检测失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.brown,
+              ),
+              _buildTestButton(
+                context,
+                '完整功耗测试',
+                Icons.power_settings_new,
+                () async {
+                  final success = await state.testFullPower();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ 完整功耗测试通过' : '❌ 完整功耗测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.deepOrange,
+              ),
+              _buildTestButton(
+                context,
+                'ISP休眠功耗测试',
+                Icons.bedtime,
+                () async {
+                  final success = await state.testIspSleepPower();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ ISP休眠功耗测试通过' : '❌ ISP休眠功耗测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.blueGrey,
+              ),
+              _buildTestButton(
+                context,
                 '获取设备电压',
                 Icons.battery_charging_full,
                 () => state.runManualTest('获取设备电压', ProductionTestCommands.createGetVoltageCommand()),

@@ -27,6 +27,8 @@ class ProductionTestCommands {
   static const int cmdIMU = 0x0B; // IMU测试
   static const int cmdSensor = 0x0C; // Sensor测试
   static const int cmdBluetooth = 0x0D; // 蓝牙测试
+  static const int cmdEMMC = 0x0E; // EMMC容量检测
+  static const int cmdPowerConsumption = 0x0F; // 功耗测试
   static const int cmdWriteSN = 0xFE; // SN码写入
   static const int cmdEndTest = 0xFF; // 产测结束
   
@@ -77,6 +79,17 @@ class ProductionTestCommands {
   static const int bluetoothOptReadMac = 0x01; // 上位机主动读MAC地址
   static const int bluetoothOptSetName = 0x02; // 设置蓝牙名称
   static const int bluetoothOptGetName = 0x03; // 获取蓝牙名称
+  
+  // Power consumption test operations (0x0F)
+  static const int powerConsumptionOptWuqiOnly = 0x00; // 只物奇功耗测试
+  static const int powerConsumptionOptIsp = 0x01; // ISP功耗测试（开启物奇和ISP）
+  static const int powerConsumptionOptSigmaSleep = 0x02; // 开启物奇，Sigma休眠
+  static const int powerConsumptionOptWifi = 0x03; // 开启物奇、Sigma以及WiFi
+  static const int powerConsumptionOptEnd = 0x04; // 功耗测试结束
+  
+  // EMMC operations (0x10)
+  static const int emmcOptGetCapacity = 0x00; // 获取EMMC容量
+  static const int emmcOptRepair = 0x01; // 修复EMMC容量问题
   
   /// Create exit sleep mode command
   /// 退出休眠模式 - module id:5, message id:4
@@ -929,6 +942,111 @@ class ProductionTestCommands {
       command[0] = cmdBluetooth; // 0x0D
       command[1] = opt; // 0x01
       return command;
+    }
+  }
+  
+  /// Create power consumption test command (0x0F)
+  /// 功耗测试命令 - CMD 0x0F + OPT
+  /// [opt] - 测试选项：
+  ///   0x00: 只物奇功耗测试
+  ///   0x01: ISP功耗测试（开启物奇和ISP）
+  ///   0x02: 开启物奇，Sigma休眠
+  ///   0x03: 开启物奇、Sigma以及WiFi
+  ///   0x04: 功耗测试结束
+  static Uint8List createPowerConsumptionCommand(int opt) {
+    return Uint8List.fromList([cmdPowerConsumption, opt]);
+  }
+  
+  /// Parse power consumption test response
+  /// 响应格式：[CMD 0x0F] + [数值]
+  /// 返回功耗数值
+  static Map<String, dynamic>? parsePowerConsumptionResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0x0F
+    if (payload[0] != cmdPowerConsumption) return null;
+    
+    // 如果只有命令字节，表示命令确认
+    if (payload.length == 1) {
+      return {
+        'cmd': payload[0],
+        'success': true,
+        'message': '功耗测试命令执行成功',
+      };
+    }
+    
+    // 解析功耗数值（假设为4字节浮点数）
+    if (payload.length >= 5) {
+      final value = ByteData.view(payload.buffer)
+          .getFloat32(1, Endian.little);
+      
+      return {
+        'cmd': payload[0],
+        'value': value,
+        'success': true,
+      };
+    }
+    
+    // 兼容其他格式：2字节整数
+    if (payload.length >= 3) {
+      final value = ByteData.view(payload.buffer)
+          .getUint16(1, Endian.little);
+      
+      return {
+        'cmd': payload[0],
+        'value': value.toDouble(),
+        'success': true,
+      };
+    }
+    
+    return null;
+  }
+  
+  /// Get power consumption option name
+  static String getPowerConsumptionOptionName(int opt) {
+    switch (opt) {
+      case powerConsumptionOptWuqiOnly: return '只物奇功耗测试';
+      case powerConsumptionOptIsp: return 'ISP功耗测试';
+      case powerConsumptionOptSigmaSleep: return '物奇+Sigma休眠';
+      case powerConsumptionOptWifi: return '物奇+Sigma+WiFi';
+      case powerConsumptionOptEnd: return '功耗测试结束';
+      default: return 'UNKNOWN';
+    }
+  }
+  
+  /// Create EMMC command (0x0E)
+  /// EMMC容量检测命令 - CMD 0x0E + OPT
+  /// [opt] - 操作选项：
+  ///   0x00: 获取EMMC容量
+  ///   0x01: 修复EMMC容量问题
+  static Uint8List createEMMCCommand(int opt) {
+    return Uint8List.fromList([cmdEMMC, opt]);
+  }
+  
+  /// Parse EMMC response
+  /// 响应格式：[CMD 0x0E] + [容量(8字节,uint64)]
+  /// 返回容量（Bytes）或错误信息
+  static Map<String, dynamic>? parseEMMCResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0x0E
+    if (payload[0] != cmdEMMC) return null;
+    
+    // 响应格式：[CMD 0x0E] + [容量(8字节,uint64)]
+    if (payload.length >= 9) {
+      final capacityBytes = ByteData.view(payload.buffer)
+          .getUint64(1, Endian.little);
+      
+      final capacityMB = capacityBytes / (1024 * 1024);
+      final capacityGB = capacityBytes / (1024 * 1024 * 1024);
+      
+      return {
+        'cmd': payload[0],
+        'capacity_bytes': capacityBytes,
+        'capacity_mb': capacityMB.toStringAsFixed(2),
+        'capacity_gb': capacityGB.toStringAsFixed(2),
+        'success': true,
+      };
     }
   }
 }
