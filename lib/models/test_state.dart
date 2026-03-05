@@ -6485,11 +6485,11 @@ class TestState extends ChangeNotifier {
       _logState?.info('📡 开始SPP蓝牙功能测试', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 检查平台支持（仅支持 Android）
-      if (!Platform.isAndroid) {
+      // 检查平台支持（支持 Android 和 Windows）
+      if (!Platform.isAndroid && !Platform.isWindows) {
         _logState?.warning('⚠️ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙测试', type: LogType.debug);
-        _logState?.info('   支持的平台: Android', type: LogType.debug);
-        _logState?.info('   Windows/macOS/iOS 暂不支持', type: LogType.debug);
+        _logState?.info('   支持的平台: Android, Windows', type: LogType.debug);
+        _logState?.info('   macOS/iOS 暂不支持', type: LogType.debug);
         _logState?.warning('⏭️ 跳过SPP蓝牙功能测试', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true; // 在不支持的平台上返回true以继续测试流程

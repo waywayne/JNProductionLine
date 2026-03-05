@@ -6,9 +6,12 @@ import '../models/log_state.dart';
 import '../config/test_config.dart';
 
 // Conditional imports for platform-specific Bluetooth plugins
-// Android only: flutter_bluetooth_serial
+// Android: flutter_bluetooth_serial
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart'
     if (dart.library.io) 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+// Windows: flutter_bluetooth_classic_serial
+import 'package:flutter_bluetooth_classic_serial/flutter_bluetooth_classic.dart'
+    as classic;
 
 /// SPP (Serial Port Profile) Bluetooth communication service for complete device testing
 /// 整机产测使用SPP协议进行蓝牙通讯
@@ -50,6 +53,8 @@ class SppService {
       // Platform-specific implementation
       if (Platform.isAndroid) {
         return await _getAvailableDevicesAndroid();
+      } else if (Platform.isWindows) {
+        return await _getAvailableDevicesWindows();
       }
       
       _logState?.warning('⚠️ 当前平台不支持SPP蓝牙');
@@ -97,12 +102,48 @@ class SppService {
     }
   }
   
+  /// Get available Bluetooth devices on Windows
+  Future<List<BluetoothDevice>> _getAvailableDevicesWindows() async {
+    try {
+      _logState?.info('🔍 Windows: 扫描配对的蓝牙设备...');
+      
+      // Get paired devices using flutter_bluetooth_classic
+      final bluetoothClassic = classic.FlutterBluetoothClassic();
+      final pairedDevices = await bluetoothClassic.getPairedDevices();
+      
+      if (pairedDevices.isEmpty) {
+        _logState?.warning('⚠️ 未找到已配对的蓝牙设备');
+        _logState?.info('   请先在Windows设置中配对蓝牙设备');
+        return [];
+      }
+      
+      _logState?.success('✅ 找到 ${pairedDevices.length} 个已配对设备:');
+      
+      // Convert classic.BluetoothDevice to BluetoothDevice
+      final devices = <BluetoothDevice>[];
+      for (var device in pairedDevices) {
+        final deviceName = device.name.isEmpty ? "未知设备" : device.name;
+        _logState?.info('  📱 $deviceName (${device.address})');
+        // Create a compatible BluetoothDevice object
+        devices.add(BluetoothDevice(
+          name: device.name,
+          address: device.address,
+        ));
+      }
+      
+      return devices;
+    } catch (e) {
+      _logState?.error('❌ Windows 蓝牙扫描失败: $e');
+      return [];
+    }
+  }
+  
   
   /// Check if current platform supports SPP Bluetooth
   bool _isPlatformSupported() {
-    // Currently only Android is supported via flutter_bluetooth_serial
-    // Windows support requires additional native implementation
-    return Platform.isAndroid;
+    // Android: flutter_bluetooth_serial
+    // Windows: flutter_bluetooth_classic_serial
+    return Platform.isAndroid || Platform.isWindows;
   }
   
   /// Check if connected
@@ -157,10 +198,12 @@ class SppService {
       // Platform-specific connection
       if (Platform.isAndroid) {
         return await _connectAndroid(device);
+      } else if (Platform.isWindows) {
+        return await _connectWindows(device);
       }
       
       _logState?.error('❌ 当前平台不支持SPP蓝牙连接');
-      _logState?.info('   仅支持 Android 平台');
+      _logState?.info('   仅支持 Android 和 Windows 平台');
       return false;
     } catch (e) {
       _logState?.error('❌ SPP连接异常: $e');
@@ -208,18 +251,69 @@ class SppService {
     }
   }
   
+  /// Connect to Bluetooth device on Windows
+  Future<bool> _connectWindows(BluetoothDevice device) async {
+    try {
+      _logState?.info('⏳ Windows: 正在建立SPP连接...');
+      
+      // Connect using flutter_bluetooth_classic
+      final bluetoothClassic = classic.FlutterBluetoothClassic();
+      final result = await bluetoothClassic.connect(device.address);
+      
+      if (result != true) {
+        _logState?.error('❌ Windows SPP连接失败');
+        return false;
+      }
+      
+      _currentDevice = device;
+      _isConnected = true;
+      
+      _logState?.success('✅ Windows SPP连接成功');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Start listening to incoming data
+      bluetoothClassic.onDataReceived.listen(
+        (data) {
+          final receivedData = data.data;
+          if (receivedData.isNotEmpty) {
+            _onDataReceived(Uint8List.fromList(receivedData));
+          }
+        },
+        onError: (error) {
+          _logState?.error('❌ Windows SPP数据接收错误: $error');
+        },
+        onDone: () {
+          _logState?.warning('⚠️ Windows SPP连接已断开');
+          disconnect();
+        },
+      );
+      
+      return true;
+    } catch (e) {
+      _logState?.error('❌ Windows SPP连接失败: $e');
+      return false;
+    }
+  }
+  
   
   /// Disconnect from Bluetooth device
   Future<void> disconnect() async {
     try {
-      if (_connection != null) {
+      if (_isConnected || _connection != null) {
         _logState?.info('🔌 断开SPP连接...');
         
-        await _subscription?.cancel();
-        _subscription = null;
-        
-        await _connection?.close();
-        _connection = null;
+        // Platform-specific disconnection
+        if (Platform.isAndroid) {
+          await _subscription?.cancel();
+          _subscription = null;
+          
+          await _connection?.close();
+          _connection = null;
+        } else if (Platform.isWindows) {
+          // Disconnect Windows Bluetooth
+          final bluetoothClassic = classic.FlutterBluetoothClassic();
+          await bluetoothClassic.disconnect();
+        }
         
         _isConnected = false;
         _currentDevice = null;
@@ -244,14 +338,25 @@ class SppService {
   
   /// Send data via SPP
   Future<bool> sendData(Uint8List data) async {
-    if (!_isConnected || _connection == null) {
+    if (!_isConnected) {
       _logState?.error('❌ SPP未连接，无法发送数据');
       return false;
     }
     
     try {
-      _connection!.output.add(data);
-      await _connection!.output.allSent;
+      // Platform-specific data sending
+      if (Platform.isAndroid) {
+        if (_connection == null) {
+          _logState?.error('❌ Android SPP连接为空');
+          return false;
+        }
+        _connection!.output.add(data);
+        await _connection!.output.allSent;
+      } else if (Platform.isWindows) {
+        // Send data via flutter_bluetooth_classic
+        final bluetoothClassic = classic.FlutterBluetoothClassic();
+        await bluetoothClassic.sendData(data);
+      }
       
       _logState?.debug('📤 SPP发送: ${data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
       return true;
