@@ -29,6 +29,8 @@ class ProductionTestCommands {
   static const int cmdBluetooth = 0x0D; // 蓝牙测试
   static const int cmdEMMC = 0x0E; // EMMC容量检测
   static const int cmdPowerConsumption = 0x0F; // 功耗测试
+  static const int cmdReadHardwareVersion = 0xFB; // 硬件版本号读取
+  static const int cmdWriteHardwareVersion = 0xFC; // 硬件版本号写入
   static const int cmdWriteSN = 0xFE; // SN码写入
   static const int cmdEndTest = 0xFF; // 产测结束
   
@@ -338,6 +340,80 @@ class ProductionTestCommands {
       
       
       return String.fromCharCodes(snBytes);
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /// Create read hardware version command (0xFB)
+  /// 硬件版本号读取 - CMD 0xFB
+  static Uint8List createReadHardwareVersionCommand() {
+    return Uint8List.fromList([cmdReadHardwareVersion]);
+  }
+  
+  /// Parse read hardware version response
+  /// 响应格式：[CMD 0xFB] + [硬件版本号字符串] + [\0]（可选）
+  /// 返回响应中的硬件版本号
+  static String? parseReadHardwareVersionResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0xFB
+    if (payload[0] != cmdReadHardwareVersion) return null;
+    
+    // 提取硬件版本号（跳过CMD字节）
+    if (payload.length < 2) return null;
+    
+    try {
+      var versionBytes = payload.sublist(1);
+      
+      // 移除末尾的null终止符（如果存在）
+      if (versionBytes.isNotEmpty && versionBytes.last == 0x00) {
+        versionBytes = versionBytes.sublist(0, versionBytes.length - 1);
+      }
+      
+      if (versionBytes.isEmpty) return null;
+      
+      return String.fromCharCodes(versionBytes);
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /// Create write hardware version command (0xFC)
+  /// 硬件版本号写入 - CMD 0xFC + 硬件版本号字符串 + \0
+  /// [version] - 硬件版本号字符串（ASCII编码）
+  static Uint8List createWriteHardwareVersionCommand(String version) {
+    List<int> command = [cmdWriteHardwareVersion];
+    // 将硬件版本号字符串转换为ASCII字节
+    command.addAll(version.codeUnits);
+    // 添加null终止符
+    command.add(0x00);
+    return Uint8List.fromList(command);
+  }
+  
+  /// Parse write hardware version response
+  /// 响应格式：[CMD 0xFC] + [硬件版本号字符串] + [\0]（可选）
+  /// 返回响应中的硬件版本号，用于验证
+  static String? parseWriteHardwareVersionResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0xFC
+    if (payload[0] != cmdWriteHardwareVersion) return null;
+    
+    // 提取硬件版本号（跳过CMD字节）
+    if (payload.length < 2) return null;
+    
+    try {
+      var versionBytes = payload.sublist(1);
+      
+      // 移除末尾的null终止符（如果存在）
+      if (versionBytes.isNotEmpty && versionBytes.last == 0x00) {
+        versionBytes = versionBytes.sublist(0, versionBytes.length - 1);
+      }
+      
+      if (versionBytes.isEmpty) return null;
+      
+      return String.fromCharCodes(versionBytes);
     } catch (e) {
       return null;
     }

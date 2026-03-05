@@ -611,7 +611,9 @@ class TestState extends ChangeNotifier {
       {'name': '24. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
       {'name': '25. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
       {'name': '26. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '27. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '27. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
+      {'name': '28. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
+      {'name': '29. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -4709,7 +4711,7 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（41项）
+    // 定义完整测试序列（43项）
     final testSequence = [
       {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
       {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
@@ -4745,8 +4747,10 @@ class TestState extends ChangeNotifier {
       {'name': '24. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
       {'name': '25. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
       {'name': '26. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '27. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
-      {'name': '28. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '27. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
+      {'name': '28. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
+      {'name': '29. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '30. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
@@ -6890,7 +6894,133 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 30. SN码写入
+  /// 29. 硬件版本号写入
+  Future<bool> _autoTestWriteHardwareVersion() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📝 开始硬件版本号写入', type: LogType.debug);
+      
+      // 从配置中获取硬件版本号
+      final hardwareVersion = ProductionConfig().hardwareVersion;
+      _logState?.info('   硬件版本号: $hardwareVersion', type: LogType.debug);
+      
+      // 创建硬件版本号写入命令
+      final writeCmd = ProductionTestCommands.createWriteHardwareVersionCommand(hardwareVersion);
+      final cmdHex = writeCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送硬件版本号写入命令: [$cmdHex]', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        writeCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ 硬件版本号写入失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+      
+      // 解析响应中的硬件版本号
+      final payload = response['payload'] as Uint8List?;
+      if (payload == null) {
+        _logState?.error('❌ 硬件版本号写入失败：响应无payload', type: LogType.debug);
+        return false;
+      }
+      
+      final responseVersion = ProductionTestCommands.parseWriteHardwareVersionResponse(payload);
+      if (responseVersion == null) {
+        _logState?.error('❌ 硬件版本号写入失败：无法解析响应', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('   响应版本号: $responseVersion', type: LogType.debug);
+      
+      // 对比写入的版本号和响应的版本号
+      if (responseVersion == hardwareVersion) {
+        _logState?.success('✅ 硬件版本号写入成功！写入值与返回值一致', type: LogType.debug);
+        _logState?.info('   写入: $hardwareVersion', type: LogType.debug);
+        _logState?.info('   返回: $responseVersion', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ 硬件版本号写入失败：写入值与返回值不一致', type: LogType.debug);
+        _logState?.error('   写入: $hardwareVersion', type: LogType.debug);
+        _logState?.error('   返回: $responseVersion', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('硬件版本号写入异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 30. 硬件版本号读取
+  Future<bool> _autoTestReadHardwareVersion() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📖 开始硬件版本号读取', type: LogType.debug);
+      
+      // 从配置中获取期望的硬件版本号
+      final expectedVersion = ProductionConfig().hardwareVersion;
+      _logState?.info('   期望版本号: $expectedVersion', type: LogType.debug);
+      
+      // 创建硬件版本号读取命令
+      final readCmd = ProductionTestCommands.createReadHardwareVersionCommand();
+      final cmdHex = readCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送硬件版本号读取命令: [$cmdHex]', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        readCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ 硬件版本号读取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+      
+      // 解析响应中的硬件版本号
+      final payload = response['payload'] as Uint8List?;
+      if (payload == null) {
+        _logState?.error('❌ 硬件版本号读取失败：响应无payload', type: LogType.debug);
+        return false;
+      }
+      
+      final readVersion = ProductionTestCommands.parseReadHardwareVersionResponse(payload);
+      if (readVersion == null) {
+        _logState?.error('❌ 硬件版本号读取失败：无法解析响应', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('   读取版本号: $readVersion', type: LogType.debug);
+      
+      // 对比读取的版本号和期望的版本号
+      if (readVersion == expectedVersion) {
+        _logState?.success('✅ 硬件版本号读取成功！读取值与期望值一致', type: LogType.debug);
+        _logState?.info('   期望: $expectedVersion', type: LogType.debug);
+        _logState?.info('   读取: $readVersion', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ 硬件版本号读取失败：读取值与期望值不一致', type: LogType.debug);
+        _logState?.error('   期望: $expectedVersion', type: LogType.debug);
+        _logState?.error('   读取: $readVersion', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('硬件版本号读取异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 31. SN码写入
   Future<bool> _autoTestWriteSN() async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
