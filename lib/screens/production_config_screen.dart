@@ -25,6 +25,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _minBatteryController;
   late TextEditingController _maxBatteryController;
   late TextEditingController _touchThresholdController;
+  late TextEditingController _emmcMinCapacityController;
 
   @override
   void initState() {
@@ -43,6 +44,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _minBatteryController = TextEditingController(text: _config.minBatteryPercent.toString());
     _maxBatteryController = TextEditingController(text: _config.maxBatteryPercent.toString());
     _touchThresholdController = TextEditingController(text: _config.touchThreshold.toString());
+    _emmcMinCapacityController = TextEditingController(text: _config.emmcMinCapacityGb.toString());
   }
 
   @override
@@ -57,6 +59,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _minBatteryController.dispose();
     _maxBatteryController.dispose();
     _touchThresholdController.dispose();
+    _emmcMinCapacityController.dispose();
     super.dispose();
   }
 
@@ -72,6 +75,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setMinBatteryPercent(int.parse(_minBatteryController.text));
       await _config.setMaxBatteryPercent(int.parse(_maxBatteryController.text));
       await _config.setTouchThreshold(int.parse(_touchThresholdController.text));
+      await _config.setEmmcMinCapacityGb(double.parse(_emmcMinCapacityController.text));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -262,6 +266,20 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               inputType: TextInputType.number,
               validator: _validatePositiveNumber,
               helperText: '手按TK1/TK2/TK3时，阈值变化量需超过此值',
+            ),
+            const SizedBox(height: 24),
+
+            // EMMC配置
+            _buildSectionTitle('4. EMMC容量配置'),
+            _buildTextField(
+              controller: _emmcMinCapacityController,
+              label: 'EMMC最小容量',
+              hint: '≥ 1',
+              suffix: 'GB',
+              icon: Icons.storage,
+              inputType: TextInputType.number,
+              validator: _validatePositiveNumber,
+              helperText: '设备返回的容量字节数将与此值比对',
             ),
             const SizedBox(height: 32),
 

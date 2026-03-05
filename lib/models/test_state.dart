@@ -583,9 +583,10 @@ class TestState extends ChangeNotifier {
       {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
       {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
       {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '4.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
-      {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false},
-      {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false},
+      // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
+      // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
       {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
       {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
       {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
@@ -2139,15 +2140,15 @@ class TestState extends ChangeNotifier {
     return await _autoTestEMMCCapacity();
   }
 
-  /// 完整功耗手动测试 - 使用新功耗测试指令
-  Future<bool> testFullPower() async {
-    return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptWifi);
-  }
+  /// 完整功耗手动测试 - 使用新功耗测试指令 - 已禁用：开启物奇、ISP和WIFI
+  // Future<bool> testFullPower() async {
+  //   return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptWifi);
+  // }
 
-  /// ISP休眠功耗手动测试 - 使用新功耗测试指令
-  Future<bool> testIspSleepPower() async {
-    return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptSigmaSleep);
-  }
+  /// ISP休眠功耗手动测试 - 使用新功耗测试指令 - 已禁用：开启物奇、ISP休眠状态
+  // Future<bool> testIspSleepPower() async {
+  //   return await testPowerConsumption(ProductionTestCommands.powerConsumptionOptSigmaSleep);
+  // }
   
   /// 功耗测试通用方法 - 手动测试
   /// [opt] - 功耗测试选项：0x00=物奇, 0x01=ISP, 0x02=Sigma休眠, 0x03=WiFi
@@ -4683,9 +4684,10 @@ class TestState extends ChangeNotifier {
       {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
       {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
       {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '4.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
-      {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false},
-      {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false},
+      // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
+      // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
       {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
       {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
       {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
@@ -5465,9 +5467,21 @@ class TestState extends ChangeNotifier {
         return false;
       }
       
-      // 再发送产测开始指令（一直重试直到成功或串口断开）
+      _logState?.success('✅ 上电测试通过', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('📤 发送产测开始指令...', type: LogType.debug);
+      return true;
+      
+    } catch (e) {
+      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 2.5 产测开始指令
+  Future<bool> _autoTestProductionStart() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🚀 发送产测开始指令...', type: LogType.debug);
       
       bool startTestSuccess = false;
       int startTestAttempt = 0;
@@ -5511,7 +5525,7 @@ class TestState extends ChangeNotifier {
       return true;
       
     } catch (e) {
-      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      _logState?.error('❌ 产测开始指令异常: $e', type: LogType.debug);
       return false;
     }
   }
@@ -5759,7 +5773,7 @@ class TestState extends ChangeNotifier {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('💾 开始EMMC容量检测测试', type: LogType.debug);
-      _logState?.info('   最小容量: ${TestConfig.emmcMinCapacityMb} MB', type: LogType.debug);
+      _logState?.info('   最小容量要求: ${TestConfig.emmcMinCapacityGb} GB', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
       // 1. 发送获取EMMC容量命令 (CMD 0x0E)
@@ -5794,12 +5808,20 @@ class TestState extends ChangeNotifier {
       final capacityGbStr = capacityResult['capacity_gb'] as String;
       final capacityBytes = capacityResult['capacity_bytes'] as int;
       
-      _logState?.info('📊 EMMC容量: $capacityGbStr GB ($capacityMbStr MB)', type: LogType.debug);
+      _logState?.info('📊 设备返回容量:', type: LogType.debug);
+      _logState?.info('   字节数: $capacityBytes bytes', type: LogType.debug);
+      _logState?.info('   容量: $capacityGbStr GB ($capacityMbStr MB)', type: LogType.debug);
       
-      // 2. 检查容量是否正常
-      final capacityMb = double.parse(capacityMbStr);
-      if (capacityMb < TestConfig.emmcMinCapacityMb) {
-        _logState?.error('❌ EMMC容量异常: $capacityMbStr MB < ${TestConfig.emmcMinCapacityMb} MB', type: LogType.debug);
+      // 2. 使用字节数比对容量是否满足要求
+      final minCapacityBytes = TestConfig.emmcMinCapacityBytes;
+      _logState?.info('📏 容量比对:', type: LogType.debug);
+      _logState?.info('   要求最小: $minCapacityBytes bytes (${TestConfig.emmcMinCapacityGb} GB)', type: LogType.debug);
+      _logState?.info('   实际容量: $capacityBytes bytes ($capacityGbStr GB)', type: LogType.debug);
+      
+      if (capacityBytes < minCapacityBytes) {
+        _logState?.error('❌ EMMC容量不足', type: LogType.debug);
+        _logState?.error('   要求: ≥${TestConfig.emmcMinCapacityGb} GB', type: LogType.debug);
+        _logState?.error('   实际: $capacityGbStr GB', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return false;
       }

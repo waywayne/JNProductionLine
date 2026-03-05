@@ -107,42 +107,44 @@ class ManualTestSection extends StatelessWidget {
                 },
                 color: Colors.brown,
               ),
-              _buildTestButton(
-                context,
-                '完整功耗测试',
-                Icons.power_settings_new,
-                () async {
-                  final success = await state.testFullPower();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(success ? '✅ 完整功耗测试通过' : '❌ 完整功耗测试失败'),
-                        backgroundColor: success ? Colors.green : Colors.red,
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  }
-                },
-                color: Colors.deepOrange,
-              ),
-              _buildTestButton(
-                context,
-                'ISP休眠功耗测试',
-                Icons.bedtime,
-                () async {
-                  final success = await state.testIspSleepPower();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(success ? '✅ ISP休眠功耗测试通过' : '❌ ISP休眠功耗测试失败'),
-                        backgroundColor: success ? Colors.green : Colors.red,
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  }
-                },
-                color: Colors.blueGrey,
-              ),
+              // 已禁用：完整功耗测试（开启物奇、ISP和WIFI）
+              // _buildTestButton(
+              //   context,
+              //   '完整功耗测试',
+              //   Icons.power_settings_new,
+              //   () async {
+              //     final success = await state.testFullPower();
+              //     if (context.mounted) {
+              //       ScaffoldMessenger.of(context).showSnackBar(
+              //         SnackBar(
+              //           content: Text(success ? '✅ 完整功耗测试通过' : '❌ 完整功耗测试失败'),
+              //           backgroundColor: success ? Colors.green : Colors.red,
+              //           duration: const Duration(seconds: 3),
+              //         ),
+              //       );
+              //     }
+              //   },
+              //   color: Colors.deepOrange,
+              // ),
+              // 已禁用：ISP休眠功耗测试（开启物奇、ISP休眠状态）
+              // _buildTestButton(
+              //   context,
+              //   'ISP休眠功耗测试',
+              //   Icons.bedtime,
+              //   () async {
+              //     final success = await state.testIspSleepPower();
+              //     if (context.mounted) {
+              //       ScaffoldMessenger.of(context).showSnackBar(
+              //         SnackBar(
+              //           content: Text(success ? '✅ ISP休眠功耗测试通过' : '❌ ISP休眠功耗测试失败'),
+              //           backgroundColor: success ? Colors.green : Colors.red,
+              //           duration: const Duration(seconds: 3),
+              //         ),
+              //       );
+              //     }
+              //   },
+              //   color: Colors.blueGrey,
+              // ),
               _buildTestButton(
                 context,
                 '获取设备电压',

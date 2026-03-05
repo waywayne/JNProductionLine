@@ -81,6 +81,12 @@ class TestConfig {
   /// Touch阈值变化量
   static int get touchThreshold => _prodConfig.touchThreshold;
   
-  /// EMMC最小容量阈值 (MB) - EMMC容量检测
+  /// EMMC最小容量 (GB)
+  static double get emmcMinCapacityGb => _prodConfig.emmcMinCapacityGb;
+  
+  /// EMMC最小容量 (字节) - 用于与设备返回的字节数比对
+  static int get emmcMinCapacityBytes => _prodConfig.emmcMinCapacityBytes;
+  
+  /// EMMC最小容量阈值 (MB) - 保持兼容性
   static const int emmcMinCapacityMb = 100;
 }
