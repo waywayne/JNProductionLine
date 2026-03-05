@@ -580,11 +580,13 @@ class TestState extends ChangeNotifier {
   /// 获取测试序列
   List<Map<String, dynamic>> _getTestSequence() {
     return [
-      {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
-      {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
-      {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
-      {'name': '4.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
+      {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
+      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
+      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
+      {'name': '4. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
+      {'name': '5. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '5.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
       // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
       // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
@@ -4560,21 +4562,22 @@ class TestState extends ChangeNotifier {
         final gpibAddress = ProductionConfig().gpibAddress;
         _logState?.info('使用配置的GPIB地址: $gpibAddress', type: LogType.debug);
         
-        // 自动检测并连接GPIB设备
-        final gpibConnected = await detectAndConnectGpib(gpibAddress);
+        // 自动检测并连接GPIB设备（跳过漏电流测试，只检查连接）
+        final gpibConnected = await detectAndConnectGpib(gpibAddress, skipLeakageTest: true);
         
         if (!gpibConnected) {
           _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-          _logState?.error('❌ GPIB设备自动检测失败，无法开始自动化测试', type: LogType.debug);
+          _logState?.error('❌ GPIB设备连接失败，无法开始自动化测试', type: LogType.debug);
           _logState?.error('请检查以下选项：', type: LogType.debug);
-          _logState?.error('  1. GPIB设备是否正确连接', type: LogType.debug);
+          _logState?.error('  1. GPIB设备是否正确连接（USB或GPIB线缆）', type: LogType.debug);
           _logState?.error('  2. 通用配置中的GPIB地址是否正确', type: LogType.debug);
-          _logState?.error('  3. 或在跳过设置中启用跳过选项', type: LogType.debug);
+          _logState?.error('  3. Python环境和PyVISA是否正常', type: LogType.debug);
+          _logState?.error('  4. 或在跳过设置中启用跳过选项', type: LogType.debug);
           _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
           return;
         }
         
-        _logState?.success('✅ GPIB设备自动检测成功', type: LogType.debug);
+        _logState?.success('✅ GPIB设备连接成功', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       }
     } else {
@@ -5332,66 +5335,125 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  // ==================== 新增测试方法 ====================
+  // ==================== 自动化测试方法 ====================
 
-  /// 1. 漏电流测试 (需要GPIB程控电源)
+  /// 0. 设备关机测试
+  Future<bool> _autoTestShutdown() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 开始设备关机测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查串口连接
+      if (!_serialService.isConnected) {
+        _logState?.error('❌ 串口未连接，无法发送关机指令', type: LogType.debug);
+        return false;
+      }
+      
+      // 发送关机指令: CMD 0x0F OPT 0x02
+      _logState?.info('📤 发送关机指令: CMD=0x0F, OPT=0x02', type: LogType.debug);
+      
+      final shutdownCmd = Uint8List.fromList([0x0F, 0x02]);
+      final cmdHex = shutdownCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送: [$cmdHex] (${shutdownCmd.length} bytes)', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        shutdownCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ 关机指令发送成功', type: LogType.debug);
+        
+        // 等待设备完全断电
+        _logState?.info('⏳ 等待设备完全断电 (5秒)...', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 5));
+        
+        _logState?.success('✅ 设备已关机', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ 关机指令发送失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+    } catch (e) {
+      _logState?.error('❌ 设备关机测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 1. 漏电流测试
   Future<bool> _autoTestLeakageCurrent() async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('🔌 开始漏电流测试', type: LogType.debug);
-      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.debug);
+      _logState?.info('🔋 开始漏电流测试', type: LogType.debug);
+      _logState?.info('   阈值: < ${ProductionConfig().leakageCurrentUa} uA', type: LogType.debug);
       _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
       // 检查是否跳过漏电流测试
       if (AutomationTestConfig.skipLeakageCurrentTest) {
         _logState?.warning('⚠️  已跳过漏电流测试（测试模式）', type: LogType.debug);
-        return true;  // 跳过时返回成功
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
       }
       
       // 检查GPIB是否就绪
       if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
         _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return false;
       }
       
-      // 如果GPIB未就绪但启用了跳过，也跳过此测试
-      if (!_isGpibReady) {
-        _logState?.warning('⚠️  GPIB未就绪，跳过漏电流测试', type: LogType.debug);
+      // 如果跳过GPIB检查，直接返回成功
+      if (!_isGpibReady && (AutomationTestConfig.skipGpibTests || AutomationTestConfig.skipGpibReadyCheck)) {
+        _logState?.warning('⚠️  已跳过GPIB检查，漏电流测试跳过', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true;
       }
       
       // 使用GPIB测量电流
+      _logState?.info('📊 开始电流采样...', type: LogType.debug);
       final currentA = await _gpibService.measureCurrent(
         sampleCount: TestConfig.gpibSampleCount,
         sampleRate: TestConfig.gpibSampleRate,
       );
       
       if (currentA == null) {
-        _logState?.error('❌ 电流测量失败', type: LogType.debug);
+        _logState?.error('❌ 漏电流测量失败', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return false;
       }
       
       // 转换为微安 (uA)
       final currentUa = currentA * 1000000;
+      final thresholdUa = ProductionConfig().leakageCurrentUa;
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📊 漏电流测试结果:', type: LogType.debug);
       _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.debug);
-      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.debug);
+      _logState?.info('   阈值: < $thresholdUa uA', type: LogType.debug);
       
-      if (currentUa < TestConfig.leakageCurrentThresholdUa) {
-        _logState?.success('✅ 漏电流测试通过', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true;
-      } else {
+      if (currentUa >= thresholdUa) {
         _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.debug);
+        _logState?.warning('⚠️  提示: 请确保设备已完全断电', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return false;
       }
+      
+      _logState?.success('✅ 漏电流测试通过', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return true;
+      
     } catch (e) {
-      if (e.toString().contains('SKIP')) rethrow;
       _logState?.error('❌ 漏电流测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       return false;
     }
   }
@@ -5399,12 +5461,35 @@ class TestState extends ChangeNotifier {
   /// 2. 上电测试
   Future<bool> _autoTestPowerOn() async {
     try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('⚡ 开始上电测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
       // 检查是否跳过上电测试
       if (AutomationTestConfig.skipPowerOnTest) {
         _logState?.warning('⚠️  已跳过上电测试（测试模式）', type: LogType.debug);
         return true;  // 跳过时返回成功
+      }
+      
+      // 使用GPIB控制电源输出
+      if (_isGpibReady) {
+        // 1. 先关闭电源输出
+        _logState?.info('📴 关闭程控电源输出...', type: LogType.debug);
+        await _gpibService.sendCommand('OUTPut:STATe OFF');
+        await Future.delayed(const Duration(milliseconds: 500));
+        _logState?.success('✅ 电源输出已关闭', type: LogType.debug);
+        
+        // 2. 开启电源输出
+        _logState?.info('📳 开启程控电源输出...', type: LogType.debug);
+        await _gpibService.sendCommand('OUTPut:STATe ON');
+        await Future.delayed(const Duration(milliseconds: 500));
+        _logState?.success('✅ 电源输出已开启', type: LogType.debug);
+        
+        // 3. 等待设备上电稳定
+        _logState?.info('⏳ 等待设备上电稳定 (2秒)...', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 2));
+      } else {
+        _logState?.warning('⚠️  GPIB未就绪，跳过电源控制', type: LogType.debug);
       }
       
       // 检查串口连接状态即可判断设备是否正常上电
@@ -7033,7 +7118,9 @@ class TestState extends ChangeNotifier {
   }
 
   /// 检测并连接GPIB设备
-  Future<bool> detectAndConnectGpib(String address) async {
+  /// [address] GPIB设备地址
+  /// [skipLeakageTest] 是否跳过漏电流测试（自动化测试开始时只需要连接，不需要测漏电流）
+  Future<bool> detectAndConnectGpib(String address, {bool skipLeakageTest = false}) async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
       _logState?.info('🔍 开始GPIB检测流程', type: LogType.gpib);
@@ -7092,41 +7179,46 @@ class TestState extends ChangeNotifier {
         _logState?.info('设备信息: $idn', type: LogType.gpib);
       }
 
-      // 5. 漏电流测试
-      _logState?.info('📋 步骤 5/5: 漏电流测试', type: LogType.gpib);
-      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
-      _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.gpib);
-      
-      // 使用GPIB测量电流
-      final currentA = await _gpibService.measureCurrent(
-        sampleCount: TestConfig.gpibSampleCount,
-        sampleRate: TestConfig.gpibSampleRate,
-      );
-      
-      if (currentA == null) {
-        _logState?.error('❌ 漏电流测量失败', type: LogType.gpib);
-        _isGpibReady = false;
-        notifyListeners();
-        return false;
-      }
-      
-      // 转换为微安 (uA)
-      final currentUa = currentA * 1000000;
-      
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
-      _logState?.info('📊 漏电流测试结果:', type: LogType.gpib);
-      _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.gpib);
-      _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
-      
-      if (currentUa >= TestConfig.leakageCurrentThresholdUa) {
-        _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.gpib);
+      // 5. 漏电流测试（可选）
+      if (skipLeakageTest) {
+        _logState?.info('📋 步骤 5/5: 跳过漏电流测试（将在正式测试中进行）', type: LogType.gpib);
+      } else {
+        _logState?.info('📋 步骤 5/5: 漏电流测试', type: LogType.gpib);
+        _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+        _logState?.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz', type: LogType.gpib);
+        
+        // 使用GPIB测量电流
+        final currentA = await _gpibService.measureCurrent(
+          sampleCount: TestConfig.gpibSampleCount,
+          sampleRate: TestConfig.gpibSampleRate,
+        );
+        
+        if (currentA == null) {
+          _logState?.error('❌ 漏电流测量失败', type: LogType.gpib);
+          _isGpibReady = false;
+          notifyListeners();
+          return false;
+        }
+        
+        // 转换为微安 (uA)
+        final currentUa = currentA * 1000000;
+        
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
-        _isGpibReady = false;
-        notifyListeners();
-        return false;
+        _logState?.info('📊 漏电流测试结果:', type: LogType.gpib);
+        _logState?.info('   测量值: ${currentUa.toStringAsFixed(2)} uA', type: LogType.gpib);
+        _logState?.info('   阈值: < ${TestConfig.leakageCurrentThresholdUa} uA', type: LogType.gpib);
+        
+        if (currentUa >= TestConfig.leakageCurrentThresholdUa) {
+          _logState?.error('❌ 漏电流测试失败: 超过阈值', type: LogType.gpib);
+          _logState?.warning('⚠️  提示: 请确保设备处于完全断电状态', type: LogType.gpib);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+          _isGpibReady = false;
+          notifyListeners();
+          return false;
+        }
+        
+        _logState?.success('✅ 漏电流测试通过', type: LogType.gpib);
       }
-      
-      _logState?.success('✅ 漏电流测试通过', type: LogType.gpib);
 
       // 标记GPIB就绪
       _isGpibReady = true;
