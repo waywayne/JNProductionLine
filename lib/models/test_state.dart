@@ -4719,47 +4719,43 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（44项）
+    // 定义完整测试序列（35项）- 与_getTestSequence保持一致
     final testSequence = [
-      {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
-      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
-      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
-      {'name': '2.3 设备唤醒', 'type': '唤醒', 'executor': _autoTestDeviceWakeup, 'skippable': false},
-      {'name': '2.5 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
-      {'name': '2.6 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
-      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '4. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
-      {'name': '5. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
-      {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
-      // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
-      // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
-      {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
-      {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
-      {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
-      {'name': '10.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
-      {'name': '10.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
-      {'name': '10.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
-      {'name': '10.4 SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
-      {'name': '11. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
-      {'name': '12. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
-      {'name': '13. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
-      {'name': '14. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
-      {'name': '15. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '16. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '17. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '18. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '19. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '20. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '21. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '22. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '23. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '24. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '25. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
-      {'name': '26. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '27. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
-      {'name': '28. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
-      {'name': '29. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
-      {'name': '30. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '1. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
+      {'name': '2. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
+      {'name': '3. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '4. 设备唤醒', 'type': '唤醒', 'executor': _autoTestDeviceWakeup, 'skippable': false},
+      {'name': '5. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
+      {'name': '6. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '7. 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
+      {'name': '8. 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
+      {'name': '9. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
+      {'name': '10. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '11. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '12. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '13. 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
+      {'name': '14. 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
+      {'name': '15. 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '16. SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
+      {'name': '17. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '18. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '19. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '20. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '21. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '22. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '23. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '24. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '25. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '26. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '27. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '28. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '29. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '30. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '31. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '32. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '33. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
+      {'name': '34. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
+      {'name': '35. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
@@ -6477,6 +6473,16 @@ class TestState extends ChangeNotifier {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📡 开始SPP蓝牙功能测试', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查平台支持（flutter_bluetooth_serial 仅支持 Windows 和 Android）
+      if (!Platform.isWindows && !Platform.isAndroid) {
+        _logState?.warning('⚠️ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙测试', type: LogType.debug);
+        _logState?.info('   支持的平台: Windows, Android', type: LogType.debug);
+        _logState?.info('   macOS/iOS 请使用BLE或其他通信方式', type: LogType.debug);
+        _logState?.warning('⏭️ 跳过SPP蓝牙功能测试', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true; // 在不支持的平台上返回true以继续测试流程
+      }
       
       // 检查是否有读取到的蓝牙MAC地址
       if (_readBluetoothMACString == null || _readBluetoothMACString!.isEmpty) {

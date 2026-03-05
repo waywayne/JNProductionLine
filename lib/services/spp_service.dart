@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import '../models/log_state.dart';
@@ -33,6 +34,14 @@ class SppService {
     try {
       _logState?.info('🔍 开始扫描蓝牙设备...');
       
+      // Check platform support
+      if (!_isPlatformSupported()) {
+        _logState?.warning('⚠️ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙');
+        _logState?.info('   支持的平台: Windows, Android');
+        _logState?.info('   macOS/iOS 请使用BLE或其他通信方式');
+        return [];
+      }
+      
       // Check if Bluetooth is available
       final isAvailable = await FlutterBluetoothSerial.instance.isAvailable ?? false;
       if (!isAvailable) {
@@ -62,8 +71,19 @@ class SppService {
       return bondedDevices;
     } catch (e) {
       _logState?.error('❌ 扫描蓝牙设备失败: $e');
+      if (e.toString().contains('MissingPluginException')) {
+        _logState?.warning('   提示: flutter_bluetooth_serial 不支持当前平台');
+        _logState?.info('   当前平台: ${Platform.operatingSystem}');
+        _logState?.info('   支持平台: Windows, Android');
+      }
       return [];
     }
+  }
+  
+  /// Check if current platform supports SPP Bluetooth
+  bool _isPlatformSupported() {
+    // flutter_bluetooth_serial only supports Windows and Android
+    return Platform.isWindows || Platform.isAndroid;
   }
   
   /// Check if connected
@@ -81,6 +101,12 @@ class SppService {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('🔗 开始连接蓝牙设备: ${device.name ?? "未知设备"}');
       _logState?.info('   地址: ${device.address}');
+      
+      // Check platform support
+      if (!_isPlatformSupported()) {
+        _logState?.error('❌ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙连接');
+        return false;
+      }
       
       // Disconnect existing connection
       await disconnect();
