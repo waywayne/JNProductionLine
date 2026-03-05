@@ -86,6 +86,32 @@ class _LogConsoleSectionState extends State<LogConsoleSection> {
                 ],
               ),
             ),
+            const SizedBox(width: 16),
+            // Compact mode checkbox for debug log
+            Consumer<LogState>(
+              builder: (context, logState, _) => Row(
+                children: [
+                  Checkbox(
+                    value: logState.debugLogCompactMode,
+                    onChanged: (value) => logState.setDebugLogCompactMode(value ?? false),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  const Text(
+                    '调试信息精简模式',
+                    style: TextStyle(fontSize: 11),
+                  ),
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: '开启后，调试信息面板只显示payload和error日志',
+                    child: Icon(
+                      Icons.info_outline,
+                      size: 14,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const Spacer(),
             // Export button
             SizedBox(
@@ -285,6 +311,22 @@ class _LogConsoleSectionState extends State<LogConsoleSection> {
             child: Consumer<LogState>(
               builder: (context, logState, _) {
                 var filteredLogs = logState.getLogsByType(logType);
+                
+                // Apply compact mode filter for debug log
+                if (logType == LogType.debug && logState.debugLogCompactMode) {
+                  filteredLogs = filteredLogs.where((log) {
+                    // 只显示error级别的日志或包含payload的日志
+                    if (log.level == LogLevel.error) {
+                      return true;
+                    }
+                    // 检查是否包含payload相关信息
+                    final msg = log.message.toLowerCase();
+                    return msg.contains('payload') || 
+                           msg.contains('📦') ||
+                           msg.contains('接收') && msg.contains('字节') ||
+                           msg.contains('发送') && msg.contains('字节');
+                  }).toList();
+                }
                 
                 // Apply regex filter
                 if (filterPattern.isNotEmpty) {

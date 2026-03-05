@@ -42,12 +42,19 @@ class LogState extends ChangeNotifier {
   final List<LogEntry> _logs = [];
   static const int maxLogs = 1000; // 最多保留10000条日志
   bool _showRawHex = false; // 是否显示原始 hex 数据
+  bool _debugLogCompactMode = false; // 调试信息精简模式（只显示payload和error）
 
   List<LogEntry> get logs => _logs;
   bool get showRawHex => _showRawHex;
+  bool get debugLogCompactMode => _debugLogCompactMode;
   
   void setShowRawHex(bool value) {
     _showRawHex = value;
+    notifyListeners();
+  }
+  
+  void setDebugLogCompactMode(bool value) {
+    _debugLogCompactMode = value;
     notifyListeners();
   }
   
