@@ -583,10 +583,12 @@ class TestState extends ChangeNotifier {
       {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
       {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
       {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '2.3 设备唤醒', 'type': '唤醒', 'executor': _autoTestDeviceWakeup, 'skippable': false},
+      {'name': '2.5 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
+      {'name': '2.6 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
       {'name': '4. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
       {'name': '5. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
-      {'name': '5.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
       // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
       // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
@@ -4707,14 +4709,17 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（38项）
+    // 定义完整测试序列（41项）
     final testSequence = [
-      {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
-      {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
-      {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
-      {'name': '4.3 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
-      {'name': '4.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
+      {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
+      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
+      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '2.3 设备唤醒', 'type': '唤醒', 'executor': _autoTestDeviceWakeup, 'skippable': false},
+      {'name': '2.5 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
+      {'name': '2.6 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
+      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
+      {'name': '4. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
+      {'name': '5. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
       {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
       // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
       // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
@@ -5501,15 +5506,36 @@ class TestState extends ChangeNotifier {
       
       _logState?.success('✅ 设备已上电', type: LogType.debug);
       
-      // 上电成功后，唤醒设备（一直重试直到成功或串口断开）
+      _logState?.success('✅ 上电测试通过', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('正在唤醒设备...', type: LogType.debug);
+      return true;
+      
+    } catch (e) {
+      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 2.3 设备唤醒测试
+  Future<bool> _autoTestDeviceWakeup() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔔 开始设备唤醒测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查串口连接
+      if (!_serialService.isConnected) {
+        _logState?.error('❌ 串口未连接，无法唤醒设备', type: LogType.debug);
+        return false;
+      }
       
       bool wakeupSuccess = false;
       int wakeupAttempt = 0;
-      while (!wakeupSuccess && _serialService.isConnected && !_shouldStopTest) {
+      const int maxWakeupAttempts = 10;
+      
+      while (!wakeupSuccess && wakeupAttempt < maxWakeupAttempts && _serialService.isConnected && !_shouldStopTest) {
         wakeupAttempt++;
-        _logState?.info('🔔 尝试唤醒设备 (第 $wakeupAttempt 次)...', type: LogType.debug);
+        _logState?.info('🔔 尝试唤醒设备 (第 $wakeupAttempt/$maxWakeupAttempts 次)...', type: LogType.debug);
         
         bool result = await _serialService.sendExitSleepMode(retries: 1);
         if (result) {
@@ -5524,23 +5550,25 @@ class TestState extends ChangeNotifier {
           return false;
         }
         
-        await Future.delayed(const Duration(milliseconds: 500));
+        if (wakeupAttempt < maxWakeupAttempts) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
       }
       
       if (!wakeupSuccess) {
-        _logState?.error('❌ 设备唤醒失败', type: LogType.debug);
+        _logState?.error('❌ 设备唤醒失败 (已尝试 $wakeupAttempt 次)', type: LogType.debug);
         return false;
       }
       
       // 等待设备完全唤醒
       await Future.delayed(const Duration(milliseconds: 500));
       
-      _logState?.success('✅ 上电测试通过', type: LogType.debug);
+      _logState?.success('✅ 设备唤醒测试通过', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       return true;
       
     } catch (e) {
-      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      _logState?.error('❌ 设备唤醒测试异常: $e', type: LogType.debug);
       return false;
     }
   }
