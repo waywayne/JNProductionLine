@@ -402,6 +402,7 @@ class _GpibDetectionDialogState extends State<GpibDetectionDialog> {
       });
 
       if (success) {
+        // 检测成功，显示提示并自动关闭对话框
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('✅ GPIB Ready - 设备已就绪！'),
@@ -409,6 +410,12 @@ class _GpibDetectionDialogState extends State<GpibDetectionDialog> {
             duration: Duration(seconds: 3),
           ),
         );
+        
+        // 延迟500ms后自动关闭对话框，避免用户误点断开按钮
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+          state.closeGpibDialog();
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

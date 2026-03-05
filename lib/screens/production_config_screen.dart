@@ -26,6 +26,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _maxBatteryController;
   late TextEditingController _touchThresholdController;
   late TextEditingController _emmcMinCapacityController;
+  late TextEditingController _gpibAddressController;
 
   @override
   void initState() {
@@ -45,6 +46,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _maxBatteryController = TextEditingController(text: _config.maxBatteryPercent.toString());
     _touchThresholdController = TextEditingController(text: _config.touchThreshold.toString());
     _emmcMinCapacityController = TextEditingController(text: _config.emmcMinCapacityGb.toString());
+    _gpibAddressController = TextEditingController(text: _config.gpibAddress);
   }
 
   @override
@@ -60,6 +62,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _maxBatteryController.dispose();
     _touchThresholdController.dispose();
     _emmcMinCapacityController.dispose();
+    _gpibAddressController.dispose();
     super.dispose();
   }
 
@@ -76,6 +79,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setMaxBatteryPercent(int.parse(_maxBatteryController.text));
       await _config.setTouchThreshold(int.parse(_touchThresholdController.text));
       await _config.setEmmcMinCapacityGb(double.parse(_emmcMinCapacityController.text));
+      await _config.setGpibAddress(_gpibAddressController.text);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -280,6 +284,25 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               inputType: TextInputType.number,
               validator: _validatePositiveNumber,
               helperText: '设备返回的容量字节数将与此值比对',
+            ),
+            const SizedBox(height: 24),
+
+            // GPIB配置
+            _buildSectionTitle('5. GPIB设备配置'),
+            _buildTextField(
+              controller: _gpibAddressController,
+              label: 'GPIB设备地址',
+              hint: 'GPIB0::5::INSTR',
+              suffix: '',
+              icon: Icons.settings_input_component,
+              inputType: TextInputType.text,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入GPIB地址';
+                }
+                return null;
+              },
+              helperText: '程控电源的GPIB地址，用于电流测试',
             ),
             const SizedBox(height: 32),
 

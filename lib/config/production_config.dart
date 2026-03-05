@@ -22,6 +22,7 @@ class ProductionConfig {
   static const String _keyMaxBattery = 'max_battery_percent';
   static const String _keyTouchThreshold = 'touch_threshold';
   static const String _keyEmmcMinCapacityGb = 'emmc_min_capacity_gb';
+  static const String _keyGpibAddress = 'gpib_address';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -35,6 +36,7 @@ class ProductionConfig {
   static const int defaultMaxBatteryPercent = 100;
   static const int defaultTouchThreshold = 500;
   static const double defaultEmmcMinCapacityGb = 1.0; // 默认1GB
+  static const String defaultGpibAddress = 'GPIB0::5::INSTR';
 
   /// 初始化配置
   Future<void> init() async {
@@ -109,6 +111,12 @@ class ProductionConfig {
   /// EMMC最小容量（字节）- 用于与设备返回的字节数比对
   int get emmcMinCapacityBytes => (emmcMinCapacityGb * 1024 * 1024 * 1024).toInt();
 
+  // ========== GPIB地址 ==========
+  String get gpibAddress => _prefs?.getString(_keyGpibAddress) ?? defaultGpibAddress;
+  Future<void> setGpibAddress(String value) async {
+    await _prefs?.setString(_keyGpibAddress, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -122,6 +130,7 @@ class ProductionConfig {
     await setMaxBatteryPercent(defaultMaxBatteryPercent);
     await setTouchThreshold(defaultTouchThreshold);
     await setEmmcMinCapacityGb(defaultEmmcMinCapacityGb);
+    await setGpibAddress(defaultGpibAddress);
   }
 
   /// 获取所有配置的摘要
@@ -137,6 +146,7 @@ class ProductionConfig {
       '电量范围': '$minBatteryPercent~$maxBatteryPercent%',
       'Touch阈值变化量': '>$touchThreshold',
       'EMMC最小容量': '≥${emmcMinCapacityGb}GB',
+      'GPIB地址': gpibAddress,
     };
   }
 }

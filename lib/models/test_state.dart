@@ -11,6 +11,7 @@ import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
 import 'log_state.dart';
 import '../config/test_config.dart';
+import '../config/production_config.dart';
 import '../config/wifi_config.dart';
 import '../config/sn_mac_config.dart';
 import 'touch_test_step.dart';
@@ -4541,19 +4542,44 @@ class TestState extends ChangeNotifier {
       return;
     }
 
-    // 检查GPIB是否就绪（除非启用了跳过选项）
-    if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
-      _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.error('❌ GPIB设备未就绪，无法开始自动化测试', type: LogType.debug);
-      _logState?.error('请先点击"GPIB检测"按钮连接程控电源，或在跳过设置中启用跳过选项', type: LogType.debug);
-      _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      return;
-    }
-    
-    // 如果跳过GPIB检查，给出提示
-    if (!_isGpibReady && (AutomationTestConfig.skipGpibTests || AutomationTestConfig.skipGpibReadyCheck)) {
-      _logState?.warning('⚠️  已跳过GPIB设备就绪检查（测试模式）', type: LogType.debug);
-      _logState?.warning('⚠️  已跳过GPIB设备就绪检查（测试模式）', type: LogType.gpib);
+    // GPIB设备检测逻辑
+    if (!_isGpibReady) {
+      // 如果启用了跳过选项，给出提示但继续测试
+      if (AutomationTestConfig.skipGpibTests || AutomationTestConfig.skipGpibReadyCheck) {
+        _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.warning('⚠️  已启用跳过GPIB选项，将跳过GPIB相关测试', type: LogType.debug);
+        _logState?.warning('⚠️  漏电流测试、功耗测试等将被跳过', type: LogType.debug);
+        _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      } else {
+        // 未启用跳过选项，执行自动检测
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('🔍 自动检测GPIB设备...', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        
+        // 从配置中获取GPIB地址
+        final gpibAddress = ProductionConfig().gpibAddress;
+        _logState?.info('使用配置的GPIB地址: $gpibAddress', type: LogType.debug);
+        
+        // 自动检测并连接GPIB设备
+        final gpibConnected = await detectAndConnectGpib(gpibAddress);
+        
+        if (!gpibConnected) {
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.error('❌ GPIB设备自动检测失败，无法开始自动化测试', type: LogType.debug);
+          _logState?.error('请检查以下选项：', type: LogType.debug);
+          _logState?.error('  1. GPIB设备是否正确连接', type: LogType.debug);
+          _logState?.error('  2. 通用配置中的GPIB地址是否正确', type: LogType.debug);
+          _logState?.error('  3. 或在跳过设置中启用跳过选项', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return;
+        }
+        
+        _logState?.success('✅ GPIB设备自动检测成功', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      }
+    } else {
+      // GPIB已就绪，直接使用
+      _logState?.info('✅ GPIB设备已就绪，使用现有连接', type: LogType.debug);
     }
 
     _isAutoTesting = true;
