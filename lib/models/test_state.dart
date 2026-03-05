@@ -4679,8 +4679,8 @@ class TestState extends ChangeNotifier {
       // 关机测试需要等待设备完全断电（5秒响应 + 5秒等待）
       actualTimeout = const Duration(seconds: 12);
     } else if (testName.contains('上电测试')) {
-      // 上电测试需要等待设备上电稳定（关闭0.5秒 + 开启0.5秒 + 稳定2秒 + 启动等待3秒）
-      actualTimeout = const Duration(seconds: 8);
+      // 上电测试需要等待设备上电稳定（关闭0.5秒 + 开启0.5秒 + 稳定2秒 + 完全启动5秒）
+      actualTimeout = const Duration(seconds: 10);
     }
     
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
