@@ -4669,7 +4669,10 @@ class TestState extends ChangeNotifier {
     if (testName.contains('ISP工作功耗测试')) {
       // ISP工作功耗测试：响应2秒 + 等待5秒 + GPIB测量3秒
       actualTimeout = const Duration(seconds: 10);
-    } else if (testName.contains('工作功耗测试') || testName.contains('漏电流测试')) {
+    } else if (testName.contains('物奇功耗测试')) {
+      // 物奇功耗测试：响应0.5秒 + 等待5秒 + GPIB测量2秒
+      actualTimeout = const Duration(seconds: 10);
+    } else if (testName.contains('漏电流测试')) {
       // GPIB 电流测试需要更长时间（20次采样 × 10秒 + 间隔）
       actualTimeout = const Duration(seconds: 240); // 4分钟
     } else if (testName.contains('设备关机')) {
