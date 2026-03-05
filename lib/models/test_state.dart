@@ -4675,6 +4675,9 @@ class TestState extends ChangeNotifier {
     } else if (testName.contains('设备关机')) {
       // 关机测试需要等待设备完全断电（5秒响应 + 5秒等待）
       actualTimeout = const Duration(seconds: 12);
+    } else if (testName.contains('上电测试')) {
+      // 上电测试需要等待设备上电稳定（关闭0.5秒 + 开启0.5秒 + 稳定2秒 + 启动等待3秒）
+      actualTimeout = const Duration(seconds: 8);
     }
     
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
@@ -5521,6 +5524,11 @@ class TestState extends ChangeNotifier {
       
       _logState?.success('✅ 上电测试通过', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 等待3秒后执行设备唤醒测试，确保设备完全启动
+      _logState?.info('⏳ 等待设备完全启动 (3秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 3));
+      
       return true;
       
     } catch (e) {
