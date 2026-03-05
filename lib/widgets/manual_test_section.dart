@@ -169,6 +169,24 @@ class ManualTestSection extends StatelessWidget {
                 Icons.wifi,
                 () => state.testWiFi(),
               ),
+              _buildTestButton(
+                context,
+                'SPP蓝牙测试',
+                Icons.bluetooth,
+                () async {
+                  final success = await state.testSppBluetooth();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ SPP蓝牙测试通过' : '❌ SPP蓝牙测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.blue,
+              ),
               _buildLEDTestButton(context, '外侧', Icons.lightbulb_outline),
               _buildLEDTestButton(context, '内侧', Icons.lightbulb),
               _buildTestButton(
