@@ -5525,9 +5525,9 @@ class TestState extends ChangeNotifier {
       _logState?.success('✅ 上电测试通过', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 等待3秒后执行设备唤醒测试，确保设备完全启动
-      _logState?.info('⏳ 等待设备完全启动 (3秒)...', type: LogType.debug);
-      await Future.delayed(const Duration(seconds: 3));
+      // 等待5秒后执行设备唤醒测试，确保设备完全启动
+      _logState?.info('⏳ 等待设备完全启动 (5秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 5));
       
       return true;
       
