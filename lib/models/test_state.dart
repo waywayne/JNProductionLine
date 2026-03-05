@@ -237,6 +237,7 @@ class TestState extends ChangeNotifier {
   // 生成的设备标识（用于蓝牙MAC地址验证）
   String? _generatedDeviceId;
   List<int>? _generatedBluetoothMAC;
+  String? _readBluetoothMACString; // 读取到的蓝牙MAC地址字符串（用于SPP连接）
 
   // GPIB检测状态
   final GpibService _gpibService = GpibService();
@@ -595,6 +596,10 @@ class TestState extends ChangeNotifier {
       {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
       {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
       {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '10.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
+      {'name': '10.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
+      {'name': '10.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '10.4 SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
       {'name': '11. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
       {'name': '12. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
       {'name': '13. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
@@ -4711,7 +4716,7 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（43项）
+    // 定义完整测试序列（44项）
     final testSequence = [
       {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
       {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
@@ -4731,6 +4736,7 @@ class TestState extends ChangeNotifier {
       {'name': '10.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
       {'name': '10.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
       {'name': '10.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '10.4 SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
       {'name': '11. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
       {'name': '12. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
       {'name': '13. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
@@ -6425,6 +6431,8 @@ class TestState extends ChangeNotifier {
             
             if (isMatch) {
               _logState?.success('✅ 蓝牙MAC地址读取成功，验证通过', type: LogType.debug);
+              // 保存读取到的MAC地址供SPP测试使用
+              _readBluetoothMACString = readMACString;
               return true;
             } else {
               _logState?.error('❌ 蓝牙MAC地址不匹配', type: LogType.debug);
@@ -6455,6 +6463,127 @@ class TestState extends ChangeNotifier {
       }
     } catch (e) {
       _logState?.error('蓝牙MAC地址读取异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 6.4 SPP蓝牙功能测试
+  Future<bool> _autoTestSppBluetooth() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📡 开始SPP蓝牙功能测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查是否有读取到的蓝牙MAC地址
+      if (_readBluetoothMACString == null || _readBluetoothMACString!.isEmpty) {
+        _logState?.error('❌ 未找到蓝牙MAC地址', type: LogType.debug);
+        _logState?.info('   提示：请先执行蓝牙MAC读取测试', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('📱 目标MAC地址: $_readBluetoothMACString', type: LogType.debug);
+      
+      // 设置日志状态
+      _sppService.setLogState(_logState!);
+      
+      // 1. 扫描蓝牙设备
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔍 步骤 1/3: 扫描蓝牙设备', type: LogType.debug);
+      final devices = await _sppService.getAvailableDevices();
+      
+      if (devices.isEmpty) {
+        _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
+        _logState?.info('   提示：请确保设备已配对', type: LogType.debug);
+        return false;
+      }
+      
+      // 2. 查找目标设备
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔍 步骤 2/3: 查找目标设备', type: LogType.debug);
+      
+      var targetDevice = devices.firstWhere(
+        (device) => device.address == _readBluetoothMACString,
+        orElse: () => throw Exception('未找到匹配的蓝牙设备'),
+      );
+      
+      _logState?.success('✅ 找到目标设备: ${targetDevice.name ?? "未知设备"}', type: LogType.debug);
+      _logState?.info('   地址: ${targetDevice.address}', type: LogType.debug);
+      
+      // 3. 通过SPP连接设备
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔗 步骤 3/3: 建立SPP连接', type: LogType.debug);
+      
+      final connected = await _sppService.connect(targetDevice);
+      
+      if (!connected) {
+        _logState?.error('❌ SPP连接失败', type: LogType.debug);
+        return false;
+      }
+      
+      // 4. 通过SPP读取蓝牙MAC地址进行验证
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📖 验证蓝牙功能: 通过SPP读取MAC地址', type: LogType.debug);
+      
+      // 创建读取MAC地址命令
+      final readMacCmd = ProductionTestCommands.createBluetoothMACCommand(0x01, []);
+      final cmdHex = readMacCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送命令: [$cmdHex]', type: LogType.debug);
+      
+      // 通过SPP发送命令并等待响应
+      final response = await _sppService.sendCommandAndWaitResponse(
+        readMacCmd,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      // 断开SPP连接
+      await _sppService.disconnect();
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ SPP读取MAC地址失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        return false;
+      }
+      
+      // 解析响应
+      final payload = response['payload'] as Uint8List?;
+      if (payload == null || payload.isEmpty) {
+        _logState?.error('❌ SPP响应为空', type: LogType.debug);
+        return false;
+      }
+      
+      // 解析MAC地址（响应格式：CMD + 6字节MAC地址）
+      if (payload.length >= 7 && payload[0] == 0x0D) {
+        final sppReadMAC = payload.sublist(1, 7);
+        final sppReadMACString = sppReadMAC.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
+        
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('📊 SPP蓝牙功能测试结果:', type: LogType.debug);
+        _logState?.info('   期望MAC: $_readBluetoothMACString', type: LogType.debug);
+        _logState?.info('   SPP读取: $sppReadMACString', type: LogType.debug);
+        
+        if (sppReadMACString == _readBluetoothMACString) {
+          _logState?.success('✅ SPP蓝牙功能测试通过！', type: LogType.debug);
+          _logState?.success('   ✓ SPP连接成功', type: LogType.debug);
+          _logState?.success('   ✓ SPP通信正常', type: LogType.debug);
+          _logState?.success('   ✓ MAC地址验证通过', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return true;
+        } else {
+          _logState?.error('❌ SPP读取的MAC地址不匹配', type: LogType.debug);
+          _logState?.error('   期望: $_readBluetoothMACString', type: LogType.debug);
+          _logState?.error('   实际: $sppReadMACString', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return false;
+        }
+      } else {
+        _logState?.error('❌ SPP响应格式错误', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ SPP蓝牙功能测试异常: $e', type: LogType.debug);
+      // 确保断开连接
+      await _sppService.disconnect();
       return false;
     }
   }
