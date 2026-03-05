@@ -4666,7 +4666,10 @@ class TestState extends ChangeNotifier {
   }) async {
     // 根据测试名称调整超时时间
     Duration actualTimeout = timeout;
-    if (testName.contains('工作功耗测试') || testName.contains('漏电流测试')) {
+    if (testName.contains('ISP工作功耗测试')) {
+      // ISP工作功耗测试：响应2秒 + 等待5秒 + GPIB测量3秒
+      actualTimeout = const Duration(seconds: 10);
+    } else if (testName.contains('工作功耗测试') || testName.contains('漏电流测试')) {
       // GPIB 电流测试需要更长时间（20次采样 × 10秒 + 间隔）
       actualTimeout = const Duration(seconds: 240); // 4分钟
     } else if (testName.contains('设备关机')) {
@@ -4793,17 +4796,16 @@ class TestState extends ChangeNotifier {
       try {
         final executor = test['executor'] as Future<bool> Function();
         
-        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED、电流测试内部已有完整的逻辑，不使用外层重试包装器
+        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED测试内部已有完整的逻辑，不使用外层重试包装器
         // WiFi有重试，IMU/Touch/Sensor/蓝牙等待用户确认，MIC/LED有弹窗和完整流程
-        // 电流测试（功耗测试）阈值未通过不重试
+        // 电流测试（功耗测试）通过异常机制区分通信失败（重试）和阈值失败（不重试）
         final result = (test['type'] == 'WiFi' || 
                        test['type'] == 'IMU' || 
                        test['type'] == 'Touch' || 
                        test['type'] == 'Sensor' ||
                        test['type'] == '蓝牙' ||
                        test['type'] == 'MIC' ||
-                       test['type'] == 'LED' ||
-                       test['type'] == '电流')
+                       test['type'] == 'LED')
             ? await executor()
             : await _executeTestWithRetry(test['name'] as String, executor);
         
@@ -5786,16 +5788,16 @@ class TestState extends ChangeNotifier {
       );
       
       if (powerResponse == null || powerResponse.containsKey('error')) {
-        _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
-        return false;
+        _logState?.error('❌ 电源控制命令发送失败（通信失败，将重试）', type: LogType.debug);
+        throw Exception('通信失败'); // 抛出异常以触发重试
       }
       
       final powerPayload = powerResponse['payload'] as Uint8List?;
       if (powerPayload != null) {
         final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
         if (result == null || !(result['success'] as bool)) {
-          _logState?.error('❌ 物奇功耗测试启动失败', type: LogType.debug);
-          return false;
+          _logState?.error('❌ 物奇功耗测试启动失败（通信失败，将重试）', type: LogType.debug);
+          throw Exception('通信失败'); // 抛出异常以触发重试
         }
         _logState?.success('✅ 物奇功耗测试已启动', type: LogType.debug);
       }
@@ -5806,8 +5808,8 @@ class TestState extends ChangeNotifier {
       
       // 3. 检查GPIB是否就绪
       if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
-        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
-        return false;
+        _logState?.error('❌ GPIB设备未就绪（通信失败，将重试）', type: LogType.debug);
+        throw Exception('GPIB未就绪'); // 抛出异常以触发重试
       }
       
       if (!_isGpibReady) {
@@ -5822,8 +5824,8 @@ class TestState extends ChangeNotifier {
       );
       
       if (currentA == null) {
-        _logState?.error('❌ 电流测量失败', type: LogType.debug);
-        return false;
+        _logState?.error('❌ 电流测量失败（通信失败，将重试）', type: LogType.debug);
+        throw Exception('电流测量失败'); // 抛出异常以触发重试
       }
       
       final currentMa = currentA * 1000;
@@ -5836,12 +5838,15 @@ class TestState extends ChangeNotifier {
       // 判断测试结果（阈值未通过不重试）
       if (currentMa <= TestConfig.wuqiPowerThresholdMa) {
         _logState?.success('✅ 物奇功耗测试通过', type: LogType.debug);
+        _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true;
       } else {
         _logState?.error('❌ 物奇功耗测试失败: 超过阈值（不重试）', type: LogType.debug);
+        _logState?.error('   测量值: ${currentMa.toStringAsFixed(2)} mA > 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+        _logState?.error('   差值: +${(currentMa - TestConfig.wuqiPowerThresholdMa).toStringAsFixed(2)} mA', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return false;
+        return false; // 阈值失败直接返回false，不抛出异常，不触发重试
       }
     } catch (e) {
       _logState?.error('❌ 物奇功耗测试异常: $e', type: LogType.debug);
@@ -5871,16 +5876,16 @@ class TestState extends ChangeNotifier {
       );
       
       if (powerResponse == null || powerResponse.containsKey('error')) {
-        _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
-        return false;
+        _logState?.error('❌ 电源控制命令发送失败（通信失败，将重试）', type: LogType.debug);
+        throw Exception('通信失败'); // 抛出异常以触发重试
       }
       
       final powerPayload = powerResponse['payload'] as Uint8List?;
       if (powerPayload != null) {
         final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
         if (result == null || !(result['success'] as bool)) {
-          _logState?.error('❌ ISP功耗测试启动失败', type: LogType.debug);
-          return false;
+          _logState?.error('❌ ISP功耗测试启动失败（通信失败，将重试）', type: LogType.debug);
+          throw Exception('通信失败'); // 抛出异常以触发重试
         }
         _logState?.success('✅ ISP功耗测试已启动', type: LogType.debug);
       }
@@ -5891,8 +5896,8 @@ class TestState extends ChangeNotifier {
       
       // 3. 检查GPIB是否就绪
       if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
-        _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
-        return false;
+        _logState?.error('❌ GPIB设备未就绪（通信失败，将重试）', type: LogType.debug);
+        throw Exception('GPIB未就绪'); // 抛出异常以触发重试
       }
       
       if (!_isGpibReady) {
@@ -5907,8 +5912,8 @@ class TestState extends ChangeNotifier {
       );
       
       if (currentA == null) {
-        _logState?.error('❌ 电流测量失败', type: LogType.debug);
-        return false;
+        _logState?.error('❌ 电流测量失败（通信失败，将重试）', type: LogType.debug);
+        throw Exception('电流测量失败'); // 抛出异常以触发重试
       }
       
       final currentMa = currentA * 1000;
@@ -5921,12 +5926,15 @@ class TestState extends ChangeNotifier {
       // 判断测试结果（阈值未通过不重试）
       if (currentMa <= TestConfig.ispWorkingPowerThresholdMa) {
         _logState?.success('✅ ISP工作功耗测试通过', type: LogType.debug);
+        _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true;
       } else {
         _logState?.error('❌ ISP工作功耗测试失败: 超过阈值（不重试）', type: LogType.debug);
+        _logState?.error('   测量值: ${currentMa.toStringAsFixed(2)} mA > 阈值: ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+        _logState?.error('   差值: +${(currentMa - TestConfig.ispWorkingPowerThresholdMa).toStringAsFixed(2)} mA', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return false;
+        return false; // 阈值失败直接返回false，不抛出异常，不触发重试
       }
     } catch (e) {
       _logState?.error('❌ ISP工作功耗测试异常: $e', type: LogType.debug);
