@@ -4707,12 +4707,13 @@ class TestState extends ChangeNotifier {
 
   /// 执行所有测试项
   Future<void> _executeAllTests() async {
-    // 定义完整测试序列（37项）
+    // 定义完整测试序列（38项）
     final testSequence = [
       {'name': '1. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
       {'name': '2. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
       {'name': '3. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
       {'name': '4. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '4.3 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
       {'name': '4.5 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
       // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
@@ -5534,15 +5535,30 @@ class TestState extends ChangeNotifier {
       // 等待设备完全唤醒
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // 先发送 ff04 指令（一直重试直到成功或串口断开）
+      _logState?.success('✅ 上电测试通过', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('📤 发送 FF04 指令...', type: LogType.debug);
+      return true;
+      
+    } catch (e) {
+      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 2.5 产测初始化 (发送 FF04 指令)
+  Future<bool> _autoTestProductionInit() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔧 产测初始化 - 发送 FF04 指令', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
       bool ff04Success = false;
       int ff04Attempt = 0;
-      while (!ff04Success && _serialService.isConnected && !_shouldStopTest) {
+      const int maxFF04Attempts = 10;
+      
+      while (!ff04Success && ff04Attempt < maxFF04Attempts && _serialService.isConnected && !_shouldStopTest) {
         ff04Attempt++;
-        _logState?.info('📤 尝试发送 FF04 指令 (第 $ff04Attempt 次)...', type: LogType.debug);
+        _logState?.info('📤 尝试发送 FF04 指令 (第 $ff04Attempt/$maxFF04Attempts 次)...', type: LogType.debug);
         
         // 创建 ff04 指令: CMD=0xFF, OPT=0x04
         final ff04Cmd = Uint8List.fromList([0xFF, 0x04]);
@@ -5559,7 +5575,6 @@ class TestState extends ChangeNotifier {
         if (ff04Response != null && !ff04Response.containsKey('error')) {
           ff04Success = true;
           _logState?.success('✅ FF04 指令发送成功', type: LogType.debug);
-          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
           break;
         }
         
@@ -5569,26 +5584,28 @@ class TestState extends ChangeNotifier {
           return false;
         }
         
-        _logState?.warning('⚠️ FF04 指令响应失败: ${ff04Response?['error'] ?? '无响应'}，1秒后重试...', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 1));
+        if (ff04Attempt < maxFF04Attempts) {
+          _logState?.warning('⚠️ FF04 指令响应失败: ${ff04Response?['error'] ?? '无响应'}，1秒后重试...', type: LogType.debug);
+          await Future.delayed(const Duration(seconds: 1));
+        }
       }
       
       if (!ff04Success) {
-        _logState?.error('❌ FF04 指令发送失败', type: LogType.debug);
+        _logState?.error('❌ FF04 指令发送失败 (已尝试 $ff04Attempt 次)', type: LogType.debug);
         return false;
       }
       
-      _logState?.success('✅ 上电测试通过', type: LogType.debug);
+      _logState?.success('✅ 产测初始化完成', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       return true;
       
     } catch (e) {
-      _logState?.error('上电测试异常: $e', type: LogType.debug);
+      _logState?.error('❌ 产测初始化异常: $e', type: LogType.debug);
       return false;
     }
   }
 
-  /// 2.5 产测开始指令
+  /// 2.6 产测开始指令
   Future<bool> _autoTestProductionStart() async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
