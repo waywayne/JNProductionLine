@@ -6482,11 +6482,11 @@ class TestState extends ChangeNotifier {
       _logState?.info('📡 开始SPP蓝牙功能测试', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 检查平台支持（Android: flutter_bluetooth_serial, Windows: win32_bluetooth）
-      if (!Platform.isAndroid && !Platform.isWindows) {
+      // 检查平台支持（仅支持 Android）
+      if (!Platform.isAndroid) {
         _logState?.warning('⚠️ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙测试', type: LogType.debug);
-        _logState?.info('   支持的平台: Android, Windows', type: LogType.debug);
-        _logState?.info('   macOS/iOS 请使用BLE或其他通信方式', type: LogType.debug);
+        _logState?.info('   支持的平台: Android', type: LogType.debug);
+        _logState?.info('   Windows/macOS/iOS 暂不支持', type: LogType.debug);
         _logState?.warning('⏭️ 跳过SPP蓝牙功能测试', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true; // 在不支持的平台上返回true以继续测试流程
@@ -6504,44 +6504,34 @@ class TestState extends ChangeNotifier {
       // 设置日志状态
       _sppService.setLogState(_logState!);
       
-      // Windows 平台优化：直接通过 MAC 地址连接，无需扫描
-      bool connected = false;
-      if (Platform.isWindows) {
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        _logState?.info('🔗 Windows 平台：直接通过MAC地址连接', type: LogType.debug);
-        
-        // 直接使用 MAC 地址连接，无需先扫描
-        connected = await _sppService.connectByAddress(_readBluetoothMACString!);
-      } else {
-        // Android 平台：需要先扫描设备列表
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        _logState?.info('🔍 步骤 1/3: 扫描蓝牙设备', type: LogType.debug);
-        final devices = await _sppService.getAvailableDevices();
-        
-        if (devices.isEmpty) {
-          _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
-          _logState?.info('   提示：请确保设备已配对', type: LogType.debug);
-          return false;
-        }
-        
-        // 2. 查找目标设备
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        _logState?.info('🔍 步骤 2/3: 查找目标设备', type: LogType.debug);
-        
-        var targetDevice = devices.firstWhere(
-          (device) => device.address == _readBluetoothMACString,
-          orElse: () => throw Exception('未找到匹配的蓝牙设备'),
-        );
-        
-        _logState?.success('✅ 找到目标设备: ${targetDevice.name ?? "未知设备"}', type: LogType.debug);
-        _logState?.info('   地址: ${targetDevice.address}', type: LogType.debug);
-        
-        // 3. 通过SPP连接设备
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        _logState?.info('🔗 步骤 3/3: 建立SPP连接', type: LogType.debug);
-        
-        connected = await _sppService.connect(targetDevice);
+      // 1. 扫描蓝牙设备
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔍 步骤 1/3: 扫描蓝牙设备', type: LogType.debug);
+      final devices = await _sppService.getAvailableDevices();
+      
+      if (devices.isEmpty) {
+        _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
+        _logState?.info('   提示：请确保设备已配对', type: LogType.debug);
+        return false;
       }
+      
+      // 2. 查找目标设备
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔍 步骤 2/3: 查找目标设备', type: LogType.debug);
+      
+      var targetDevice = devices.firstWhere(
+        (device) => device.address == _readBluetoothMACString,
+        orElse: () => throw Exception('未找到匹配的蓝牙设备'),
+      );
+      
+      _logState?.success('✅ 找到目标设备: ${targetDevice.name ?? "未知设备"}', type: LogType.debug);
+      _logState?.info('   地址: ${targetDevice.address}', type: LogType.debug);
+      
+      // 3. 通过SPP连接设备
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔗 步骤 3/3: 建立SPP连接', type: LogType.debug);
+      
+      final connected = await _sppService.connect(targetDevice);
       
       if (!connected) {
         _logState?.error('❌ SPP连接失败', type: LogType.debug);
