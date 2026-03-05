@@ -4672,6 +4672,9 @@ class TestState extends ChangeNotifier {
     if (testName.contains('工作功耗测试') || testName.contains('漏电流测试')) {
       // GPIB 电流测试需要更长时间（20次采样 × 10秒 + 间隔）
       actualTimeout = const Duration(seconds: 240); // 4分钟
+    } else if (testName.contains('设备关机')) {
+      // 关机测试需要等待设备完全断电（5秒响应 + 5秒等待）
+      actualTimeout = const Duration(seconds: 12);
     }
     
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
