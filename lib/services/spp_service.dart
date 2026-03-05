@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:flutter_bluetooth_classic_serial/flutter_bluetooth_classic_serial.dart' as classic;
 import '../models/log_state.dart';
 import '../config/test_config.dart';
 
@@ -33,19 +34,38 @@ class SppService {
   Future<List<BluetoothDevice>> getAvailableDevices() async {
     try {
       _logState?.info('🔍 开始扫描蓝牙设备...');
+      _logState?.info('   当前平台: ${Platform.operatingSystem}');
       
       // Check platform support
       if (!_isPlatformSupported()) {
         _logState?.warning('⚠️ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙');
-        _logState?.info('   支持的平台: Windows, Android');
+        _logState?.info('   支持的平台: Android, Windows');
         _logState?.info('   macOS/iOS 请使用BLE或其他通信方式');
         return [];
       }
       
+      // Platform-specific implementation
+      if (Platform.isWindows) {
+        return await _getAvailableDevicesWindows();
+      } else if (Platform.isAndroid) {
+        return await _getAvailableDevicesAndroid();
+      }
+      
+      return [];
+    } catch (e) {
+      _logState?.error('❌ 扫描蓝牙设备失败: $e');
+      return [];
+    }
+  }
+  
+  /// Get available Bluetooth devices on Android
+  Future<List<BluetoothDevice>> _getAvailableDevicesAndroid() async {
+    try {
       // Check if Bluetooth is available
       final isAvailable = await FlutterBluetoothSerial.instance.isAvailable ?? false;
       if (!isAvailable) {
         _logState?.error('❌ 蓝牙不可用');
+        _logState?.info('   请检查系统蓝牙是否已启用');
         return [];
       }
       
@@ -70,20 +90,54 @@ class SppService {
       
       return bondedDevices;
     } catch (e) {
-      _logState?.error('❌ 扫描蓝牙设备失败: $e');
-      if (e.toString().contains('MissingPluginException')) {
-        _logState?.warning('   提示: flutter_bluetooth_serial 不支持当前平台');
-        _logState?.info('   当前平台: ${Platform.operatingSystem}');
-        _logState?.info('   支持平台: Windows, Android');
+      _logState?.error('❌ Android 蓝牙扫描失败: $e');
+      return [];
+    }
+  }
+  
+  /// Get available Bluetooth devices on Windows
+  Future<List<BluetoothDevice>> _getAvailableDevicesWindows() async {
+    try {
+      // Get paired devices using flutter_bluetooth_classic_serial
+      final classicPlugin = classic.FlutterBluetoothClassicSerial();
+      final pairedDevices = await classicPlugin.getPairedDevices();
+      
+      if (pairedDevices.isEmpty) {
+        _logState?.warning('⚠️ 未找到已配对的蓝牙设备');
+        _logState?.info('   请在 Windows 设置中配对蓝牙设备');
+        return [];
       }
+      
+      _logState?.success('✅ 找到 ${pairedDevices.length} 个已配对设备');
+      
+      // Convert classic.Device to BluetoothDevice
+      final devices = <BluetoothDevice>[];
+      for (var classicDevice in pairedDevices) {
+        _logState?.info('  📱 ${classicDevice.name ?? "未知设备"} (${classicDevice.address})');
+        
+        // Create BluetoothDevice compatible object
+        devices.add(BluetoothDevice(
+          name: classicDevice.name,
+          address: classicDevice.address,
+        ));
+      }
+      
+      return devices;
+    } catch (e) {
+      _logState?.error('❌ Windows 蓝牙扫描失败: $e');
+      _logState?.info('   请确保:');
+      _logState?.info('   1. 系统蓝牙已启用');
+      _logState?.info('   2. 已在 Windows 设置中配对设备');
+      _logState?.info('   3. 已运行 flutter pub get');
       return [];
     }
   }
   
   /// Check if current platform supports SPP Bluetooth
   bool _isPlatformSupported() {
-    // flutter_bluetooth_serial only supports Windows and Android
-    return Platform.isWindows || Platform.isAndroid;
+    // Android: flutter_bluetooth_serial
+    // Windows: flutter_bluetooth_classic_serial
+    return Platform.isAndroid || Platform.isWindows;
   }
   
   /// Check if connected

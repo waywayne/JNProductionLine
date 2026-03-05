@@ -6482,10 +6482,10 @@ class TestState extends ChangeNotifier {
       _logState?.info('📡 开始SPP蓝牙功能测试', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 检查平台支持（flutter_bluetooth_serial 仅支持 Windows 和 Android）
-      if (!Platform.isWindows && !Platform.isAndroid) {
+      // 检查平台支持（Android: flutter_bluetooth_serial, Windows: win32_bluetooth）
+      if (!Platform.isAndroid && !Platform.isWindows) {
         _logState?.warning('⚠️ 当前平台 (${Platform.operatingSystem}) 不支持SPP蓝牙测试', type: LogType.debug);
-        _logState?.info('   支持的平台: Windows, Android', type: LogType.debug);
+        _logState?.info('   支持的平台: Android, Windows', type: LogType.debug);
         _logState?.info('   macOS/iOS 请使用BLE或其他通信方式', type: LogType.debug);
         _logState?.warning('⏭️ 跳过SPP蓝牙功能测试', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
