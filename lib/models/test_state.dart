@@ -581,44 +581,41 @@ class TestState extends ChangeNotifier {
   /// 获取测试序列
   List<Map<String, dynamic>> _getTestSequence() {
     return [
-      {'name': '0. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
-      {'name': '1. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
-      {'name': '2. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
-      {'name': '2.3 设备唤醒', 'type': '唤醒', 'executor': _autoTestDeviceWakeup, 'skippable': false},
-      {'name': '2.5 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
-      {'name': '2.6 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
-      {'name': '3. 工作功耗测试', 'type': '电流', 'executor': _autoTestWorkingPower, 'skippable': true},
-      {'name': '4. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
-      {'name': '5. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
-      {'name': '5. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
-      // {'name': '6. 完整功耗测试', 'type': '电流', 'executor': _autoTestFullPower, 'skippable': false}, // 已禁用：开启物奇、ISP和WIFI
-      // {'name': '7. ISP休眠功耗测试', 'type': '电流', 'executor': _autoTestIspSleepPower, 'skippable': false}, // 已禁用：开启物奇、ISP休眠状态
-      {'name': '8. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
-      {'name': '9. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
-      {'name': '10. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
-      {'name': '10.1 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
-      {'name': '10.2 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
-      {'name': '10.3 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
-      {'name': '10.4 SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
-      {'name': '11. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
-      {'name': '12. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
-      {'name': '13. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
-      {'name': '14. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
-      {'name': '15. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
-      {'name': '16. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '17. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '18. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '19. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '20. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '21. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '22. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '23. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '24. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '25. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '26. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '27. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
-      {'name': '28. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
-      {'name': '29. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '1. 设备关机', 'type': '电源', 'executor': _autoTestShutdown, 'skippable': false},
+      {'name': '2. 漏电流测试', 'type': '电流', 'executor': _autoTestLeakageCurrent, 'skippable': false},
+      {'name': '3. 上电测试', 'type': '电源', 'executor': _autoTestPowerOn, 'skippable': false},
+      {'name': '4. 设备唤醒', 'type': '唤醒', 'executor': _autoTestDeviceWakeup, 'skippable': false},
+      {'name': '5. 物奇功耗测试', 'type': '电流', 'executor': _autoTestWuqiPower, 'skippable': false},
+      {'name': '6. ISP工作功耗测试', 'type': '电流', 'executor': _autoTestIspWorkingPower, 'skippable': false},
+      {'name': '7. 产测初始化', 'type': '指令', 'executor': _autoTestProductionInit, 'skippable': false},
+      {'name': '8. 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
+      {'name': '9. EMMC容量检测测试', 'type': 'EMMC', 'executor': _autoTestEMMCCapacity, 'skippable': false},
+      {'name': '10. 设备电压测试', 'type': '电压', 'executor': _autoTestVoltage, 'skippable': false},
+      {'name': '11. 电量检测测试', 'type': '电量', 'executor': _autoTestBattery, 'skippable': false},
+      {'name': '12. 充电状态测试', 'type': '充电', 'executor': _autoTestCharging, 'skippable': false},
+      {'name': '13. 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
+      {'name': '14. 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
+      {'name': '15. 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
+      {'name': '16. SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
+      {'name': '17. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
+      {'name': '18. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
+      {'name': '19. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
+      {'name': '20. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
+      {'name': '21. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
+      {'name': '22. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
+      {'name': '23. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '24. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
+      {'name': '25. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '26. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '27. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '28. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '29. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '30. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '31. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '32. 蓝牙测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '33. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
+      {'name': '34. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
+      {'name': '35. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -4800,15 +4797,17 @@ class TestState extends ChangeNotifier {
       try {
         final executor = test['executor'] as Future<bool> Function();
         
-        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED测试内部已有完整的逻辑，不使用外层重试包装器
+        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED、电流测试内部已有完整的逻辑，不使用外层重试包装器
         // WiFi有重试，IMU/Touch/Sensor/蓝牙等待用户确认，MIC/LED有弹窗和完整流程
+        // 电流测试（功耗测试）阈值未通过不重试
         final result = (test['type'] == 'WiFi' || 
                        test['type'] == 'IMU' || 
                        test['type'] == 'Touch' || 
                        test['type'] == 'Sensor' ||
                        test['type'] == '蓝牙' ||
                        test['type'] == 'MIC' ||
-                       test['type'] == 'LED')
+                       test['type'] == 'LED' ||
+                       test['type'] == '电流')
             ? await executor()
             : await _executeTestWithRetry(test['name'] as String, executor);
         
@@ -5805,9 +5804,9 @@ class TestState extends ChangeNotifier {
         _logState?.success('✅ 物奇功耗测试已启动', type: LogType.debug);
       }
       
-      // 2. 等待设备稳定
-      _logState?.info('⏳ 等待设备稳定 (2秒)...', type: LogType.debug);
-      await Future.delayed(const Duration(seconds: 2));
+      // 2. 等待设备稳定（响应成功后等待5秒再测试电流）
+      _logState?.info('⏳ 等待设备稳定 (5秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 5));
       
       // 3. 检查GPIB是否就绪
       if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
@@ -5838,19 +5837,16 @@ class TestState extends ChangeNotifier {
       _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
       _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
       
-      bool testPassed = false;
+      // 判断测试结果（阈值未通过不重试）
       if (currentMa <= TestConfig.wuqiPowerThresholdMa) {
         _logState?.success('✅ 物奇功耗测试通过', type: LogType.debug);
-        testPassed = true;
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
       } else {
-        _logState?.error('❌ 物奇功耗测试失败: 超过阈值', type: LogType.debug);
-        testPassed = false;
+        _logState?.error('❌ 物奇功耗测试失败: 超过阈值（不重试）', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
       }
-      
-      // 发送功耗测试结束命令
-      await _sendPowerConsumptionEndCommand();
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      return testPassed;
     } catch (e) {
       _logState?.error('❌ 物奇功耗测试异常: $e', type: LogType.debug);
       return false;
@@ -5893,9 +5889,9 @@ class TestState extends ChangeNotifier {
         _logState?.success('✅ ISP功耗测试已启动', type: LogType.debug);
       }
       
-      // 2. 等待设备稳定
-      _logState?.info('⏳ 等待设备稳定 (2秒)...', type: LogType.debug);
-      await Future.delayed(const Duration(seconds: 2));
+      // 2. 等待设备稳定（响应成功后等待5秒再测试电流）
+      _logState?.info('⏳ 等待设备稳定 (5秒)...', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 5));
       
       // 3. 检查GPIB是否就绪
       if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
@@ -5926,19 +5922,16 @@ class TestState extends ChangeNotifier {
       _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
       _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
       
-      bool testPassed = false;
+      // 判断测试结果（阈值未通过不重试）
       if (currentMa <= TestConfig.ispWorkingPowerThresholdMa) {
         _logState?.success('✅ ISP工作功耗测试通过', type: LogType.debug);
-        testPassed = true;
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
       } else {
-        _logState?.error('❌ ISP工作功耗测试失败: 超过阈值', type: LogType.debug);
-        testPassed = false;
+        _logState?.error('❌ ISP工作功耗测试失败: 超过阈值（不重试）', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
       }
-      
-      // 发送功耗测试结束命令
-      await _sendPowerConsumptionEndCommand();
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      return testPassed;
     } catch (e) {
       _logState?.error('❌ ISP工作功耗测试异常: $e', type: LogType.debug);
       return false;
