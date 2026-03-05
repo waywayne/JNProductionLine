@@ -6903,7 +6903,7 @@ class TestState extends ChangeNotifier {
       if (_currentDeviceIdentity == null || _currentDeviceIdentity!['sn'] == null) {
         _bluetoothTestStep = '❌ 错误：未找到SN码';
         notifyListeners();
-        _logState?.error('❌ 蓝牙测试失败：未找到SN码', type: LogType.debug);
+        _logState?.error('❌ 蓝牙测试失败：未找到SN码 ', type: LogType.debug);
         await Future.delayed(const Duration(seconds: 3)); // 显示错误信息3秒
         return false;
       }
