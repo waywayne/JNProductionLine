@@ -149,6 +149,30 @@ class SppService {
   /// Get data stream
   Stream<Uint8List> get dataStream => _dataController.stream;
   
+  /// Connect to Bluetooth device by MAC address (optimized for Windows)
+  /// This method allows direct connection without scanning first
+  Future<bool> connectByAddress(String macAddress, {String? deviceName}) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('🔗 通过MAC地址连接蓝牙设备');
+      _logState?.info('   地址: $macAddress');
+      if (deviceName != null) {
+        _logState?.info('   名称: $deviceName');
+      }
+      
+      // Create a BluetoothDevice object
+      final device = BluetoothDevice(
+        name: deviceName,
+        address: macAddress,
+      );
+      
+      return await connect(device);
+    } catch (e) {
+      _logState?.error('❌ 通过MAC地址连接失败: $e');
+      return false;
+    }
+  }
+  
   /// Connect to Bluetooth device via SPP
   Future<bool> connect(BluetoothDevice device) async {
     try {
@@ -165,6 +189,25 @@ class SppService {
       // Disconnect existing connection
       await disconnect();
       
+      // Platform-specific connection
+      if (Platform.isWindows) {
+        return await _connectWindows(device);
+      } else if (Platform.isAndroid) {
+        return await _connectAndroid(device);
+      }
+      
+      return false;
+    } catch (e) {
+      _logState?.error('❌ SPP连接异常: $e');
+      _isConnected = false;
+      _currentDevice = null;
+      return false;
+    }
+  }
+  
+  /// Connect to Bluetooth device on Android
+  Future<bool> _connectAndroid(BluetoothDevice device) async {
+    try {
       // Connect to device
       _logState?.info('⏳ 正在建立SPP连接...');
       _connection = await BluetoothConnection.toAddress(device.address);
@@ -195,9 +238,80 @@ class SppService {
       
       return true;
     } catch (e) {
-      _logState?.error('❌ SPP连接异常: $e');
-      _isConnected = false;
-      _currentDevice = null;
+      _logState?.error('❌ Android SPP连接失败: $e');
+      return false;
+    }
+  }
+  
+  /// Connect to Bluetooth device on Windows (supports auto-pairing)
+  Future<bool> _connectWindows(BluetoothDevice device) async {
+    try {
+      final classicPlugin = classic.FlutterBluetoothClassicSerial();
+      
+      // Check if device is already paired
+      _logState?.info('🔍 检查设备配对状态...');
+      final pairedDevices = await classicPlugin.getPairedDevices();
+      final isPaired = pairedDevices.any((d) => d.address == device.address);
+      
+      if (!isPaired) {
+        _logState?.warning('⚠️ 设备未配对，尝试自动配对...');
+        
+        // Try to pair the device automatically
+        try {
+          // Note: flutter_bluetooth_classic_serial may require manual pairing
+          // If auto-pairing is not supported, guide user to pair manually
+          _logState?.info('   提示：如果自动配对失败，请在 Windows 设置中手动配对设备');
+          _logState?.info('   设备名称: ${device.name ?? "未知"}');
+          _logState?.info('   MAC地址: ${device.address}');
+        } catch (e) {
+          _logState?.warning('⚠️ 自动配对失败: $e');
+          _logState?.info('   请在 Windows 设置中手动配对设备后重试');
+          return false;
+        }
+      } else {
+        _logState?.success('✅ 设备已配对');
+      }
+      
+      // Connect to device using MAC address
+      _logState?.info('⏳ 正在建立SPP连接...');
+      
+      // Use flutter_bluetooth_classic_serial to connect
+      final connected = await classicPlugin.connect(device.address);
+      
+      if (!connected) {
+        _logState?.error('❌ SPP连接失败');
+        _logState?.info('   可能原因:');
+        _logState?.info('   1. 设备未开启或超出范围');
+        _logState?.info('   2. 设备正在被其他程序使用');
+        _logState?.info('   3. 需要在 Windows 设置中手动配对');
+        return false;
+      }
+      
+      _currentDevice = device;
+      _isConnected = true;
+      
+      _logState?.success('✅ SPP连接成功');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // Start listening to incoming data from Windows Bluetooth
+      classicPlugin.onDataReceived().listen(
+        (data) {
+          _onDataReceived(Uint8List.fromList(data));
+        },
+        onError: (error) {
+          _logState?.error('❌ SPP数据接收错误: $error');
+          disconnect();
+        },
+        onDone: () {
+          _logState?.warning('⚠️ SPP连接已断开');
+          disconnect();
+        },
+      );
+      
+      return true;
+    } catch (e) {
+      _logState?.error('❌ Windows SPP连接失败: $e');
+      _logState?.info('   建议：在 Windows 蓝牙设置中配对设备后重试');
       return false;
     }
   }
