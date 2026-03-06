@@ -345,69 +345,42 @@ class PythonBluetoothService {
   /// 安装预编译的 wheel 文件
   Future<bool> _installPrecompiledWheel(String pythonVersion) async {
     try {
-      _logState?.info('   正在下载预编译包...');
+      _logState?.info('   尝试使用 pip download 下载预编译包...');
       
-      // PyBluez wheel 文件的多个下载源（按优先级）
-      final wheelUrlSources = {
-        '3.8': [
-          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp38-cp38-win_amd64.whl',
-          'https://download.lfd.uci.edu/pythonlibs/archived/PyBluez-0.23-cp38-cp38-win_amd64.whl',
-        ],
-        '3.9': [
-          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp39-cp39-win_amd64.whl',
-        ],
-        '3.10': [
-          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp310-cp310-win_amd64.whl',
-        ],
-        '3.11': [
-          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp311-cp311-win_amd64.whl',
-        ],
-        '3.12': [
-          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp312-cp312-win_amd64.whl',
-        ],
-      };
-      
-      final wheelUrls = wheelUrlSources[pythonVersion];
-      if (wheelUrls == null || wheelUrls.isEmpty) {
-        _logState?.warning('   ⚠️  不支持的 Python 版本: $pythonVersion');
-        return false;
-      }
-      
-      // 下载到临时目录
+      // 使用临时目录
       final tempDir = Directory.systemTemp;
-      final wheelFileName = 'PyBluez-0.23-cp${pythonVersion.replaceAll('.', '')}-cp${pythonVersion.replaceAll('.', '')}-win_amd64.whl';
-      final wheelPath = path.join(tempDir.path, wheelFileName);
+      final downloadDir = path.join(tempDir.path, 'pybluez_wheels');
+      await Directory(downloadDir).create(recursive: true);
       
-      // 创建下载脚本
-      final downloadScript = '''
-import urllib.request
-import sys
-
-url = sys.argv[1]
-output = sys.argv[2]
-
-try:
-    urllib.request.urlretrieve(url, output)
-    print("OK")
-except Exception as e:
-    print(f"ERROR: {e}", file=sys.stderr)
-    sys.exit(1)
-''';
+      // 方法 1: 使用 pip download 下载 wheel（使用国内镜像）
+      final mirrors = [
+        'https://pypi.tuna.tsinghua.edu.cn/simple',  // 清华镜像
+        'https://mirrors.aliyun.com/pypi/simple/',   // 阿里云镜像
+        null,  // 默认PyPI
+      ];
       
-      final downloadScriptPath = path.join(tempDir.path, 'download_wheel.py');
-      await File(downloadScriptPath).writeAsString(downloadScript);
-      
-      // 尝试所有下载源
-      bool downloaded = false;
-      for (int i = 0; i < wheelUrls.length; i++) {
-        final wheelUrl = wheelUrls[i];
-        _logState?.debug('   尝试源 ${i + 1}/${wheelUrls.length}: $wheelUrl');
+      ProcessResult? downloadResult;
+      for (int i = 0; i < mirrors.length; i++) {
+        final mirror = mirrors[i];
+        final mirrorName = mirror == null 
+            ? '默认PyPI' 
+            : (mirror.contains('tsinghua') ? '清华镜像' : '阿里云镜像');
+        
+        _logState?.debug('   尝试 $mirrorName...');
+        
+        final args = [
+          '-m', 'pip', 'download',
+          '--only-binary=:all:',  // 只下载二进制包
+          '--dest', downloadDir,
+          '--no-deps',  // 不下载依赖
+          if (mirror != null) ...['-i', mirror],  // 指定镜像源
+          'pybluez==0.23',
+        ];
         
         try {
-          // 执行下载
-          final downloadResult = await Process.run(
+          downloadResult = await Process.run(
             _pythonPath!,
-            [downloadScriptPath, wheelUrl, wheelPath],
+            args,
             runInShell: true,
           ).timeout(
             const Duration(minutes: 2),
@@ -416,55 +389,74 @@ except Exception as e:
             },
           );
           
-          if (downloadResult.exitCode == 0 && await File(wheelPath).exists()) {
-            _logState?.debug('   ✓ 下载成功');
-            downloaded = true;
+          if (downloadResult.exitCode == 0) {
+            _logState?.debug('   ✓ $mirrorName 下载成功');
             break;
           } else {
-            _logState?.debug('   ✗ 下载失败: ${downloadResult.stderr}');
+            _logState?.debug('   ✗ $mirrorName 失败');
           }
         } catch (e) {
-          _logState?.debug('   ✗ 下载异常: $e');
+          _logState?.debug('   ✗ $mirrorName 异常: $e');
         }
       }
       
-      if (!downloaded) {
-        _logState?.warning('   ⚠️  所有下载源都失败');
-        return false;
-      }
-      
-      _logState?.success('   ✅ 下载完成');
-      _logState?.info('   正在安装...');
-      
-      // 安装 wheel
-      final installResult = await Process.run(
-        _pythonPath!,
-        ['-m', 'pip', 'install', wheelPath, '--user', '--force-reinstall'],
-        runInShell: true,
-      ).timeout(
-        const Duration(minutes: 2),
-        onTimeout: () {
-          throw TimeoutException('安装超时');
-        },
-      );
-      
-      if (installResult.exitCode == 0) {
-        _logState?.success('   ✅ 预编译包安装成功');
+      if (downloadResult != null && downloadResult.exitCode == 0) {
+        _logState?.debug('   ✓ pip download 成功');
         
-        // 验证安装
-        final installed = await _checkPyBluez();
-        if (installed) {
-          // 清理临时文件
-          try {
-            await File(wheelPath).delete();
-            await File(downloadScriptPath).delete();
-          } catch (_) {}
-          return true;
+        // 查找下载的 wheel 文件
+        final wheelFiles = Directory(downloadDir)
+            .listSync()
+            .whereType<File>()
+            .where((f) => f.path.endsWith('.whl'))
+            .toList();
+        
+        if (wheelFiles.isNotEmpty) {
+          final wheelPath = wheelFiles.first.path;
+          _logState?.success('   ✅ 找到 wheel: ${path.basename(wheelPath)}');
+          _logState?.info('   正在安装...');
+          
+          // 安装下载的 wheel
+          final installResult = await Process.run(
+            _pythonPath!,
+            ['-m', 'pip', 'install', wheelPath, '--user', '--force-reinstall'],
+            runInShell: true,
+          ).timeout(
+            const Duration(minutes: 2),
+            onTimeout: () {
+              throw TimeoutException('安装超时');
+            },
+          );
+          
+          if (installResult.exitCode == 0) {
+            _logState?.success('   ✅ 预编译包安装成功');
+            
+            // 验证安装
+            final installed = await _checkPyBluez();
+            if (installed) {
+              // 清理临时文件
+              try {
+                await Directory(downloadDir).delete(recursive: true);
+              } catch (_) {}
+              return true;
+            }
+          } else {
+            _logState?.warning('   ⚠️  安装失败');
+            _logState?.debug('   错误: ${installResult.stderr}');
+          }
+        } else {
+          _logState?.warning('   ⚠️  未找到下载的 wheel 文件');
         }
       } else {
-        _logState?.warning('   ⚠️  安装失败');
-        _logState?.debug('   错误: ${installResult.stderr}');
+        _logState?.warning('   ⚠️  所有镜像源都失败');
+        if (downloadResult != null) {
+          _logState?.debug('   最后错误: ${downloadResult.stderr}');
+        }
       }
+      
+      // 清理
+      try {
+        await Directory(downloadDir).delete(recursive: true);
+      } catch (_) {}
       
       return false;
     } catch (e) {
