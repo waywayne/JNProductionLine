@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as path;
 import '../services/serial_service.dart';
 import '../services/spp_service.dart';
+import '../services/python_bluetooth_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
@@ -135,6 +136,7 @@ class TestState extends ChangeNotifier {
   // Communication services
   final SerialService _serialService = SerialService();
   final SppService _sppService = SppService();
+  final PythonBluetoothService _pythonBtService = PythonBluetoothService();
   
   String? _selectedPort;
   bool _isRunningTest = false;
@@ -333,6 +335,10 @@ class TestState extends ChangeNotifier {
     _logState = logState;
     _serialService.setLogState(logState);
     _sppService.setLogState(logState);
+    _pythonBtService.setLogState(logState);
+    
+    // 初始化 Python 蓝牙服务（异步，不阻塞）
+    _initializePythonBluetoothService();
   }
   
   /// 关闭Touch测试弹窗
@@ -2475,11 +2481,126 @@ class TestState extends ChangeNotifier {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📖 验证通信: 读取蓝牙MAC地址', type: LogType.debug);
       
+      // 创建 CLI Payload (CMD + OPT)
       final readMacCmd = ProductionTestCommands.createBluetoothMACCommand(0x01, []);
       final cmdHex = readMacCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-      _logState?.info('📤 发送命令 (${readMacCmd.length} 字节): $cmdHex', type: LogType.debug);
-      _logState?.info('   模块ID: 0x${ProductionTestCommands.moduleId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
-      _logState?.info('   消息ID: 0x${ProductionTestCommands.messageId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      _logState?.info('📦 CLI Payload (${readMacCmd.length} 字节): $cmdHex', type: LogType.debug);
+      _logState?.info('   CMD: 0x${readMacCmd[0].toRadixString(16).toUpperCase().padLeft(2, '0')} (蓝牙MAC命令)', type: LogType.debug);
+      _logState?.info('   OPT: 0x${readMacCmd[1].toRadixString(16).toUpperCase().padLeft(2, '0')} (读取)', type: LogType.debug);
+      
+      // 构建完整的 GTP 协议帧
+      final gtpPacket = GTPProtocol.buildGTPPacket(
+        readMacCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      // 打印完整的 GTP 协议帧结构
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📤 完整GTP协议帧 (${gtpPacket.length} 字节):', type: LogType.debug);
+      final gtpHex = gtpPacket.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('   $gtpHex', type: LogType.debug);
+      
+      // 解析并打印 GTP 协议帧各个字段
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔍 GTP协议帧结构解析:', type: LogType.debug);
+      int offset = 0;
+      
+      // Preamble (4 bytes)
+      final preamble = ByteData.view(gtpPacket.buffer).getUint32(offset, Endian.little);
+      _logState?.info('   [0-3] Preamble: 0x${preamble.toRadixString(16).toUpperCase().padLeft(8, '0')}', type: LogType.debug);
+      offset += 4;
+      
+      // Version (1 byte)
+      final version = gtpPacket[offset];
+      _logState?.info('   [4] Version: 0x${version.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      offset += 1;
+      
+      // Length (2 bytes)
+      final length = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('   [5-6] Length: $length (0x${length.toRadixString(16).toUpperCase().padLeft(4, '0')})', type: LogType.debug);
+      offset += 2;
+      
+      // Type (1 byte)
+      final type = gtpPacket[offset];
+      _logState?.info('   [7] Type: 0x${type.toRadixString(16).toUpperCase().padLeft(2, '0')} (CLI命令)', type: LogType.debug);
+      offset += 1;
+      
+      // FC (1 byte)
+      final fc = gtpPacket[offset];
+      _logState?.info('   [8] FC: 0x${fc.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      offset += 1;
+      
+      // Seq (2 bytes)
+      final seq = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('   [9-10] Seq: $seq (0x${seq.toRadixString(16).toUpperCase().padLeft(4, '0')})', type: LogType.debug);
+      offset += 2;
+      
+      // CRC8 (1 byte)
+      final crc8 = gtpPacket[offset];
+      _logState?.info('   [11] CRC8: 0x${crc8.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      offset += 1;
+      
+      // CLI Message
+      final cliStart = offset;
+      _logState?.info('   [12-${gtpPacket.length - 5}] CLI Message:', type: LogType.debug);
+      
+      // CLI Start (2 bytes)
+      final cliStartMarker = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [0-1] Start: 0x${cliStartMarker.toRadixString(16).toUpperCase().padLeft(4, '0')}', type: LogType.debug);
+      offset += 2;
+      
+      // Module ID (2 bytes)
+      final moduleId = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [2-3] Module ID: 0x${moduleId.toRadixString(16).toUpperCase().padLeft(4, '0')}', type: LogType.debug);
+      offset += 2;
+      
+      // CRC16 (2 bytes)
+      final crc16 = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [4-5] CRC16: 0x${crc16.toRadixString(16).toUpperCase().padLeft(4, '0')}', type: LogType.debug);
+      offset += 2;
+      
+      // Message ID (2 bytes)
+      final messageId = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [6-7] Message ID: 0x${messageId.toRadixString(16).toUpperCase().padLeft(4, '0')}', type: LogType.debug);
+      offset += 2;
+      
+      // Flags (1 byte)
+      final flags = gtpPacket[offset];
+      _logState?.info('      [8] Flags: 0x${flags.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      offset += 1;
+      
+      // Result (1 byte)
+      final result = gtpPacket[offset];
+      _logState?.info('      [9] Result: 0x${result.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      offset += 1;
+      
+      // Payload Length (2 bytes)
+      final payloadLen = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [10-11] Payload Length: $payloadLen (0x${payloadLen.toRadixString(16).toUpperCase().padLeft(4, '0')})', type: LogType.debug);
+      offset += 2;
+      
+      // SN (2 bytes)
+      final sn = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [12-13] SN: $sn (0x${sn.toRadixString(16).toUpperCase().padLeft(4, '0')})', type: LogType.debug);
+      offset += 2;
+      
+      // Payload (CMD + OPT)
+      final payloadBytes = gtpPacket.sublist(offset, offset + payloadLen);
+      final payloadHex = payloadBytes.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('      [14-${13 + payloadLen}] Payload ($payloadLen 字节): $payloadHex', type: LogType.debug);
+      offset += payloadLen;
+      
+      // Tail (2 bytes)
+      final tail = ByteData.view(gtpPacket.buffer).getUint16(offset, Endian.little);
+      _logState?.info('      [${offset - cliStart}-${offset - cliStart + 1}] Tail: 0x${tail.toRadixString(16).toUpperCase().padLeft(4, '0')}', type: LogType.debug);
+      offset += 2;
+      
+      // CRC32 (4 bytes)
+      final crc32 = ByteData.view(gtpPacket.buffer).getUint32(gtpPacket.length - 4, Endian.little);
+      _logState?.info('   [${gtpPacket.length - 4}-${gtpPacket.length - 1}] CRC32: 0x${crc32.toRadixString(16).toUpperCase().padLeft(8, '0')}', type: LogType.debug);
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
       final response = await _sppService.sendCommandAndWaitResponse(
         readMacCmd,
@@ -2537,6 +2658,94 @@ class TestState extends ChangeNotifier {
         await _sppService.disconnect();
       } catch (_) {}
       
+      return false;
+    }
+  }
+  
+  /// 初始化 Python 蓝牙服务
+  Future<void> _initializePythonBluetoothService() async {
+    try {
+      final initialized = await _pythonBtService.initialize();
+      if (initialized) {
+        _logState?.success('✅ Python 蓝牙服务可用');
+      } else {
+        _logState?.warning('⚠️  Python 蓝牙服务不可用，将使用 Flutter 原生蓝牙');
+      }
+    } catch (e) {
+      _logState?.debug('Python 蓝牙服务初始化失败: $e');
+    }
+  }
+  
+  /// Python 蓝牙手动测试（支持自定义 UUID 和 Channel）
+  Future<bool> testPythonBluetooth({
+    String? deviceAddress,
+    String? uuid,
+    int? channel,
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🐍 开始 Python 蓝牙测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 检查服务是否可用
+      if (!_pythonBtService.isAvailable) {
+        _logState?.error('❌ Python 蓝牙服务不可用', type: LogType.debug);
+        _logState?.info('   请确保已安装 Python 和 PyBluez', type: LogType.debug);
+        return false;
+      }
+      
+      // 如果没有指定设备地址，先扫描
+      String? targetAddress = deviceAddress;
+      if (targetAddress == null) {
+        _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
+        final devices = await _pythonBtService.scanDevices();
+        
+        if (devices.isEmpty) {
+          _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
+          return false;
+        }
+        
+        // 使用第一个设备
+        targetAddress = devices.first['address'];
+        _logState?.success('✅ 选择设备: ${devices.first['name']} ($targetAddress)', type: LogType.debug);
+      }
+      
+      // 如果没有指定 UUID 或 channel，查找服务
+      if (uuid == null && channel == null) {
+        _logState?.info('🔍 查找设备服务...', type: LogType.debug);
+        final services = await _pythonBtService.findServices(targetAddress);
+        
+        if (services.isNotEmpty) {
+          final service = services.first;
+          _logState?.success('✅ 找到服务: ${service['name']}', type: LogType.debug);
+          uuid = service['uuid'] as String?;
+          channel = service['channel'] as int?;
+        }
+      }
+      
+      // 测试读取蓝牙 MAC 地址
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📖 测试: 读取蓝牙 MAC 地址', type: LogType.debug);
+      
+      final mac = await _pythonBtService.testReadBluetoothMAC(
+        deviceAddress: targetAddress,
+        uuid: uuid,
+        channel: channel,
+      );
+      
+      if (mac != null) {
+        _logState?.success('✅ Python 蓝牙测试成功', type: LogType.debug);
+        _logState?.info('   设备 MAC: $mac', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ Python 蓝牙测试失败', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ Python 蓝牙测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       return false;
     }
   }

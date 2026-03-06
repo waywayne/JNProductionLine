@@ -187,6 +187,24 @@ class ManualTestSection extends StatelessWidget {
                 },
                 color: Colors.blue,
               ),
+              _buildTestButton(
+                context,
+                'Python蓝牙测试',
+                Icons.bluetooth_searching,
+                () async {
+                  final success = await state.testPythonBluetooth();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? '✅ Python蓝牙测试通过' : '❌ Python蓝牙测试失败'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                },
+                color: Colors.deepPurple,
+              ),
               _buildLEDTestButton(context, '外侧', Icons.lightbulb_outline),
               _buildLEDTestButton(context, '内侧', Icons.lightbulb),
               _buildTestButton(
