@@ -543,14 +543,16 @@ class SerialService {
       
       if (logContent.isNotEmpty) {
         // 根据日志级别使用不同的输出方法，标记为设备日志 (Type 0x02)
+        // 过滤掉 DEBUG 及以下级别的日志，避免日志过多
         switch (level) {
           case 0: // ALL
           case 1: // VERBOSE
           case 2: // DEBUG
-            _logState?.debug('$emoji $logContent', type: LogType.device);
+            // 过滤掉这些级别的日志
             break;
           case 3: // INFO
-            _logState?.info('$emoji $logContent', type: LogType.device);
+            // 也过滤掉 INFO 级别，只保留警告和错误
+            // _logState?.info('$emoji $logContent', type: LogType.device);
             break;
           case 4: // WARNING
             _logState?.warning('$emoji $logContent', type: LogType.device);
@@ -560,10 +562,11 @@ class SerialService {
             _logState?.error('$emoji $logContent', type: LogType.device);
             break;
           case 7: // NONE
-            _logState?.info('$emoji $logContent', type: LogType.device);
+            // 不输出
             break;
           default:
-            _logState?.info('$emoji $logContent', type: LogType.device);
+            // 不输出
+            break;
         }
       }
     } catch (e) {

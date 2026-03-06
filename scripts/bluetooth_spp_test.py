@@ -190,21 +190,70 @@ class BluetoothSPPClient:
 
 
 def scan_devices():
-    """扫描蓝牙设备"""
+    """扫描蓝牙设备（最大1分钟，找到设备后立即返回）"""
     print("━" * 50)
     print("🔍 正在扫描蓝牙设备...")
+    print("   最大扫描时间: 1分钟")
+    print("   找到设备后立即返回")
+    print("   提示: 请确保蓝牙已开启且设备可被发现")
     print("━" * 50)
     
-    nearby_devices = bluetooth.discover_devices(
-        duration=8,
-        lookup_names=True,
-        flush_cache=True,
-        lookup_class=False
-    )
+    import time
+    start_time = time.time()
+    max_duration = 60  # 最大1分钟
+    scan_interval = 8  # 每次扫描8秒
     
-    if not nearby_devices:
-        print("未找到任何设备")
+    all_devices = {}  # 使用字典去重，key=地址, value=名称
+    
+    try:
+        while time.time() - start_time < max_duration:
+            elapsed = int(time.time() - start_time)
+            print(f"   扫描中... ({elapsed}秒)")
+            
+            try:
+                # 每次扫描8秒
+                nearby_devices = bluetooth.discover_devices(
+                    duration=scan_interval,
+                    lookup_names=True,
+                    flush_cache=True,
+                    lookup_class=False
+                )
+                
+                # 合并新发现的设备
+                for addr, name in nearby_devices:
+                    if addr not in all_devices:
+                        all_devices[addr] = name
+                        print(f"   ✓ 发现设备: {name} ({addr})")
+                
+                # 如果找到设备，立即返回
+                if all_devices:
+                    print(f"\n✅ 找到 {len(all_devices)} 个设备，停止扫描")
+                    break
+                    
+            except Exception as e:
+                print(f"   扫描出错: {e}")
+                # 继续尝试
+                
+    except KeyboardInterrupt:
+        print("\n⚠️  用户中断扫描")
+    except Exception as e:
+        print(f"❌ 扫描失败: {e}")
+        print("   可能原因:")
+        print("   1. 蓝牙适配器未启用")
+        print("   2. 没有蓝牙权限")
+        print("   3. PyBluez 安装不完整")
         return []
+    
+    if not all_devices:
+        print("未找到任何设备")
+        print("   建议:")
+        print("   1. 确保目标设备已开启蓝牙")
+        print("   2. 确保目标设备处于可发现模式")
+        print("   3. 尝试在系统设置中手动配对设备")
+        return []
+    
+    # 转换为列表格式
+    nearby_devices = [(addr, name) for addr, name in all_devices.items()]
     
     print(f"\n找到 {len(nearby_devices)} 个设备:\n")
     for i, (addr, name) in enumerate(nearby_devices, 1):
