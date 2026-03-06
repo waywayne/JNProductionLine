@@ -208,6 +208,30 @@ class PythonBluetoothService {
   /// 自动安装 PyBluez
   Future<bool> _autoInstallPyBluez() async {
     try {
+      // 检查 Python 版本
+      final versionResult = await Process.run(_pythonPath!, ['--version']);
+      final versionStr = versionResult.stdout.toString();
+      _logState?.debug('   Python 版本: $versionStr');
+      
+      // 检查是否是 Python 3.13+（PyBluez 不兼容）
+      if (versionStr.contains('3.13') || versionStr.contains('3.14') || versionStr.contains('3.15')) {
+        _logState?.warning('   ⚠️  检测到 Python 3.13+');
+        _logState?.warning('   PyBluez 不支持 Python 3.13+（use_2to3 已废弃）');
+        _logState?.info('');
+        _logState?.info('   尝试使用 Python 3.12 的预编译包...');
+        
+        // 尝试安装 Python 3.12 的 wheel（通常可以在 3.13 上工作）
+        final wheelInstalled = await _installPrecompiledWheel('3.12');
+        if (wheelInstalled) {
+          return true;
+        }
+        
+        _logState?.error('');
+        _logState?.error('   ❌ 无法自动安装');
+        _logState?.info('   建议: 降级到 Python 3.9-3.12');
+        return false;
+      }
+      
       _logState?.info('   方法 1: 尝试使用 pip 安装...');
       
       // 尝试使用 pip 安装
@@ -232,11 +256,38 @@ class PythonBluetoothService {
         }
       } else {
         _logState?.warning('   ⚠️  pip 安装失败');
-        _logState?.debug('   错误: ${result.stderr}');
+        final stderr = result.stderr.toString();
+        _logState?.debug('   错误: $stderr');
+        
+        // 检查是否是 use_2to3 错误
+        if (stderr.contains('use_2to3 is invalid')) {
+          _logState?.warning('');
+          _logState?.warning('   检测到 use_2to3 错误');
+          _logState?.warning('   这是 Python 版本兼容性问题');
+        }
       }
 
-      // 方法 2: 尝试使用 setup_bluetooth.py 脚本
-      _logState?.info('   方法 2: 尝试使用安装脚本...');
+      // 方法 2: 尝试使用预编译 wheel
+      _logState?.info('   方法 2: 尝试使用预编译包...');
+      
+      // 提取 Python 版本号
+      String? pyVer;
+      if (versionStr.contains('3.9')) pyVer = '3.9';
+      else if (versionStr.contains('3.10')) pyVer = '3.10';
+      else if (versionStr.contains('3.11')) pyVer = '3.11';
+      else if (versionStr.contains('3.12')) pyVer = '3.12';
+      
+      if (pyVer != null) {
+        final wheelInstalled = await _installPrecompiledWheel(pyVer);
+        if (wheelInstalled) {
+          return true;
+        }
+      } else {
+        _logState?.warning('   ⚠️  无法识别 Python 版本');
+      }
+
+      // 方法 3: 尝试使用 setup_bluetooth.py 脚本
+      _logState?.info('   方法 3: 尝试使用安装脚本...');
       
       final setupScriptPath = await _findSetupScript();
       if (setupScriptPath != null) {
@@ -274,6 +325,7 @@ class PythonBluetoothService {
     final exeDir = path.dirname(Platform.resolvedExecutable);
 
     final candidates = [
+      path.join(exeDir, 'data', 'flutter_assets', 'assets', 'scripts', 'setup_bluetooth.py'),
       path.join(exeDir, 'data', 'flutter_assets', 'scripts', 'setup_bluetooth.py'),
       path.join(exeDir, 'scripts', 'setup_bluetooth.py'),
       path.join(Directory.current.path, 'scripts', 'setup_bluetooth.py'),
@@ -286,6 +338,111 @@ class PythonBluetoothService {
     }
 
     return null;
+  }
+
+  /// 安装预编译的 wheel 文件
+  Future<bool> _installPrecompiledWheel(String pythonVersion) async {
+    try {
+      _logState?.info('   正在下载预编译包...');
+      
+      // PyBluez wheel 文件的直接下载链接（备用镜像）
+      final wheelUrls = {
+        '3.9': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp39-cp39-win_amd64.whl',
+        '3.10': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp310-cp310-win_amd64.whl',
+        '3.11': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp311-cp311-win_amd64.whl',
+        '3.12': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp312-cp312-win_amd64.whl',
+      };
+      
+      final wheelUrl = wheelUrls[pythonVersion];
+      if (wheelUrl == null) {
+        _logState?.warning('   ⚠️  不支持的 Python 版本: $pythonVersion');
+        return false;
+      }
+      
+      // 下载到临时目录
+      final tempDir = Directory.systemTemp;
+      final wheelFileName = 'PyBluez-0.23-cp${pythonVersion.replaceAll('.', '')}-cp${pythonVersion.replaceAll('.', '')}-win_amd64.whl';
+      final wheelPath = path.join(tempDir.path, wheelFileName);
+      
+      // 使用 Python 下载（避免依赖额外的 HTTP 库）
+      _logState?.debug('   下载地址: $wheelUrl');
+      _logState?.debug('   保存到: $wheelPath');
+      
+      final downloadScript = '''
+import urllib.request
+import sys
+
+url = sys.argv[1]
+output = sys.argv[2]
+
+try:
+    urllib.request.urlretrieve(url, output)
+    print("OK")
+except Exception as e:
+    print(f"ERROR: {e}", file=sys.stderr)
+    sys.exit(1)
+''';
+      
+      // 创建临时下载脚本
+      final downloadScriptPath = path.join(tempDir.path, 'download_wheel.py');
+      await File(downloadScriptPath).writeAsString(downloadScript);
+      
+      // 执行下载
+      final downloadResult = await Process.run(
+        _pythonPath!,
+        [downloadScriptPath, wheelUrl, wheelPath],
+        runInShell: true,
+      ).timeout(
+        const Duration(minutes: 3),
+        onTimeout: () {
+          throw TimeoutException('下载超时');
+        },
+      );
+      
+      if (downloadResult.exitCode != 0 || !await File(wheelPath).exists()) {
+        _logState?.warning('   ⚠️  下载失败');
+        _logState?.debug('   错误: ${downloadResult.stderr}');
+        return false;
+      }
+      
+      _logState?.success('   ✅ 下载完成');
+      _logState?.info('   正在安装...');
+      
+      // 安装 wheel
+      final installResult = await Process.run(
+        _pythonPath!,
+        ['-m', 'pip', 'install', wheelPath, '--user', '--force-reinstall'],
+        runInShell: true,
+      ).timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          throw TimeoutException('安装超时');
+        },
+      );
+      
+      if (installResult.exitCode == 0) {
+        _logState?.success('   ✅ 预编译包安装成功');
+        
+        // 验证安装
+        final installed = await _checkPyBluez();
+        if (installed) {
+          // 清理临时文件
+          try {
+            await File(wheelPath).delete();
+            await File(downloadScriptPath).delete();
+          } catch (_) {}
+          return true;
+        }
+      } else {
+        _logState?.warning('   ⚠️  安装失败');
+        _logState?.debug('   错误: ${installResult.stderr}');
+      }
+      
+      return false;
+    } catch (e) {
+      _logState?.error('   ❌ 预编译包安装异常: $e');
+      return false;
+    }
   }
 
   /// 扫描蓝牙设备
