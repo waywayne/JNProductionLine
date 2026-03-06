@@ -337,8 +337,7 @@ class TestState extends ChangeNotifier {
     _sppService.setLogState(logState);
     _pythonBtService.setLogState(logState);
     
-    // 初始化 Python 蓝牙服务（异步，不阻塞）
-    _initializePythonBluetoothService();
+    // Python 蓝牙服务将在首次使用时初始化
   }
   
   /// 关闭Touch测试弹窗
@@ -2665,14 +2664,24 @@ class TestState extends ChangeNotifier {
   /// 初始化 Python 蓝牙服务
   Future<void> _initializePythonBluetoothService() async {
     try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔧 初始化 Python 蓝牙服务...', type: LogType.debug);
+      
       final initialized = await _pythonBtService.initialize();
+      
       if (initialized) {
-        _logState?.success('✅ Python 蓝牙服务可用');
+        _logState?.success('✅ Python 蓝牙服务初始化成功', type: LogType.debug);
+        _logState?.info('   Python: ${_pythonBtService.pythonPath}', type: LogType.debug);
+        _logState?.info('   脚本: ${_pythonBtService.scriptPath}', type: LogType.debug);
       } else {
-        _logState?.warning('⚠️  Python 蓝牙服务不可用，将使用 Flutter 原生蓝牙');
+        _logState?.warning('⚠️  Python 蓝牙服务初始化失败', type: LogType.debug);
+        _logState?.info('   将使用 Flutter 原生蓝牙', type: LogType.debug);
       }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     } catch (e) {
-      _logState?.debug('Python 蓝牙服务初始化失败: $e');
+      _logState?.error('❌ Python 蓝牙服务初始化异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     }
   }
   
@@ -2687,11 +2696,20 @@ class TestState extends ChangeNotifier {
       _logState?.info('🐍 开始 Python 蓝牙测试', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 检查服务是否可用
+      // 如果服务未初始化，先初始化
       if (!_pythonBtService.isAvailable) {
-        _logState?.error('❌ Python 蓝牙服务不可用', type: LogType.debug);
-        _logState?.info('   请确保已安装 Python 和 PyBluez', type: LogType.debug);
-        return false;
+        _logState?.info('🔧 正在初始化 Python 蓝牙服务...', type: LogType.debug);
+        await _initializePythonBluetoothService();
+        
+        // 再次检查是否初始化成功
+        if (!_pythonBtService.isAvailable) {
+          _logState?.error('❌ Python 蓝牙服务初始化失败', type: LogType.debug);
+          _logState?.info('   请检查:', type: LogType.debug);
+          _logState?.info('   1. Python 是否已安装 (python --version)', type: LogType.debug);
+          _logState?.info('   2. PyBluez 是否已安装', type: LogType.debug);
+          _logState?.info('   3. 查看详细日志了解错误原因', type: LogType.debug);
+          return false;
+        }
       }
       
       // 如果没有指定设备地址，先扫描

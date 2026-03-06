@@ -22,51 +22,62 @@ class PythonBluetoothService {
   /// 初始化 Python 环境
   Future<bool> initialize() async {
     try {
-      _logState?.info('🔧 初始化 Python 蓝牙服务...');
+      _logState?.info('📋 步骤 1/3: 检查 Python 环境');
 
       // 查找 Python 可执行文件
       _pythonPath = await _findPython();
       if (_pythonPath == null) {
-        _logState?.error('❌ 未找到 Python 环境');
+        _logState?.error('   ❌ 未找到 Python 环境');
         _logState?.warning('   请安装 Python 3.7+ 并添加到 PATH');
         return false;
       }
 
-      _logState?.success('✅ 找到 Python: $_pythonPath');
+      _logState?.success('   ✅ Python: $_pythonPath');
 
       // 查找脚本文件
+      _logState?.info('📋 步骤 2/3: 查找蓝牙测试脚本');
       _scriptPath = await _findScript();
       if (_scriptPath == null) {
-        _logState?.error('❌ 未找到蓝牙测试脚本');
+        _logState?.error('   ❌ 未找到蓝牙测试脚本');
+        _logState?.info('   脚本路径: scripts/bluetooth_spp_test.py');
         return false;
       }
 
-      _logState?.success('✅ 找到脚本: $_scriptPath');
+      _logState?.success('   ✅ 脚本: $_scriptPath');
 
       // 检查 PyBluez 是否安装
+      _logState?.info('📋 步骤 3/3: 检查 PyBluez 安装状态');
       final hasPyBluez = await _checkPyBluez();
+      
       if (!hasPyBluez) {
-        _logState?.warning('⚠️  PyBluez 未安装');
+        _logState?.warning('   ⚠️  PyBluez 未安装');
+        _logState?.info('');
+        _logState?.info('🔧 开始自动安装 PyBluez...');
+        _logState?.info('   这可能需要 30-60 秒，请稍候...');
         
-        // 尝试自动安装
-        _logState?.info('🔧 尝试自动安装 PyBluez...');
         final installed = await _autoInstallPyBluez();
         
         if (!installed) {
+          _logState?.error('');
           _logState?.error('❌ 自动安装失败');
-          _logState?.info('   请手动安装:');
-          _logState?.info('   1. pip install pybluez');
-          _logState?.info('   2. 或运行: python scripts/setup_bluetooth.py --install');
+          _logState?.info('');
+          _logState?.info('请手动安装 PyBluez:');
+          _logState?.info('   方法 1: pip install pybluez --user');
+          _logState?.info('   方法 2: python scripts/setup_bluetooth.py --install');
+          _logState?.info('   方法 3: 下载预编译 wheel 文件');
+          _logState?.info('           https://www.lfd.uci.edu/~gohlke/pythonlibs/#pybluez');
           return false;
         }
         
+        _logState?.info('');
         _logState?.success('✅ PyBluez 自动安装成功');
       } else {
-        _logState?.success('✅ PyBluez 已安装');
+        _logState?.success('   ✅ PyBluez 已安装');
       }
 
       _isInitialized = true;
-      _logState?.success('✅ Python 蓝牙服务初始化成功');
+      _logState?.info('');
+      _logState?.success('🎉 Python 蓝牙服务初始化完成');
       return true;
     } catch (e) {
       _logState?.error('❌ 初始化失败: $e');
