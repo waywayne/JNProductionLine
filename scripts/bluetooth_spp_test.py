@@ -110,9 +110,12 @@ class GTPProtocol:
 class BluetoothSPPClient:
     """蓝牙 SPP 客户端"""
     
+    # 自定义 UUID（项目专用）
+    DEFAULT_UUID = "00007033-1000-8000-00805f9b34fb"
+    
     def __init__(self, device_address: str, uuid: Optional[str] = None, channel: Optional[int] = None):
         self.device_address = device_address
-        self.uuid = uuid or "00001101-0000-1000-8000-00805F9B34FB"
+        self.uuid = uuid or self.DEFAULT_UUID
         self.channel = channel
         self.socket = None
     
@@ -264,30 +267,78 @@ def scan_devices():
     return nearby_devices
 
 
-def find_services(device_address: str):
-    """查找设备的所有服务"""
+def list_paired_devices():
+    """列出系统已配对的蓝牙设备（Windows）"""
+    print("━" * 50)
+    print("🔗 查找已配对的蓝牙设备...")
+    print("━" * 50)
+    
+    try:
+        import subprocess
+        # 使用 PowerShell 获取已配对的蓝牙设备
+        result = subprocess.run(
+            ['powershell', '-Command', 
+             'Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq "OK"} | Select-Object FriendlyName, InstanceId'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            print("\n已配对的设备:")
+            print(result.stdout)
+            print("\n提示: 可以直接使用设备的蓝牙地址连接")
+        else:
+            print("无法获取已配对设备列表")
+            
+    except Exception as e:
+        print(f"获取已配对设备失败: {e}")
+    
+    print("━" * 50)
+
+
+def find_services(device_address: str, uuid: str = None):
+    """查找设备的所有服务或指定UUID的服务"""
     print("━" * 50)
     print(f"🔍 查找设备 {device_address} 的服务...")
+    if uuid:
+        print(f"   UUID: {uuid}")
     print("━" * 50)
     
-    services = bluetooth.find_service(address=device_address)
-    
-    if not services:
-        print("未找到任何服务")
+    try:
+        if uuid:
+            # 查找指定 UUID 的服务
+            services = bluetooth.find_service(uuid=uuid, address=device_address)
+        else:
+            # 查找所有服务
+            services = bluetooth.find_service(address=device_address)
+        
+        if not services:
+            print("未找到任何服务")
+            print("\n建议:")
+            print("1. 确保设备已配对")
+            print("2. 确保设备已开启蓝牙")
+            print("3. 尝试指定 UUID (如 SPP: 00001101-0000-1000-8000-00805f9b34fb)")
+            return []
+        
+        print(f"\n找到 {len(services)} 个服务:\n")
+        
+        for i, service in enumerate(services, 1):
+            print(f"服务 {i}:")
+            print(f"  名称: {service.get('name', 'Unknown')}")
+            print(f"  主机: {service.get('host', 'N/A')}")
+            print(f"  RFCOMM Channel: {service.get('port', 'N/A')}")
+            print(f"  服务 ID: {service.get('service-id', 'N/A')}")
+            print(f"  服务类: {service.get('service-classes', 'N/A')}")
+            print(f"  协议: {service.get('protocol', 'N/A')}")
+            print()
+        
+        print("━" * 50)
+        return services
+        
+    except Exception as e:
+        print(f"❌ 查找服务失败: {e}")
         return []
-    
-    print(f"\n找到 {len(services)} 个服务:\n")
-    
-    for i, service in enumerate(services, 1):
-        print(f"服务 {i}:")
-        print(f"  名称: {service.get('name', 'Unknown')}")
-        print(f"  RFCOMM Channel: {service.get('port', 'N/A')}")
-        print(f"  服务 ID: {service.get('service-id', 'N/A')}")
-        print(f"  协议: {service.get('protocol', 'N/A')}")
-        print()
-    
-    print("━" * 50)
-    return services
 
 
 def test_read_mac(client: BluetoothSPPClient):
@@ -309,10 +360,11 @@ def test_read_mac(client: BluetoothSPPClient):
 
 def main():
     parser = argparse.ArgumentParser(description='Windows 蓝牙 SPP 测试工具')
-    parser.add_argument('--scan', action='store_true', help='扫描蓝牙设备')
+    parser.add_argument('--scan', action='store_true', help='扫描可发现的蓝牙设备')
+    parser.add_argument('--paired', action='store_true', help='列出已配对的蓝牙设备')
     parser.add_argument('--services', metavar='ADDRESS', help='查找设备的服务')
+    parser.add_argument('--uuid', metavar='UUID', help=f'指定服务UUID (默认: {BluetoothSPPClient.DEFAULT_UUID})')
     parser.add_argument('--connect', metavar='ADDRESS', help='连接到设备')
-    parser.add_argument('--uuid', metavar='UUID', help='自定义 UUID (默认: 标准 SPP UUID)')
     parser.add_argument('--channel', type=int, metavar='N', help='RFCOMM channel (1-30)')
     parser.add_argument('--test', choices=['mac'], help='运行测试')
     parser.add_argument('--env-cmd', action='store_true', help='从环境变量读取命令')
@@ -322,10 +374,10 @@ def main():
     try:
         if args.scan:
             scan_devices()
-        
+        elif args.paired:
+            list_paired_devices()
         elif args.services:
-            find_services(args.services)
-        
+            find_services(args.services, uuid=args.uuid)
         elif args.connect:
             client = BluetoothSPPClient(
                 args.connect,

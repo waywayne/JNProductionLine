@@ -9,6 +9,9 @@ import '../models/log_state.dart';
 /// 通过调用 Python 脚本实现蓝牙 SPP 通信
 /// 支持自定义 UUID 和 RFCOMM channel
 class PythonBluetoothService {
+  /// 自定义蓝牙服务 UUID（项目专用）
+  static const String defaultUuid = '00007033-1000-8000-00805f9b34fb';
+  
   LogState? _logState;
   String? _pythonPath;
   String? _scriptPath;
@@ -415,13 +418,47 @@ class PythonBluetoothService {
     }
   }
 
-  /// 扫描蓝牙设备
+  /// 列出已配对的蓝牙设备
+  Future<List<Map<String, String>>> listPairedDevices() async {
+    if (!_isInitialized) {
+      throw Exception('服务未初始化，请先调用 initialize()');
+    }
+
+    _logState?.info('🔗 查找已配对的蓝牙设备...');
+
+    try {
+      final result = await Process.run(
+        _pythonPath!,
+        [_scriptPath!, '--paired'],
+        runInShell: true,
+      );
+
+      if (result.exitCode != 0) {
+        _logState?.warning('⚠️  无法获取已配对设备: ${result.stderr}');
+        return [];
+      }
+
+      // 输出已配对设备信息
+      final output = result.stdout.toString();
+      _logState?.info(output);
+
+      return [];
+    } catch (e) {
+      _logState?.error('❌ 查找已配对设备异常: $e');
+      return [];
+    }
+  }
+
+  /// 扫描可发现的蓝牙设备
   Future<List<Map<String, String>>> scanDevices() async {
     if (!_isInitialized) {
       throw Exception('服务未初始化，请先调用 initialize()');
     }
 
-    _logState?.info('🔍 扫描蓝牙设备...');
+    _logState?.info('🔍 扫描可发现的蓝牙设备...');
+    _logState?.info('   提示: 如果扫描不到设备，可以尝试:');
+    _logState?.info('   1. 先在 Windows 设置中配对设备');
+    _logState?.info('   2. 使用已知的设备地址直接连接');
 
     try {
       final result = await Process.run(
@@ -448,17 +485,31 @@ class PythonBluetoothService {
   }
 
   /// 查找设备服务
-  Future<List<Map<String, dynamic>>> findServices(String deviceAddress) async {
+  /// 
+  /// [deviceAddress] 设备蓝牙地址
+  /// [uuid] 可选的服务 UUID，如 SPP: '00001101-0000-1000-8000-00805f9b34fb'
+  Future<List<Map<String, dynamic>>> findServices(
+    String deviceAddress, {
+    String? uuid,
+  }) async {
     if (!_isInitialized) {
       throw Exception('服务未初始化，请先调用 initialize()');
     }
 
     _logState?.info('🔍 查找设备服务: $deviceAddress');
+    if (uuid != null) {
+      _logState?.info('   UUID: $uuid');
+    }
 
     try {
+      final args = [_scriptPath!, '--services', deviceAddress];
+      if (uuid != null) {
+        args.addAll(['--uuid', uuid]);
+      }
+
       final result = await Process.run(
         _pythonPath!,
-        [_scriptPath!, '--services', deviceAddress],
+        args,
         runInShell: true,
       );
 
@@ -482,7 +533,7 @@ class PythonBluetoothService {
   Future<Map<String, dynamic>> sendGTPCommand({
     required String deviceAddress,
     required Uint8List commandPayload,
-    String? uuid,
+    String? uuid,  // 如果为 null，使用默认 UUID
     int? channel,
     int moduleId = 0x0000,
     int messageId = 0x0000,
@@ -492,9 +543,12 @@ class PythonBluetoothService {
       throw Exception('服务未初始化，请先调用 initialize()');
     }
 
+    // 使用默认 UUID（如果未指定）
+    final effectiveUuid = uuid ?? defaultUuid;
+
     _logState?.info('📡 通过 Python 发送 GTP 命令...');
     _logState?.info('   设备: $deviceAddress');
-    if (uuid != null) _logState?.info('   UUID: $uuid');
+    _logState?.info('   UUID: $effectiveUuid');
     if (channel != null) _logState?.info('   Channel: $channel');
 
     try {
@@ -502,12 +556,9 @@ class PythonBluetoothService {
       final args = <String>[
         _scriptPath!,
         '--connect', deviceAddress,
+        '--uuid', effectiveUuid,  // 始终指定 UUID
         '--env-cmd',  // 使用环境变量传递命令
       ];
-
-      if (uuid != null) {
-        args.addAll(['--uuid', uuid]);
-      }
 
       if (channel != null) {
         args.addAll(['--channel', channel.toString()]);
