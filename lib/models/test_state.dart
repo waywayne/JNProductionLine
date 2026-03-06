@@ -2715,17 +2715,31 @@ class TestState extends ChangeNotifier {
       // 如果没有指定设备地址，先扫描
       String? targetAddress = deviceAddress;
       if (targetAddress == null) {
-        _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
-        final devices = await _pythonBtService.scanDevices();
+        _logState?.info('🔍 扫描蓝牙设备（最多60秒）...', type: LogType.debug);
+        _logState?.info('   提示: 如果已知设备地址，可直接指定跳过扫描', type: LogType.debug);
+        
+        final devices = await _pythonBtService.scanDevices().timeout(
+          const Duration(seconds: 70),  // 给扫描足够的时间
+          onTimeout: () {
+            _logState?.warning('⚠️  扫描超时', type: LogType.debug);
+            return [];
+          },
+        );
         
         if (devices.isEmpty) {
           _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
+          _logState?.info('   建议:', type: LogType.debug);
+          _logState?.info('   1. 先在 Windows 设置中配对设备', type: LogType.debug);
+          _logState?.info('   2. 使用已知的设备地址直接连接', type: LogType.debug);
+          _logState?.info('   3. 确保设备处于可发现模式', type: LogType.debug);
           return false;
         }
         
         // 使用第一个设备
         targetAddress = devices.first['address'];
         _logState?.success('✅ 选择设备: ${devices.first['name']} ($targetAddress)', type: LogType.debug);
+      } else {
+        _logState?.info('📍 使用指定设备: $targetAddress', type: LogType.debug);
       }
       
       // 检查设备地址是否有效
@@ -2734,17 +2748,45 @@ class TestState extends ChangeNotifier {
         return false;
       }
       
-      // 如果没有指定 UUID 或 channel，查找服务
-      if (uuid == null && channel == null) {
+      // 优先使用指定的 Channel（跳过服务查找）
+      int? targetChannel = channel;
+      String? targetUuid = uuid;
+      
+      if (targetChannel == null && targetUuid == null) {
         _logState?.info('🔍 查找设备服务...', type: LogType.debug);
-        final services = await _pythonBtService.findServices(targetAddress);
+        _logState?.info('   提示: 如果已知 Channel，可直接指定跳过查找', type: LogType.debug);
         
-        if (services.isNotEmpty) {
-          final service = services.first;
-          _logState?.success('✅ 找到服务: ${service['name']}', type: LogType.debug);
-          uuid = service['uuid'] as String?;
-          channel = service['channel'] as int?;
+        try {
+          final services = await _pythonBtService.findServices(
+            targetAddress,
+            uuid: PythonBluetoothService.defaultUuid,
+          ).timeout(
+            const Duration(seconds: 15),
+            onTimeout: () {
+              _logState?.warning('⚠️  查找服务超时', type: LogType.debug);
+              return [];
+            },
+          );
+          
+          if (services.isNotEmpty) {
+            final service = services.first;
+            _logState?.success('✅ 找到服务: ${service['name']}', type: LogType.debug);
+            targetUuid = service['uuid'] as String?;
+            targetChannel = service['channel'] as int?;
+          } else {
+            _logState?.warning('⚠️  未找到服务，将使用默认配置', type: LogType.debug);
+          }
+        } catch (e) {
+          _logState?.warning('⚠️  查找服务失败: $e', type: LogType.debug);
         }
+      }
+      
+      // 如果仍然没有 Channel，使用默认值 5
+      if (targetChannel == null) {
+        targetChannel = 5;  // 默认使用 Channel 5
+        _logState?.info('   使用默认 RFCOMM Channel: $targetChannel', type: LogType.debug);
+      } else {
+        _logState?.info('   使用 RFCOMM Channel: $targetChannel', type: LogType.debug);
       }
       
       // 测试读取蓝牙 MAC 地址
@@ -2753,8 +2795,8 @@ class TestState extends ChangeNotifier {
       
       final mac = await _pythonBtService.testReadBluetoothMAC(
         deviceAddress: targetAddress,
-        uuid: uuid,
-        channel: channel,
+        uuid: targetUuid,
+        channel: targetChannel,
       );
       
       if (mac != null) {
