@@ -445,6 +445,14 @@ class PythonBluetoothService {
 
       final output = result.stdout.toString();
       
+      // 输出完整的 Python 输出用于调试
+      _logState?.debug('Python --paired 输出:');
+      for (final line in output.split('\n')) {
+        if (line.trim().isNotEmpty) {
+          _logState?.debug('   $line');
+        }
+      }
+      
       // 查找 JSON 数据
       final jsonStartMarker = 'JSON_DEVICES_START';
       final jsonEndMarker = 'JSON_DEVICES_END';
@@ -452,12 +460,16 @@ class PythonBluetoothService {
       final startIndex = output.indexOf(jsonStartMarker);
       final endIndex = output.indexOf(jsonEndMarker);
       
+      _logState?.debug('JSON 标记位置: start=$startIndex, end=$endIndex');
+      
       if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
         // 提取 JSON 数据
         final jsonStr = output.substring(
           startIndex + jsonStartMarker.length,
           endIndex,
         ).trim();
+        
+        _logState?.debug('提取的 JSON: $jsonStr');
         
         try {
           final List<dynamic> devicesJson = jsonDecode(jsonStr);
@@ -476,10 +488,14 @@ class PythonBluetoothService {
           return devices;
         } catch (e) {
           _logState?.warning('⚠️  解析设备列表失败: $e');
+          _logState?.debug('JSON 解析错误详情: $e');
         }
+      } else {
+        _logState?.warning('⚠️  未找到 JSON 标记');
       }
       
       // 如果没有找到 JSON，输出原始信息
+      _logState?.info('原始输出（未找到 JSON）:');
       _logState?.info(output);
       return [];
     } catch (e) {
@@ -494,7 +510,7 @@ class PythonBluetoothService {
       throw Exception('服务未初始化，请先调用 initialize()');
     }
 
-    _logState?.info('🔍 扫描可发现的蓝牙设备...');
+    _logState?.info('🔍 扫描可发现的蓝牙设备（最多60秒）...');
     _logState?.info('   提示: 如果扫描不到设备，可以尝试:');
     _logState?.info('   1. 先在 Windows 设置中配对设备');
     _logState?.info('   2. 使用已知的设备地址直接连接');
@@ -504,18 +520,36 @@ class PythonBluetoothService {
         _pythonPath!,
         [_scriptPath!, '--scan'],
         runInShell: true,
+      ).timeout(
+        const Duration(seconds: 90),  // 给扫描足够的时间（60秒扫描 + 30秒缓冲）
+        onTimeout: () {
+          throw TimeoutException('扫描超时（90秒）');
+        },
       );
 
       if (result.exitCode != 0) {
-        _logState?.error('❌ 扫描失败: ${result.stderr}');
+        _logState?.error('❌ 扫描失败');
+        _logState?.debug('   stderr: ${result.stderr}');
         return [];
       }
 
-      // 解析输出
+      // 输出完整的 Python 输出用于调试
       final output = result.stdout.toString();
+      _logState?.debug('Python 输出:');
+      for (final line in output.split('\n')) {
+        if (line.trim().isNotEmpty) {
+          _logState?.debug('   $line');
+        }
+      }
+      
+      // 解析输出
       final devices = _parseDevices(output);
 
       _logState?.success('✅ 找到 ${devices.length} 个设备');
+      for (final device in devices) {
+        _logState?.info('   ${device['name']} (${device['address']})');
+      }
+      
       return devices;
     } catch (e) {
       _logState?.error('❌ 扫描异常: $e');
@@ -702,12 +736,15 @@ class PythonBluetoothService {
     final devices = <Map<String, String>>[];
     final lines = output.split('\n');
 
+    _logState?.debug('开始解析设备列表，共 ${lines.length} 行');
+
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
       
       // 查找设备名称行（格式: "1. DeviceName"）
       if (RegExp(r'^\d+\.\s+.+').hasMatch(line)) {
         final name = line.replaceFirst(RegExp(r'^\d+\.\s+'), '');
+        _logState?.debug('找到设备名称: $name');
         
         // 下一行应该是地址（格式: "   地址: XX:XX:XX:XX:XX:XX"）
         if (i + 1 < lines.length) {
@@ -715,15 +752,20 @@ class PythonBluetoothService {
           final addrMatch = RegExp(r'地址:\s*([0-9A-Fa-f:]+)').firstMatch(nextLine);
           
           if (addrMatch != null) {
+            final address = addrMatch.group(1)!;
+            _logState?.debug('找到设备地址: $address');
             devices.add({
               'name': name,
-              'address': addrMatch.group(1)!,
+              'address': address,
             });
+          } else {
+            _logState?.debug('未能从下一行提取地址: $nextLine');
           }
         }
       }
     }
 
+    _logState?.debug('解析完成，找到 ${devices.length} 个设备');
     return devices;
   }
 
