@@ -5895,7 +5895,7 @@ class TestState extends ChangeNotifier {
       _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 1. 发送功耗测试命令：只物奇
+      // 1. 发送功耗测试命令：只物奇（只在第一次执行时发送）
       _logState?.info('📤 发送功耗测试命令：只物奇', type: LogType.debug);
       final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
         ProductionTestCommands.powerConsumptionOptWuqiOnly
@@ -5938,41 +5938,86 @@ class TestState extends ChangeNotifier {
         return true;
       }
       
-      // 4. 使用GPIB测量电流
-      final currentA = await _gpibService.measureCurrent(
-        sampleCount: TestConfig.gpibSampleCount,
-        sampleRate: TestConfig.gpibSampleRate,
-      );
+      // 4. 测量电流（支持重试，阈值失败时只重新测量，不重新发送命令）
+      return await _measureWuqiPowerWithRetry();
       
-      if (currentA == null) {
-        _logState?.error('❌ 电流测量失败（通信失败，将重试）', type: LogType.debug);
-        throw Exception('电流测量失败'); // 抛出异常以触发重试
-      }
-      
-      final currentMa = currentA * 1000;
-      
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('📊 物奇功耗测试结果:', type: LogType.debug);
-      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
-      _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
-      
-      // 判断测试结果（阈值未通过不重试）
-      if (currentMa <= TestConfig.wuqiPowerThresholdMa) {
-        _logState?.success('✅ 物奇功耗测试通过', type: LogType.debug);
-        _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true;
-      } else {
-        _logState?.error('❌ 物奇功耗测试失败: 超过阈值（不重试）', type: LogType.debug);
-        _logState?.error('   测量值: ${currentMa.toStringAsFixed(2)} mA > 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
-        _logState?.error('   差值: +${(currentMa - TestConfig.wuqiPowerThresholdMa).toStringAsFixed(2)} mA', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return false; // 阈值失败直接返回false，不抛出异常，不触发重试
-      }
     } catch (e) {
       _logState?.error('❌ 物奇功耗测试异常: $e', type: LogType.debug);
       return false;
     }
+  }
+  
+  /// 物奇功耗电流测量（支持阈值失败重试）
+  Future<bool> _measureWuqiPowerWithRetry() async {
+    const maxRetries = 10;
+    
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.info('🔄 重新测量电流 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        }
+        
+        // 使用GPIB测量电流
+        final currentA = await _gpibService.measureCurrent(
+          sampleCount: TestConfig.gpibSampleCount,
+          sampleRate: TestConfig.gpibSampleRate,
+        );
+        
+        if (currentA == null) {
+          _logState?.error('❌ 电流测量失败', type: LogType.debug);
+          if (attempt < maxRetries) {
+            _logState?.warning('⚠️  准备重试...', type: LogType.debug);
+            await Future.delayed(const Duration(milliseconds: 300));
+            continue; // 测量失败，重试
+          } else {
+            _logState?.error('❌ 已达最大重试次数', type: LogType.debug);
+            return false;
+          }
+        }
+        
+        final currentMa = currentA * 1000;
+        
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('📊 物奇功耗测试结果:', type: LogType.debug);
+        _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+        _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+        
+        // 判断测试结果
+        if (currentMa <= TestConfig.wuqiPowerThresholdMa) {
+          _logState?.success('✅ 物奇功耗测试通过', type: LogType.debug);
+          _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return true;
+        } else {
+          _logState?.error('❌ 超过阈值', type: LogType.debug);
+          _logState?.error('   测量值: ${currentMa.toStringAsFixed(2)} mA > 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+          _logState?.error('   差值: +${(currentMa - TestConfig.wuqiPowerThresholdMa).toStringAsFixed(2)} mA', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          
+          if (attempt < maxRetries) {
+            _logState?.warning('⚠️  准备重新测量电流...', type: LogType.debug);
+            await Future.delayed(const Duration(milliseconds: 300));
+            continue; // 阈值失败，重试
+          } else {
+            _logState?.error('❌ 已达最大重试次数，物奇功耗测试失败', type: LogType.debug);
+            return false;
+          }
+        }
+      } catch (e) {
+        _logState?.error('❌ 电流测量异常: $e', type: LogType.debug);
+        if (attempt < maxRetries) {
+          _logState?.warning('⚠️  准备重试...', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 300));
+          continue;
+        } else {
+          return false;
+        }
+      }
+    }
+    
+    return false;
   }
 
   /// 3.2 ISP工作功耗测试 (开启ISP) - 使用新CMD 0x0F
@@ -6026,41 +6071,86 @@ class TestState extends ChangeNotifier {
         return true;
       }
       
-      // 4. 使用GPIB测量电流
-      final currentA = await _gpibService.measureCurrent(
-        sampleCount: TestConfig.gpibSampleCount,
-        sampleRate: TestConfig.gpibSampleRate,
-      );
+      // 4. 测量电流（支持重试，阈值失败时只重新测量，不重新发送命令）
+      return await _measureIspPowerWithRetry();
       
-      if (currentA == null) {
-        _logState?.error('❌ 电流测量失败（通信失败，将重试）', type: LogType.debug);
-        throw Exception('电流测量失败'); // 抛出异常以触发重试
-      }
-      
-      final currentMa = currentA * 1000;
-      
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('📊 ISP工作功耗测试结果:', type: LogType.debug);
-      _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
-      _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
-      
-      // 判断测试结果（阈值未通过不重试）
-      if (currentMa <= TestConfig.ispWorkingPowerThresholdMa) {
-        _logState?.success('✅ ISP工作功耗测试通过', type: LogType.debug);
-        _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true;
-      } else {
-        _logState?.error('❌ ISP工作功耗测试失败: 超过阈值（不重试）', type: LogType.debug);
-        _logState?.error('   测量值: ${currentMa.toStringAsFixed(2)} mA > 阈值: ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
-        _logState?.error('   差值: +${(currentMa - TestConfig.ispWorkingPowerThresholdMa).toStringAsFixed(2)} mA', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return false; // 阈值失败直接返回false，不抛出异常，不触发重试
-      }
     } catch (e) {
       _logState?.error('❌ ISP工作功耗测试异常: $e', type: LogType.debug);
       return false;
     }
+  }
+  
+  /// ISP功耗电流测量（支持阈值失败重试）
+  Future<bool> _measureIspPowerWithRetry() async {
+    const maxRetries = 10;
+    
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.info('🔄 重新测量电流 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        }
+        
+        // 使用GPIB测量电流
+        final currentA = await _gpibService.measureCurrent(
+          sampleCount: TestConfig.gpibSampleCount,
+          sampleRate: TestConfig.gpibSampleRate,
+        );
+        
+        if (currentA == null) {
+          _logState?.error('❌ 电流测量失败', type: LogType.debug);
+          if (attempt < maxRetries) {
+            _logState?.warning('⚠️  准备重试...', type: LogType.debug);
+            await Future.delayed(const Duration(milliseconds: 300));
+            continue; // 测量失败，重试
+          } else {
+            _logState?.error('❌ 已达最大重试次数', type: LogType.debug);
+            return false;
+          }
+        }
+        
+        final currentMa = currentA * 1000;
+        
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('📊 ISP工作功耗测试结果:', type: LogType.debug);
+        _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA', type: LogType.debug);
+        _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+        
+        // 判断测试结果
+        if (currentMa <= TestConfig.ispWorkingPowerThresholdMa) {
+          _logState?.success('✅ ISP工作功耗测试通过', type: LogType.debug);
+          _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return true;
+        } else {
+          _logState?.error('❌ 超过阈值', type: LogType.debug);
+          _logState?.error('   测量值: ${currentMa.toStringAsFixed(2)} mA > 阈值: ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+          _logState?.error('   差值: +${(currentMa - TestConfig.ispWorkingPowerThresholdMa).toStringAsFixed(2)} mA', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          
+          if (attempt < maxRetries) {
+            _logState?.warning('⚠️  准备重新测量电流...', type: LogType.debug);
+            await Future.delayed(const Duration(milliseconds: 300));
+            continue; // 阈值失败，重试
+          } else {
+            _logState?.error('❌ 已达最大重试次数，ISP工作功耗测试失败', type: LogType.debug);
+            return false;
+          }
+        }
+      } catch (e) {
+        _logState?.error('❌ 电流测量异常: $e', type: LogType.debug);
+        if (attempt < maxRetries) {
+          _logState?.warning('⚠️  准备重试...', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 300));
+          continue;
+        } else {
+          return false;
+        }
+      }
+    }
+    
+    return false;
   }
 
   /// 3.3 EMMC容量检测测试
