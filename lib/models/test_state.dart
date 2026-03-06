@@ -2472,9 +2472,15 @@ class TestState extends ChangeNotifier {
       _logState?.success('✅ SPP连接成功', type: LogType.debug);
       
       // 4. 简单验证：发送读取MAC地址命令
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📖 验证通信: 读取蓝牙MAC地址', type: LogType.debug);
       
       final readMacCmd = ProductionTestCommands.createBluetoothMACCommand(0x01, []);
+      final cmdHex = readMacCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送命令 (${readMacCmd.length} 字节): $cmdHex', type: LogType.debug);
+      _logState?.info('   模块ID: 0x${ProductionTestCommands.moduleId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      _logState?.info('   消息ID: 0x${ProductionTestCommands.messageId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      
       final response = await _sppService.sendCommandAndWaitResponse(
         readMacCmd,
         timeout: const Duration(seconds: 5),
@@ -2482,8 +2488,34 @@ class TestState extends ChangeNotifier {
         messageId: ProductionTestCommands.messageId,
       );
       
+      // 打印响应详情
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      if (response == null) {
+        _logState?.error('📥 响应: null (超时或无响应)', type: LogType.debug);
+      } else if (response.containsKey('error')) {
+        _logState?.error('📥 响应错误: ${response['error']}', type: LogType.debug);
+        if (response.containsKey('details')) {
+          _logState?.error('   详情: ${response['details']}', type: LogType.debug);
+        }
+      } else {
+        _logState?.success('📥 收到响应', type: LogType.debug);
+        
+        // 打印响应中的所有字段
+        response.forEach((key, value) {
+          if (key == 'payload' && value is Uint8List) {
+            final payloadHex = value.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+            _logState?.info('   $key (${value.length} 字节): $payloadHex', type: LogType.debug);
+          } else {
+            _logState?.info('   $key: $value', type: LogType.debug);
+          }
+        });
+      }
+      
       // 断开连接
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔌 断开SPP连接...', type: LogType.debug);
       await _sppService.disconnect();
+      _logState?.success('✅ 已断开连接', type: LogType.debug);
       
       if (response == null || response.containsKey('error')) {
         _logState?.warning('⚠️ SPP通信测试失败，但连接成功', type: LogType.debug);

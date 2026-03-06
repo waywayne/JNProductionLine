@@ -214,14 +214,27 @@ class SppService {
   }
   
   /// Connect to Bluetooth device on Android
+  /// 
+  /// 关于 SPP 连接和 RFCOMM 通道：
+  /// - flutter_bluetooth_serial 使用 Serial Port Profile (SPP)
+  /// - BluetoothConnection.toAddress() 会自动通过 SDP (Service Discovery Protocol) 
+  ///   查找设备上的 SPP 服务并连接到对应的 RFCOMM 通道
+  /// - 不需要手动指定 channel 或 UUID，库会自动处理
+  /// - SPP 标准 UUID: 00001101-0000-1000-8000-00805F9B34FB
+  /// - RFCOMM 通道通常在 1-30 之间，由设备的 SDP 服务器动态分配
+  /// 
+  /// 注意：当前版本不支持指定特定 UUID，如需连接非标准 SPP 服务，
+  /// 需要等待库更新或使用其他蓝牙插件
   Future<bool> _connectAndroid(BluetoothDevice device) async {
     try {
-      // Connect to device
+      // Connect to device - 自动使用 SPP/RFCOMM
       _logState?.info('⏳ 正在建立SPP连接...');
+      _logState?.debug('   通过 SDP 查找 SPP 服务 (UUID: 00001101-...)');
       _connection = await BluetoothConnection.toAddress(device.address);
       
       if (_connection == null || !_connection!.isConnected) {
         _logState?.error('❌ SPP连接失败');
+        _logState?.warning('   可能原因: 设备未提供 SPP 服务或 RFCOMM 通道不可用');
         return false;
       }
       
@@ -229,6 +242,22 @@ class SppService {
       _isConnected = true;
       
       _logState?.success('✅ SPP连接成功');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // 打印连接详情
+      _logState?.info('📋 连接信息:');
+      _logState?.info('   设备名称: ${device.name ?? "未知"}');
+      _logState?.info('   设备地址: ${device.address}');
+      _logState?.info('   连接状态: ${_connection!.isConnected ? "已连接" : "未连接"}');
+      _logState?.info('   SPP UUID: 00001101-0000-1000-8000-00805F9B34FB');
+      
+      // 注意：BluetoothConnection 类不提供获取 RFCOMM 通道号的方法
+      // 如需查看通道号，可以通过以下方式：
+      // 1. 使用 adb logcat 查看 Android 系统日志
+      // 2. 搜索 "RFCOMM" 或 "BluetoothSocket" 关键字
+      // 3. 日志中会显示类似 "connect to RFCOMM channel X" 的信息
+      _logState?.debug('   提示: RFCOMM 通道号可通过 adb logcat 查看');
+      _logState?.debug('   命令: adb logcat | grep -i "rfcomm\\|bluetooth"');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Start listening to incoming data
@@ -269,6 +298,16 @@ class SppService {
       _isConnected = true;
       
       _logState?.success('✅ Windows SPP连接成功');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // 打印连接详情
+      _logState?.info('📋 连接信息:');
+      _logState?.info('   平台: Windows');
+      _logState?.info('   设备名称: ${device.name ?? "未知"}');
+      _logState?.info('   设备地址: ${device.address}');
+      _logState?.info('   连接方式: 系统配对设备');
+      _logState?.info('   SPP UUID: 00001101-0000-1000-8000-00805F9B34FB');
+      _logState?.debug('   提示: Windows 使用系统蓝牙服务，通道信息由系统管理');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Start listening to incoming data
@@ -383,28 +422,46 @@ class SppService {
       final completer = Completer<Map<String, dynamic>?>();
       _pendingResponses[seqNum] = completer;
       
+      _logState?.debug('🔄 [SPP] 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒)');
+      if (moduleId != null) {
+        _logState?.debug('   期望模块ID: 0x${moduleId.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+      }
+      if (messageId != null) {
+        _logState?.debug('   期望消息ID: 0x${messageId.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+      }
+      
       // Send command
       final success = await sendData(command);
       if (!success) {
         _pendingResponses.remove(seqNum);
+        _logState?.error('❌ [SPP] 发送命令失败');
         return {'error': 'Failed to send command'};
       }
+      
+      _logState?.debug('⏳ [SPP] 等待响应中...');
       
       // Wait for response with timeout
       final response = await completer.future.timeout(
         timeout,
         onTimeout: () {
           _pendingResponses.remove(seqNum);
-          _logState?.warning('⚠️ SPP命令超时');
-          return {'error': 'Timeout'};
+          _logState?.warning('⚠️ [SPP] 命令超时 (${timeout.inSeconds}秒)');
+          _logState?.warning('   当前待处理响应数: ${_pendingResponses.length}');
+          _logState?.warning('   缓冲区大小: ${_buffer.length} 字节');
+          return {'error': 'Timeout', 'details': 'No response received within ${timeout.inSeconds} seconds'};
         },
       );
       
       _pendingResponses.remove(seqNum);
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ [SPP] 收到有效响应');
+      }
+      
       return response;
     } catch (e) {
-      _logState?.error('❌ SPP命令执行异常: $e');
-      return {'error': e.toString()};
+      _logState?.error('❌ [SPP] 命令执行异常: $e');
+      return {'error': e.toString(), 'details': 'Exception during command execution'};
     }
   }
   
