@@ -2710,6 +2710,12 @@ class TestState extends ChangeNotifier {
         _logState?.success('✅ 选择设备: ${devices.first['name']} ($targetAddress)', type: LogType.debug);
       }
       
+      // 检查设备地址是否有效
+      if (targetAddress == null || targetAddress.isEmpty) {
+        _logState?.error('❌ 无效的设备地址', type: LogType.debug);
+        return false;
+      }
+      
       // 如果没有指定 UUID 或 channel，查找服务
       if (uuid == null && channel == null) {
         _logState?.info('🔍 查找设备服务...', type: LogType.debug);
