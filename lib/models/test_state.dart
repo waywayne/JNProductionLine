@@ -2796,19 +2796,20 @@ class TestState extends ChangeNotifier {
             targetUuid = service['uuid'] as String?;
             targetChannel = service['channel'] as int?;
           } else {
-            _logState?.warning('⚠️  未找到服务，将使用默认配置', type: LogType.debug);
+            _logState?.warning('⚠️  未找到服务', type: LogType.debug);
+            _logState?.info('   Python 脚本将自动尝试常用 Channel (1-10)', type: LogType.debug);
           }
         } catch (e) {
           _logState?.warning('⚠️  查找服务失败: $e', type: LogType.debug);
+          _logState?.info('   Python 脚本将自动尝试常用 Channel (1-10)', type: LogType.debug);
         }
       }
       
-      // 如果仍然没有 Channel，使用默认值 5
-      if (targetChannel == null) {
-        targetChannel = 5;  // 默认使用 Channel 5
-        _logState?.info('   使用默认 RFCOMM Channel: $targetChannel', type: LogType.debug);
+      // 显示 Channel 信息
+      if (targetChannel != null) {
+        _logState?.info('   使用指定 RFCOMM Channel: $targetChannel', type: LogType.debug);
       } else {
-        _logState?.info('   使用 RFCOMM Channel: $targetChannel', type: LogType.debug);
+        _logState?.info('   未指定 Channel，将自动尝试常用 Channel', type: LogType.debug);
       }
       
       // 测试读取蓝牙 MAC 地址

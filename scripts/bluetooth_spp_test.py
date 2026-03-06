@@ -111,7 +111,7 @@ class BluetoothSPPClient:
     """蓝牙 SPP 客户端"""
     
     # 自定义 UUID（项目专用）
-    DEFAULT_UUID = "00007033-1000-8000-00805f9b34fb"
+    DEFAULT_UUID = "00007033-0000-1000-8000-00805f9b34fb"
     
     def __init__(self, device_address: str, uuid: Optional[str] = None, channel: Optional[int] = None):
         self.device_address = device_address
@@ -120,34 +120,121 @@ class BluetoothSPPClient:
         self.socket = None
     
     def connect(self):
-        """连接到蓝牙设备"""
+        """连接到蓝牙设备（带智能重试）"""
         print("━" * 50)
         print(f"🔗 连接到设备: {self.device_address}")
         print(f"   UUID: {self.uuid}")
         
-        if self.channel is not None:
-            print(f"   使用 RFCOMM Channel: {self.channel}")
-            self.socket = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-            self.socket.connect((self.device_address, self.channel))
-        else:
-            print("   正在查找服务...")
-            services = bluetooth.find_service(
-                uuid=self.uuid,
-                address=self.device_address
-            )
+        try:
+            if self.channel is not None:
+                # 用户指定了 Channel，直接连接
+                print(f"   使用指定 RFCOMM Channel: {self.channel}")
+                self._connect_to_channel(self.channel)
+            else:
+                # 未指定 Channel，尝试查找服务
+                print("   正在查找服务...")
+                try:
+                    services = bluetooth.find_service(
+                        uuid=self.uuid,
+                        address=self.device_address
+                    )
+                    
+                    if services:
+                        service = services[0]
+                        channel = service['port']
+                        print(f"   找到服务: {service.get('name', 'Unknown')}")
+                        print(f"   RFCOMM Channel: {channel}")
+                        self._connect_to_channel(channel)
+                    else:
+                        # 找不到服务，使用智能重试
+                        print("   ⚠️  未找到服务，启动智能连接...")
+                        self._smart_connect()
+                        
+                except Exception as e:
+                    # 查找服务失败，使用智能重试
+                    print(f"   ⚠️  查找服务失败: {e}")
+                    print("   启动智能连接...")
+                    self._smart_connect()
             
-            if not services:
-                raise Exception(f"未找到 UUID {self.uuid} 的服务")
+            print("✅ 连接成功!")
+            print("━" * 50)
             
-            service = services[0]
-            print(f"   找到服务: {service['name']}")
-            print(f"   RFCOMM Channel: {service['port']}")
-            
-            self.socket = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-            self.socket.connect((service['host'], service['port']))
+        except bluetooth.BluetoothError as e:
+            error_msg = str(e)
+            print(f"\n❌ 蓝牙连接失败:")
+            print(f"   错误类型: BluetoothError")
+            print(f"   错误信息: {error_msg}")
+            print(f"   设备地址: {self.device_address}")
+            print(f"   Channel: {self.channel if self.channel else '未指定'}")
+            print(f"\n可能的原因:")
+            print(f"   1. 设备未开启或不在范围内")
+            print(f"   2. RFCOMM Channel 不正确")
+            print(f"   3. 设备不支持此 UUID: {self.uuid}")
+            print(f"   4. 设备已被其他程序占用")
+            print(f"   5. 蓝牙权限不足")
+            print("━" * 50)
+            raise
+        except Exception as e:
+            print(f"\n❌ 连接失败:")
+            print(f"   错误类型: {type(e).__name__}")
+            print(f"   错误信息: {e}")
+            print("━" * 50)
+            raise
+    
+    def _connect_to_channel(self, channel: int):
+        """连接到指定 Channel"""
+        print(f"   正在创建蓝牙套接字...")
+        self.socket = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+        self.socket.settimeout(5)  # 5秒超时
+        print(f"   正在连接到 {self.device_address}:{channel}...")
+        self.socket.connect((self.device_address, channel))
+        self.channel = channel  # 记录成功的 Channel
+    
+    def _smart_connect(self):
+        """智能连接：尝试常用的 RFCOMM Channel"""
+        # Android 设备常用的 Channel：1, 2, 3, 4, 5, 6
+        common_channels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         
-        print("✅ 连接成功!")
-        print("━" * 50)
+        print(f"\n   🔄 尝试常用 Channel: {common_channels}")
+        print(f"   (Android 设备通常使用 Channel 1-6)\n")
+        
+        last_error = None
+        for channel in common_channels:
+            try:
+                print(f"   [{channel:2d}] 尝试 Channel {channel}...", end=" ", flush=True)
+                
+                sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+                sock.settimeout(3)  # 3秒超时
+                sock.connect((self.device_address, channel))
+                
+                # 连接成功
+                print("✅")
+                self.socket = sock
+                self.channel = channel
+                print(f"\n   ✅ 成功连接到 Channel {channel}")
+                return
+                
+            except bluetooth.BluetoothError as e:
+                error_msg = str(e).lower()
+                if "connection refused" in error_msg or "refused" in error_msg:
+                    print("❌ 拒绝")
+                elif "timeout" in error_msg or "timed out" in error_msg:
+                    print("⏱️  超时")
+                elif "host is down" in error_msg:
+                    print("📴 无响应")
+                else:
+                    print(f"❌ {e}")
+                last_error = e
+            except Exception as e:
+                print(f"❌ {e}")
+                last_error = e
+        
+        # 所有 Channel 都失败
+        print(f"\n   ❌ 所有常用 Channel 都无法连接")
+        if last_error:
+            raise last_error
+        else:
+            raise Exception("无法连接到任何 RFCOMM Channel")
     
     def send_gtp_command(self, cmd_payload: bytes, module_id: int = 0x0000, message_id: int = 0x0000):
         """发送 GTP 命令"""

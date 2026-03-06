@@ -10,7 +10,7 @@ import '../models/log_state.dart';
 /// 支持自定义 UUID 和 RFCOMM channel
 class PythonBluetoothService {
   /// 自定义蓝牙服务 UUID（项目专用）
-  static const String defaultUuid = '00007033-1000-8000-00805f9b34fb';
+  static const String defaultUuid = '00007033-0000-1000-8000-00805f9b34fb';
   
   LogState? _logState;
   String? _pythonPath;
