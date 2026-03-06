@@ -24,8 +24,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  # 包含 Python 脚本文件
+  # 包含 Python 脚本文件和 wheel 包
   assets:
     - scripts/bluetooth_spp_test.py
     - scripts/setup_bluetooth.py
     - scripts/README_BLUETOOTH.md
+    - PyBluez-0.23-cp37-cp37m-win_amd64.whl
