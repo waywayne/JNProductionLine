@@ -2712,32 +2712,54 @@ class TestState extends ChangeNotifier {
         }
       }
       
-      // 如果没有指定设备地址，先扫描
+      // 如果没有指定设备地址，先查找已配对设备
       String? targetAddress = deviceAddress;
       if (targetAddress == null) {
-        _logState?.info('🔍 扫描蓝牙设备（最多60秒）...', type: LogType.debug);
-        _logState?.info('   提示: 如果已知设备地址，可直接指定跳过扫描', type: LogType.debug);
+        _logState?.info('🔍 查找已配对的蓝牙设备...', type: LogType.debug);
+        _logState?.info('   提示: 已配对设备无需处于可发现模式', type: LogType.debug);
         
-        final devices = await _pythonBtService.scanDevices().timeout(
-          const Duration(seconds: 70),  // 给扫描足够的时间
+        // 先尝试列出已配对设备
+        final pairedDevices = await _pythonBtService.listPairedDevices().timeout(
+          const Duration(seconds: 10),
           onTimeout: () {
-            _logState?.warning('⚠️  扫描超时', type: LogType.debug);
-            return [];
+            _logState?.warning('⚠️  查询已配对设备超时', type: LogType.debug);
+            return <Map<String, String>>[];
           },
         );
         
-        if (devices.isEmpty) {
-          _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
-          _logState?.info('   建议:', type: LogType.debug);
-          _logState?.info('   1. 先在 Windows 设置中配对设备', type: LogType.debug);
-          _logState?.info('   2. 使用已知的设备地址直接连接', type: LogType.debug);
-          _logState?.info('   3. 确保设备处于可发现模式', type: LogType.debug);
-          return false;
+        if (pairedDevices.isNotEmpty) {
+          // 使用第一个已配对设备
+          targetAddress = pairedDevices.first['address'];
+          _logState?.success('✅ 找到已配对设备: ${pairedDevices.first['name']} ($targetAddress)', type: LogType.debug);
+        } else {
+          // 如果没有已配对设备，尝试扫描
+          _logState?.info('🔍 未找到已配对设备，尝试扫描可发现设备...', type: LogType.debug);
+          _logState?.info('   提示: 请确保设备处于可发现模式', type: LogType.debug);
+          
+          final devices = await _pythonBtService.scanDevices().timeout(
+            const Duration(seconds: 70),
+            onTimeout: () {
+              _logState?.warning('⚠️  扫描超时', type: LogType.debug);
+              return [];
+            },
+          );
+          
+          if (devices.isNotEmpty) {
+            targetAddress = devices.first['address'];
+            _logState?.success('✅ 选择设备: ${devices.first['name']} ($targetAddress)', type: LogType.debug);
+          }
         }
         
-        // 使用第一个设备
-        targetAddress = devices.first['address'];
-        _logState?.success('✅ 选择设备: ${devices.first['name']} ($targetAddress)', type: LogType.debug);
+        // 如果仍然没有找到设备
+        if (targetAddress == null) {
+          _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
+          _logState?.info('   建议:', type: LogType.debug);
+          _logState?.info('   1. 在 Windows 设置中配对设备', type: LogType.debug);
+          _logState?.info('   2. 确保设备蓝牙已开启', type: LogType.debug);
+          _logState?.info('   3. 如果已知设备地址，直接指定跳过扫描', type: LogType.debug);
+          _logState?.info('   4. 示例: testPythonBluetooth(deviceAddress: "00:11:22:33:44:55", channel: 5)', type: LogType.debug);
+          return false;
+        }
       } else {
         _logState?.info('📍 使用指定设备: $targetAddress', type: LogType.debug);
       }

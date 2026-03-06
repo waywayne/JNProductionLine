@@ -273,28 +273,100 @@ def list_paired_devices():
     print("🔗 查找已配对的蓝牙设备...")
     print("━" * 50)
     
+    devices = []
+    
     try:
         import subprocess
-        # 使用 PowerShell 获取已配对的蓝牙设备
+        import re
+        import json
+        
+        # 方法 1: 使用 PyBluez 读取本地蓝牙适配器附近的设备
+        # 注意：这只能找到可发现的设备，不是已配对的设备
+        print("   正在查询系统蓝牙设备...")
+        
+        # 方法 2: 使用 PowerShell 获取已配对的蓝牙设备
         result = subprocess.run(
             ['powershell', '-Command', 
-             'Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq "OK"} | Select-Object FriendlyName, InstanceId'],
+             'Get-PnpDevice -Class Bluetooth | Where-Object {$_.Status -eq "OK"} | Select-Object FriendlyName, InstanceId | ConvertTo-Json'],
             capture_output=True,
             text=True,
             timeout=10
         )
         
-        if result.returncode == 0 and result.stdout:
-            print("\n已配对的设备:")
-            print(result.stdout)
-            print("\n提示: 可以直接使用设备的蓝牙地址连接")
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                # 解析 JSON 输出
+                ps_devices = json.loads(result.stdout)
+                
+                # 如果只有一个设备，PowerShell 返回对象而不是数组
+                if isinstance(ps_devices, dict):
+                    ps_devices = [ps_devices]
+                
+                print(f"\n✅ 找到 {len(ps_devices)} 个已配对设备:\n")
+                
+                for idx, dev in enumerate(ps_devices, 1):
+                    name = dev.get('FriendlyName', 'Unknown')
+                    instance_id = dev.get('InstanceId', '')
+                    
+                    # 尝试从 InstanceId 中提取蓝牙地址
+                    # 格式通常是: BTHENUM\{...}\8&1234abcd&0&BLUETOOTHDEVICE_AABBCCDDEEFF
+                    # 或: BTHENUM\{...}\7&12345678&0&AABBCCDDEEFF
+                    mac_address = None
+                    
+                    # 尝试多种模式提取 MAC 地址
+                    patterns = [
+                        r'BLUETOOTHDEVICE_([0-9A-F]{12})',  # BLUETOOTHDEVICE_AABBCCDDEEFF
+                        r'&0&([0-9A-F]{12})',                # &0&AABBCCDDEEFF
+                        r'_([0-9A-F]{12})$',                 # 结尾的12位十六进制
+                    ]
+                    
+                    for pattern in patterns:
+                        match = re.search(pattern, instance_id, re.IGNORECASE)
+                        if match:
+                            mac_hex = match.group(1)
+                            # 转换为标准 MAC 地址格式 AA:BB:CC:DD:EE:FF
+                            mac_address = ':'.join([mac_hex[i:i+2] for i in range(0, 12, 2)])
+                            break
+                    
+                    if mac_address:
+                        print(f"{idx}. {name}")
+                        print(f"   地址: {mac_address}")
+                        devices.append({
+                            'name': name,
+                            'address': mac_address
+                        })
+                    else:
+                        print(f"{idx}. {name}")
+                        print(f"   InstanceId: {instance_id}")
+                        print(f"   ⚠️  无法提取 MAC 地址")
+                
+                # 输出 JSON 格式供 Dart 解析
+                if devices:
+                    print("\n" + "━" * 50)
+                    print("JSON_DEVICES_START")
+                    print(json.dumps(devices, ensure_ascii=False))
+                    print("JSON_DEVICES_END")
+                else:
+                    print("\n⚠️  未能提取任何设备的 MAC 地址")
+                    print("   建议: 直接使用已知的设备地址")
+                    
+            except json.JSONDecodeError as e:
+                print(f"解析 PowerShell 输出失败: {e}")
+                print("原始输出:")
+                print(result.stdout)
         else:
             print("无法获取已配对设备列表")
+            if result.stderr:
+                print(f"错误: {result.stderr}")
             
     except Exception as e:
         print(f"获取已配对设备失败: {e}")
+        import traceback
+        traceback.print_exc()
     
     print("━" * 50)
+    
+    return devices
 
 
 def find_services(device_address: str, uuid: str = None):

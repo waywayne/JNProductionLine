@@ -431,6 +431,11 @@ class PythonBluetoothService {
         _pythonPath!,
         [_scriptPath!, '--paired'],
         runInShell: true,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw TimeoutException('查询已配对设备超时');
+        },
       );
 
       if (result.exitCode != 0) {
@@ -438,10 +443,44 @@ class PythonBluetoothService {
         return [];
       }
 
-      // 输出已配对设备信息
       final output = result.stdout.toString();
+      
+      // 查找 JSON 数据
+      final jsonStartMarker = 'JSON_DEVICES_START';
+      final jsonEndMarker = 'JSON_DEVICES_END';
+      
+      final startIndex = output.indexOf(jsonStartMarker);
+      final endIndex = output.indexOf(jsonEndMarker);
+      
+      if (startIndex != -1 && endIndex != -1 && endIndex > startIndex) {
+        // 提取 JSON 数据
+        final jsonStr = output.substring(
+          startIndex + jsonStartMarker.length,
+          endIndex,
+        ).trim();
+        
+        try {
+          final List<dynamic> devicesJson = jsonDecode(jsonStr);
+          final devices = devicesJson.map((d) {
+            return {
+              'name': d['name'].toString(),
+              'address': d['address'].toString(),
+            };
+          }).toList();
+          
+          _logState?.success('✅ 找到 ${devices.length} 个已配对设备');
+          for (final device in devices) {
+            _logState?.info('   ${device['name']} (${device['address']})');
+          }
+          
+          return devices;
+        } catch (e) {
+          _logState?.warning('⚠️  解析设备列表失败: $e');
+        }
+      }
+      
+      // 如果没有找到 JSON，输出原始信息
       _logState?.info(output);
-
       return [];
     } catch (e) {
       _logState?.error('❌ 查找已配对设备异常: $e');
