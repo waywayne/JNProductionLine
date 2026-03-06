@@ -272,18 +272,20 @@ class PythonBluetoothService {
       
       // 提取 Python 版本号
       String? pyVer;
-      if (versionStr.contains('3.9')) pyVer = '3.9';
+      if (versionStr.contains('3.8')) pyVer = '3.8';
+      else if (versionStr.contains('3.9')) pyVer = '3.9';
       else if (versionStr.contains('3.10')) pyVer = '3.10';
       else if (versionStr.contains('3.11')) pyVer = '3.11';
       else if (versionStr.contains('3.12')) pyVer = '3.12';
       
       if (pyVer != null) {
+        _logState?.info('   检测到 Python $pyVer');
         final wheelInstalled = await _installPrecompiledWheel(pyVer);
         if (wheelInstalled) {
           return true;
         }
       } else {
-        _logState?.warning('   ⚠️  无法识别 Python 版本');
+        _logState?.warning('   ⚠️  无法识别 Python 版本: $versionStr');
       }
 
       // 方法 3: 尝试使用 setup_bluetooth.py 脚本
@@ -345,16 +347,28 @@ class PythonBluetoothService {
     try {
       _logState?.info('   正在下载预编译包...');
       
-      // PyBluez wheel 文件的直接下载链接（备用镜像）
-      final wheelUrls = {
-        '3.9': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp39-cp39-win_amd64.whl',
-        '3.10': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp310-cp310-win_amd64.whl',
-        '3.11': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp311-cp311-win_amd64.whl',
-        '3.12': 'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp312-cp312-win_amd64.whl',
+      // PyBluez wheel 文件的多个下载源（按优先级）
+      final wheelUrlSources = {
+        '3.8': [
+          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp38-cp38-win_amd64.whl',
+          'https://download.lfd.uci.edu/pythonlibs/archived/PyBluez-0.23-cp38-cp38-win_amd64.whl',
+        ],
+        '3.9': [
+          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp39-cp39-win_amd64.whl',
+        ],
+        '3.10': [
+          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp310-cp310-win_amd64.whl',
+        ],
+        '3.11': [
+          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp311-cp311-win_amd64.whl',
+        ],
+        '3.12': [
+          'https://github.com/pybluez/pybluez/releases/download/0.23/PyBluez-0.23-cp312-cp312-win_amd64.whl',
+        ],
       };
       
-      final wheelUrl = wheelUrls[pythonVersion];
-      if (wheelUrl == null) {
+      final wheelUrls = wheelUrlSources[pythonVersion];
+      if (wheelUrls == null || wheelUrls.isEmpty) {
         _logState?.warning('   ⚠️  不支持的 Python 版本: $pythonVersion');
         return false;
       }
@@ -364,10 +378,7 @@ class PythonBluetoothService {
       final wheelFileName = 'PyBluez-0.23-cp${pythonVersion.replaceAll('.', '')}-cp${pythonVersion.replaceAll('.', '')}-win_amd64.whl';
       final wheelPath = path.join(tempDir.path, wheelFileName);
       
-      // 使用 Python 下载（避免依赖额外的 HTTP 库）
-      _logState?.debug('   下载地址: $wheelUrl');
-      _logState?.debug('   保存到: $wheelPath');
-      
+      // 创建下载脚本
       final downloadScript = '''
 import urllib.request
 import sys
@@ -383,25 +394,42 @@ except Exception as e:
     sys.exit(1)
 ''';
       
-      // 创建临时下载脚本
       final downloadScriptPath = path.join(tempDir.path, 'download_wheel.py');
       await File(downloadScriptPath).writeAsString(downloadScript);
       
-      // 执行下载
-      final downloadResult = await Process.run(
-        _pythonPath!,
-        [downloadScriptPath, wheelUrl, wheelPath],
-        runInShell: true,
-      ).timeout(
-        const Duration(minutes: 3),
-        onTimeout: () {
-          throw TimeoutException('下载超时');
-        },
-      );
+      // 尝试所有下载源
+      bool downloaded = false;
+      for (int i = 0; i < wheelUrls.length; i++) {
+        final wheelUrl = wheelUrls[i];
+        _logState?.debug('   尝试源 ${i + 1}/${wheelUrls.length}: $wheelUrl');
+        
+        try {
+          // 执行下载
+          final downloadResult = await Process.run(
+            _pythonPath!,
+            [downloadScriptPath, wheelUrl, wheelPath],
+            runInShell: true,
+          ).timeout(
+            const Duration(minutes: 2),
+            onTimeout: () {
+              throw TimeoutException('下载超时');
+            },
+          );
+          
+          if (downloadResult.exitCode == 0 && await File(wheelPath).exists()) {
+            _logState?.debug('   ✓ 下载成功');
+            downloaded = true;
+            break;
+          } else {
+            _logState?.debug('   ✗ 下载失败: ${downloadResult.stderr}');
+          }
+        } catch (e) {
+          _logState?.debug('   ✗ 下载异常: $e');
+        }
+      }
       
-      if (downloadResult.exitCode != 0 || !await File(wheelPath).exists()) {
-        _logState?.warning('   ⚠️  下载失败');
-        _logState?.debug('   错误: ${downloadResult.stderr}');
+      if (!downloaded) {
+        _logState?.warning('   ⚠️  所有下载源都失败');
         return false;
       }
       
