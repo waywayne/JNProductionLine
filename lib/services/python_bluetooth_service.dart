@@ -109,21 +109,87 @@ class PythonBluetoothService {
   Future<String?> _findScript() async {
     // 获取当前可执行文件目录
     final exeDir = path.dirname(Platform.resolvedExecutable);
+    final currentDir = Directory.current.path;
 
     // 可能的脚本位置
     final candidates = [
+      // Flutter 打包后的位置
+      path.join(exeDir, 'data', 'flutter_assets', 'assets', 'scripts', 'bluetooth_spp_test.py'),
       path.join(exeDir, 'data', 'flutter_assets', 'scripts', 'bluetooth_spp_test.py'),
+      
+      // 与可执行文件同级的 scripts 目录
       path.join(exeDir, 'scripts', 'bluetooth_spp_test.py'),
-      path.join(Directory.current.path, 'scripts', 'bluetooth_spp_test.py'),
+      
+      // 可执行文件上一级的 scripts 目录
+      path.join(path.dirname(exeDir), 'scripts', 'bluetooth_spp_test.py'),
+      
+      // 当前工作目录
+      path.join(currentDir, 'scripts', 'bluetooth_spp_test.py'),
+      
+      // 开发环境路径
+      path.join(currentDir, 'assets', 'scripts', 'bluetooth_spp_test.py'),
     ];
 
+    _logState?.debug('   搜索脚本文件...');
+    _logState?.debug('   可执行文件目录: $exeDir');
+    _logState?.debug('   当前工作目录: $currentDir');
+
     for (final scriptPath in candidates) {
+      _logState?.debug('   检查: $scriptPath');
       if (await File(scriptPath).exists()) {
+        _logState?.debug('   ✓ 找到脚本');
         return scriptPath;
       }
     }
 
+    _logState?.debug('   ✗ 所有路径都不存在');
+    
+    // 尝试从 assets 复制
+    _logState?.debug('   尝试从 assets 复制脚本...');
+    try {
+      final scriptContent = await _loadScriptFromAssets();
+      if (scriptContent != null) {
+        final tempDir = Directory.systemTemp;
+        final tempScriptPath = path.join(tempDir.path, 'bluetooth_spp_test.py');
+        final tempFile = File(tempScriptPath);
+        await tempFile.writeAsString(scriptContent);
+        _logState?.debug('   ✓ 复制到临时目录: $tempScriptPath');
+        
+        // 同时复制 setup_bluetooth.py
+        final setupContent = await _loadSetupScriptFromAssets();
+        if (setupContent != null) {
+          final tempSetupPath = path.join(tempDir.path, 'setup_bluetooth.py');
+          await File(tempSetupPath).writeAsString(setupContent);
+        }
+        
+        return tempScriptPath;
+      }
+    } catch (e) {
+      _logState?.debug('   ✗ 从 assets 复制失败: $e');
+    }
+    
     return null;
+  }
+  
+  /// 从 assets 加载脚本内容
+  Future<String?> _loadScriptFromAssets() async {
+    try {
+      // 这里需要使用 rootBundle 加载 assets
+      // 但由于我们在 service 中，需要通过其他方式
+      // 暂时返回 null，让用户手动部署脚本
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /// 从 assets 加载安装脚本内容
+  Future<String?> _loadSetupScriptFromAssets() async {
+    try {
+      return null;
+    } catch (e) {
+      return null;
+    }
   }
 
   /// 检查 PyBluez 是否安装
