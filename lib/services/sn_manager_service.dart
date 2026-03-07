@@ -135,14 +135,26 @@ class SNManagerService {
     // 简单的校验算法：对所有字符的 ASCII 值求和，然后转 Base36
     int sum = 0;
     for (int i = 0; i < baseSN.length; i++) {
-      sum += baseSN.codeUnitAt(i) * (i + 1); // 加权求和
+      sum += baseSN.codeUnitAt(i);
     }
     
-    // 转 Base36（0-9, A-Z）
-    final checksum = sum.toRadixString(36).toUpperCase();
+    // 转 Base36（0-9, A-Z），取模确保不超过4位
+    return _toBase36(sum % (36 * 36 * 36 * 36), 4);
+  }
+  
+  /// 将数字转换为Base36字符串
+  String _toBase36(int number, int length) {
+    const base36Chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     
-    // 补齐到 4 位
-    return checksum.padLeft(4, '0').substring(checksum.length > 4 ? checksum.length - 4 : 0);
+    if (number == 0) return '0' * length;
+    
+    String result = '';
+    while (number > 0) {
+      result = base36Chars[number % 36] + result;
+      number ~/= 36;
+    }
+    
+    return result.padLeft(length, '0');
   }
 
   /// 验证 SN 码格式
