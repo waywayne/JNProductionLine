@@ -106,12 +106,14 @@ class SNManagerService {
     String? btMac,
     String? hardwareVersion,
   }) async {
+    final now = DateTime.now();
     final record = SNRecord(
       sn: sn,
       wifiMac: wifiMac,
       btMac: btMac,
       hardwareVersion: hardwareVersion ?? 'V1.0',
-      createdAt: DateTime.now().toIso8601String(),
+      createdAt: now,
+      updatedAt: now,
     );
     
     _snRecords[sn] = record;
