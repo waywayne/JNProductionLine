@@ -7741,6 +7741,26 @@ class TestState extends ChangeNotifier {
       
       _logState?.success('✅ SN码读取成功: $snCode', type: LogType.debug);
       
+      // 验证SN码格式
+      if (!_snManager.validateSN(snCode)) {
+        _logState?.warning('⚠️ SN码格式无效或校验失败', type: LogType.debug);
+        _logState?.info('   读取的SN: $snCode', type: LogType.debug);
+        _logState?.info('   SN码长度: ${snCode.length} (应为19位)', type: LogType.debug);
+        
+        // 检查是否包含非法字符
+        final hasInvalidChars = !RegExp(r'^[0-9A-Z]+$').hasMatch(snCode);
+        if (hasInvalidChars) {
+          _logState?.warning('   ⚠️ SN码包含非法字符（应只包含数字和大写字母）', type: LogType.debug);
+        }
+        
+        _logState?.info('   将在下一步写入新的有效SN码', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        
+        // 清空当前设备标识，强制生成新SN
+        _currentDeviceIdentity = null;
+        return true;
+      }
+      
       // 查询数据库，检查SN是否已存在
       final existingRecord = _snManager.querySN(snCode);
       
