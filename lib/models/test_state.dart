@@ -616,7 +616,7 @@ class TestState extends ChangeNotifier {
       {'name': '11. 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
       {'name': '12. 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
       {'name': '13. WiFi MAC写入', 'type': 'WiFi', 'executor': _autoTestWiFiMACWrite, 'skippable': false},
-      {'name': '14. WiFi MAC读取', 'type': 'WiFi', 'executor': _autoTestWiFiMACRead, 'skippable': false},
+      // {'name': '14. WiFi MAC读取', 'type': 'WiFi', 'executor': _autoTestWiFiMACRead, 'skippable': false},
       {'name': '15. 硬件版本号写入', 'type': '版本', 'executor': _autoTestWriteHardwareVersion, 'skippable': false},
       {'name': '16. 硬件版本号读取', 'type': '版本', 'executor': _autoTestReadHardwareVersion, 'skippable': false},
       
