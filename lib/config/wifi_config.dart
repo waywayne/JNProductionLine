@@ -1,11 +1,13 @@
+import 'test_config.dart';
+
 /// WiFi测试配置类
 /// 包含WiFi测试相关的配置参数
 class WiFiConfig {
-  /// 默认SSID（可以从配置文件读取）
-  static String defaultSSID = '';
+  /// 默认SSID（从配置文件读取）
+  static String get defaultSSID => TestConfig.wifiSsid;
   
-  /// 默认密码（可以从配置文件读取）
-  static String defaultPassword = '';
+  /// 默认密码（从配置文件读取）
+  static String get defaultPassword => TestConfig.wifiPassword;
   
   /// WiFi测试选项常量
   static const int optStartTest = 0x00;      // 开始测试

@@ -23,6 +23,11 @@ class ProductionConfig {
   static const String _keyTouchThreshold = 'touch_threshold';
   static const String _keyEmmcMinCapacityGb = 'emmc_min_capacity_gb';
   static const String _keyGpibAddress = 'gpib_address';
+  static const String _keyWifiSsid = 'wifi_ssid';
+  static const String _keyWifiPassword = 'wifi_password';
+  static const String _keyProductLine = 'product_line';
+  static const String _keyFactory = 'factory';
+  static const String _keyProductionLine = 'production_line';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -37,6 +42,11 @@ class ProductionConfig {
   static const int defaultTouchThreshold = 500;
   static const double defaultEmmcMinCapacityGb = 1.0; // 默认1GB
   static const String defaultGpibAddress = 'GPIB0::5::INSTR';
+  static const String defaultWifiSsid = '';  // 默认为空，需要用户配置
+  static const String defaultWifiPassword = '';  // 默认为空，需要用户配置
+  static const String defaultProductLine = '637';  // 默认 Kanaan-K2
+  static const String defaultFactory = '1';  // 默认比亚迪
+  static const String defaultProductionLine = '1';  // 默认产线1
 
   /// 初始化配置
   Future<void> init() async {
@@ -117,6 +127,36 @@ class ProductionConfig {
     await _prefs?.setString(_keyGpibAddress, value);
   }
 
+  // ========== WiFi SSID ==========
+  String get wifiSsid => _prefs?.getString(_keyWifiSsid) ?? defaultWifiSsid;
+  Future<void> setWifiSsid(String value) async {
+    await _prefs?.setString(_keyWifiSsid, value);
+  }
+
+  // ========== WiFi 密码 ==========
+  String get wifiPassword => _prefs?.getString(_keyWifiPassword) ?? defaultWifiPassword;
+  Future<void> setWifiPassword(String value) async {
+    await _prefs?.setString(_keyWifiPassword, value);
+  }
+
+  // ========== 产品线代码 ==========
+  String get productLine => _prefs?.getString(_keyProductLine) ?? defaultProductLine;
+  Future<void> setProductLine(String value) async {
+    await _prefs?.setString(_keyProductLine, value);
+  }
+
+  // ========== 工厂代码 ==========
+  String get factory => _prefs?.getString(_keyFactory) ?? defaultFactory;
+  Future<void> setFactory(String value) async {
+    await _prefs?.setString(_keyFactory, value);
+  }
+
+  // ========== 产线代码 ==========
+  String get productionLine => _prefs?.getString(_keyProductionLine) ?? defaultProductionLine;
+  Future<void> setProductionLine(String value) async {
+    await _prefs?.setString(_keyProductionLine, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -131,6 +171,11 @@ class ProductionConfig {
     await setTouchThreshold(defaultTouchThreshold);
     await setEmmcMinCapacityGb(defaultEmmcMinCapacityGb);
     await setGpibAddress(defaultGpibAddress);
+    await setWifiSsid(defaultWifiSsid);
+    await setWifiPassword(defaultWifiPassword);
+    await setProductLine(defaultProductLine);
+    await setFactory(defaultFactory);
+    await setProductionLine(defaultProductionLine);
   }
 
   /// 获取所有配置的摘要
@@ -147,6 +192,11 @@ class ProductionConfig {
       'Touch阈值变化量': '>$touchThreshold',
       'EMMC最小容量': '≥${emmcMinCapacityGb}GB',
       'GPIB地址': gpibAddress,
+      'WiFi SSID': wifiSsid.isEmpty ? '(未配置)' : wifiSsid,
+      'WiFi 密码': wifiPassword.isEmpty ? '(未配置)' : '******',
+      '产品线': productLine,
+      '工厂': factory,
+      '产线': productionLine,
     };
   }
 }

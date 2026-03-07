@@ -89,4 +89,12 @@ class TestConfig {
   
   /// EMMC最小容量阈值 (MB) - 保持兼容性
   static const int emmcMinCapacityMb = 100;
+  
+  // ==================== WiFi 配置 ====================
+  
+  /// WiFi SSID
+  static String get wifiSsid => _prodConfig.wifiSsid;
+  
+  /// WiFi 密码
+  static String get wifiPassword => _prodConfig.wifiPassword;
 }

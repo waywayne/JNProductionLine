@@ -31,6 +31,7 @@ class ProductionTestCommands {
   static const int cmdPowerConsumption = 0x0F; // 功耗测试
   static const int cmdReadHardwareVersion = 0xFB; // 硬件版本号读取
   static const int cmdWriteHardwareVersion = 0xFC; // 硬件版本号写入
+  static const int cmdReadSN = 0xFD; // SN码读取
   static const int cmdWriteSN = 0xFE; // SN码写入
   static const int cmdEndTest = 0xFF; // 产测结束
   
@@ -300,6 +301,46 @@ class ProductionTestCommands {
       if (nameBytes.isEmpty) return null;
       
       return String.fromCharCodes(nameBytes);
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  /// Create read SN command (0xFD)
+  /// SN码读取 - CMD 0xFD
+  static Uint8List createReadSNCommand() {
+    return Uint8List.fromList([cmdReadSN]);
+  }
+  
+  /// Parse read SN response
+  /// 响应格式：[CMD 0xFD] + [SN码字符串] + [\0]
+  /// 返回读取到的SN码
+  static String? parseReadSNResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    // 检查第一个字节是否为0xFD
+    if (payload[0] != cmdReadSN) return null;
+    
+    // 提取SN码（跳过CMD字节）
+    if (payload.length < 2) return null;
+    
+    try {
+      // 将字节转换为字符串
+      var snBytes = payload.sublist(1);
+      
+      // 移除末尾的null终止符（如果存在）
+      if (snBytes.isNotEmpty && snBytes.last == 0x00) {
+        snBytes = snBytes.sublist(0, snBytes.length - 1);
+      }
+      
+      final sn = String.fromCharCodes(snBytes);
+      
+      // 如果SN为空或全是0，返回null表示未写入
+      if (sn.isEmpty || sn.replaceAll(String.fromCharCode(0), '').isEmpty) {
+        return null;
+      }
+      
+      return sn;
     } catch (e) {
       return null;
     }

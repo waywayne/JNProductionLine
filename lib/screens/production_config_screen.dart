@@ -27,6 +27,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _touchThresholdController;
   late TextEditingController _emmcMinCapacityController;
   late TextEditingController _gpibAddressController;
+  late TextEditingController _wifiSsidController;
+  late TextEditingController _wifiPasswordController;
 
   @override
   void initState() {
@@ -47,6 +49,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _touchThresholdController = TextEditingController(text: _config.touchThreshold.toString());
     _emmcMinCapacityController = TextEditingController(text: _config.emmcMinCapacityGb.toString());
     _gpibAddressController = TextEditingController(text: _config.gpibAddress);
+    _wifiSsidController = TextEditingController(text: _config.wifiSsid);
+    _wifiPasswordController = TextEditingController(text: _config.wifiPassword);
   }
 
   @override
@@ -63,6 +67,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _touchThresholdController.dispose();
     _emmcMinCapacityController.dispose();
     _gpibAddressController.dispose();
+    _wifiSsidController.dispose();
+    _wifiPasswordController.dispose();
     super.dispose();
   }
 
@@ -80,6 +86,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setTouchThreshold(int.parse(_touchThresholdController.text));
       await _config.setEmmcMinCapacityGb(double.parse(_emmcMinCapacityController.text));
       await _config.setGpibAddress(_gpibAddressController.text);
+      await _config.setWifiSsid(_wifiSsidController.text);
+      await _config.setWifiPassword(_wifiPasswordController.text);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -304,6 +312,30 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               },
               helperText: '程控电源的GPIB地址，用于电流测试',
             ),
+            const SizedBox(height: 24),
+
+            // WiFi配置
+            _buildSectionTitle('6. WiFi测试配置'),
+            _buildTextField(
+              controller: _wifiSsidController,
+              label: 'WiFi SSID',
+              hint: '输入测试用的WiFi名称',
+              suffix: '',
+              icon: Icons.wifi,
+              inputType: TextInputType.text,
+              helperText: 'WiFi控制测试中连接固定热点使用的SSID',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _wifiPasswordController,
+              label: 'WiFi 密码',
+              hint: '输入WiFi密码',
+              suffix: '',
+              icon: Icons.lock,
+              inputType: TextInputType.text,
+              helperText: 'WiFi控制测试中连接固定热点使用的密码',
+              obscureText: true,
+            ),
             const SizedBox(height: 32),
 
             // 保存按钮
@@ -347,9 +379,11 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     TextInputType? inputType,
     String? Function(String?)? validator,
     String? helperText,
+    bool obscureText = false,
   }) {
     return TextFormField(
       controller: controller,
+      obscureText: obscureText,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
