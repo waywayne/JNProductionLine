@@ -23,9 +23,9 @@ class SNManagerService {
   static const String btMacStart = '48:08:EB:60:00:50';
   static const String btMacEnd = '48:08:EB:6F:FF:FF';
   
-  // 当前分配的 MAC 地址索引
-  int _currentWifiMacIndex = 0;
-  int _currentBtMacIndex = 0;
+  // 当前分配的 MAC 地址索引 (从 0x50 = 80 开始)
+  int _currentWifiMacIndex = 0x50;
+  int _currentBtMacIndex = 0x50;
 
   /// 初始化服务
   Future<void> init() async {

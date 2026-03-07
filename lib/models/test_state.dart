@@ -6205,62 +6205,56 @@ class TestState extends ChangeNotifier {
 
   /// 3.1 物奇功耗测试 (只开启物奇) - 使用新CMD 0x0F
   Future<bool> _autoTestWuqiPower() async {
-    try {
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('🔌 开始物奇功耗测试', type: LogType.debug);
-      _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      
-      // 1. 发送功耗测试命令：只物奇（只在第一次执行时发送）
-      _logState?.info('📤 发送功耗测试命令：只物奇', type: LogType.debug);
-      final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
-        ProductionTestCommands.powerConsumptionOptWuqiOnly
-      );
-      
-      final powerResponse = await _serialService.sendCommandAndWaitResponse(
-        powerCommand,
-        timeout: TestConfig.defaultTimeout,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-      
-      if (powerResponse == null || powerResponse.containsKey('error')) {
-        _logState?.error('❌ 电源控制命令发送失败（通信失败，将重试）', type: LogType.debug);
-        throw Exception('通信失败'); // 抛出异常以触发重试
-      }
-      
-      final powerPayload = powerResponse['payload'] as Uint8List?;
-      if (powerPayload != null) {
-        final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
-        if (result == null || !(result['success'] as bool)) {
-          _logState?.error('❌ 物奇功耗测试启动失败（通信失败，将重试）', type: LogType.debug);
-          throw Exception('通信失败'); // 抛出异常以触发重试
-        }
-        _logState?.success('✅ 物奇功耗测试已启动', type: LogType.debug);
-      }
-      
-      // 2. 等待设备稳定（响应成功后等待5秒再测试电流）
-      _logState?.info('⏳ 等待设备稳定 (5秒)...', type: LogType.debug);
-      await Future.delayed(const Duration(seconds: 5));
-      
-      // 3. 检查GPIB是否就绪
-      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
-        _logState?.error('❌ GPIB设备未就绪（通信失败，将重试）', type: LogType.debug);
-        throw Exception('GPIB未就绪'); // 抛出异常以触发重试
-      }
-      
-      if (!_isGpibReady) {
-        _logState?.warning('⚠️  GPIB未就绪，跳过物奇功耗测试', type: LogType.debug);
-        return true;
-      }
-      
-      // 4. 测量电流（支持重试，阈值失败时只重新测量，不重新发送命令）
-      return await _measureWuqiPowerWithRetry();
-      
-    } catch (e) {
-      _logState?.error('❌ 物奇功耗测试异常: $e', type: LogType.debug);
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    _logState?.info('🔌 开始物奇功耗测试', type: LogType.debug);
+    _logState?.info('   阈值: ≤ ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    
+    // 1. 发送功耗测试命令：只物奇
+    _logState?.info('📤 发送功耗测试命令：只物奇', type: LogType.debug);
+    final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
+      ProductionTestCommands.powerConsumptionOptWuqiOnly
+    );
+    
+    final powerResponse = await _serialService.sendCommandAndWaitResponse(
+      powerCommand,
+      timeout: TestConfig.defaultTimeout,
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (powerResponse == null || powerResponse.containsKey('error')) {
+      _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
       return false;
     }
+    
+    final powerPayload = powerResponse['payload'] as Uint8List?;
+    if (powerPayload != null) {
+      final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
+      if (result == null || !(result['success'] as bool)) {
+        _logState?.error('❌ 物奇功耗测试启动失败', type: LogType.debug);
+        return false;
+      }
+      _logState?.success('✅ 物奇功耗测试已启动', type: LogType.debug);
+    }
+    
+    // 2. 等待设备稳定（响应成功后等待5秒再测试电流）
+    _logState?.info('⏳ 等待设备稳定 (5秒)...', type: LogType.debug);
+    await Future.delayed(const Duration(seconds: 5));
+    
+    // 3. 检查GPIB是否就绪
+    if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+      _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+      return false;
+    }
+    
+    if (!_isGpibReady) {
+      _logState?.warning('⚠️  GPIB未就绪，跳过物奇功耗测试', type: LogType.debug);
+      return true;
+    }
+    
+    // 4. 测量电流（支持内部重试，阈值失败时只重新测量）
+    return await _measureWuqiPowerWithRetry();
   }
   
   /// 物奇功耗电流测量（支持阈值失败重试）
@@ -6338,62 +6332,56 @@ class TestState extends ChangeNotifier {
 
   /// 3.2 ISP工作功耗测试 (开启ISP) - 使用新CMD 0x0F
   Future<bool> _autoTestIspWorkingPower() async {
-    try {
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('🔌 开始ISP工作功耗测试', type: LogType.debug);
-      _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      
-      // 1. 发送功耗测试命令：ISP功耗测试
-      _logState?.info('📤 发送功耗测试命令：ISP功耗测试', type: LogType.debug);
-      final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
-        ProductionTestCommands.powerConsumptionOptIsp
-      );
-      
-      final powerResponse = await _serialService.sendCommandAndWaitResponse(
-        powerCommand,
-        timeout: TestConfig.defaultTimeout,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-      
-      if (powerResponse == null || powerResponse.containsKey('error')) {
-        _logState?.error('❌ 电源控制命令发送失败（通信失败，将重试）', type: LogType.debug);
-        throw Exception('通信失败'); // 抛出异常以触发重试
-      }
-      
-      final powerPayload = powerResponse['payload'] as Uint8List?;
-      if (powerPayload != null) {
-        final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
-        if (result == null || !(result['success'] as bool)) {
-          _logState?.error('❌ ISP功耗测试启动失败（通信失败，将重试）', type: LogType.debug);
-          throw Exception('通信失败'); // 抛出异常以触发重试
-        }
-        _logState?.success('✅ ISP功耗测试已启动', type: LogType.debug);
-      }
-      
-      // 2. 等待设备稳定（响应成功后等待5秒再测试电流）
-      _logState?.info('⏳ 等待设备稳定 (5秒)...', type: LogType.debug);
-      await Future.delayed(const Duration(seconds: 5));
-      
-      // 3. 检查GPIB是否就绪
-      if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
-        _logState?.error('❌ GPIB设备未就绪（通信失败，将重试）', type: LogType.debug);
-        throw Exception('GPIB未就绪'); // 抛出异常以触发重试
-      }
-      
-      if (!_isGpibReady) {
-        _logState?.warning('⚠️  GPIB未就绪，跳过ISP工作功耗测试', type: LogType.debug);
-        return true;
-      }
-      
-      // 4. 测量电流（支持重试，阈值失败时只重新测量，不重新发送命令）
-      return await _measureIspPowerWithRetry();
-      
-    } catch (e) {
-      _logState?.error('❌ ISP工作功耗测试异常: $e', type: LogType.debug);
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    _logState?.info('🔌 开始ISP工作功耗测试', type: LogType.debug);
+    _logState?.info('   阈值: ≤ ${TestConfig.ispWorkingPowerThresholdMa} mA', type: LogType.debug);
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    
+    // 1. 发送功耗测试命令：ISP功耗测试
+    _logState?.info('📤 发送功耗测试命令：ISP功耗测试', type: LogType.debug);
+    final powerCommand = ProductionTestCommands.createPowerConsumptionCommand(
+      ProductionTestCommands.powerConsumptionOptIsp
+    );
+    
+    final powerResponse = await _serialService.sendCommandAndWaitResponse(
+      powerCommand,
+      timeout: TestConfig.defaultTimeout,
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (powerResponse == null || powerResponse.containsKey('error')) {
+      _logState?.error('❌ 电源控制命令发送失败', type: LogType.debug);
       return false;
     }
+    
+    final powerPayload = powerResponse['payload'] as Uint8List?;
+    if (powerPayload != null) {
+      final result = ProductionTestCommands.parsePowerConsumptionResponse(powerPayload);
+      if (result == null || !(result['success'] as bool)) {
+        _logState?.error('❌ ISP功耗测试启动失败', type: LogType.debug);
+        return false;
+      }
+      _logState?.success('✅ ISP功耗测试已启动', type: LogType.debug);
+    }
+    
+    // 2. 等待设备稳定（响应成功后等待5秒再测试电流）
+    _logState?.info('⏳ 等待设备稳定 (5秒)...', type: LogType.debug);
+    await Future.delayed(const Duration(seconds: 5));
+    
+    // 3. 检查GPIB是否就绪
+    if (!_isGpibReady && !AutomationTestConfig.skipGpibTests && !AutomationTestConfig.skipGpibReadyCheck) {
+      _logState?.error('❌ GPIB设备未就绪', type: LogType.debug);
+      return false;
+    }
+    
+    if (!_isGpibReady) {
+      _logState?.warning('⚠️  GPIB未就绪，跳过ISP工作功耗测试', type: LogType.debug);
+      return true;
+    }
+    
+    // 4. 测量电流（支持内部重试，阈值失败时只重新测量）
+    return await _measureIspPowerWithRetry();
   }
   
   /// ISP功耗电流测量（支持阈值失败重试）
@@ -6888,16 +6876,25 @@ class TestState extends ChangeNotifier {
     try {
       _logState?.info('📝 开始蓝牙MAC地址写入', type: LogType.debug);
       
-      if (_generatedBluetoothMAC == null || _generatedBluetoothMAC!.length != 6) {
+      // 从设备标识中获取蓝牙 MAC 地址
+      final bluetoothMacString = _currentDeviceIdentity?['bluetoothMac'];
+      if (bluetoothMacString == null || bluetoothMacString.isEmpty) {
         _logState?.error('❌ 蓝牙MAC地址未生成或格式错误', type: LogType.debug);
         return false;
       }
       
-      final macString = _generatedBluetoothMAC!.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
-      _logState?.info('📱 写入MAC地址: $macString', type: LogType.debug);
+      // 将字符串格式的 MAC 地址转换为字节数组
+      // 例如: "48:08:EB:60:00:50" -> [0x48, 0x08, 0xEB, 0x60, 0x00, 0x50]
+      final macBytes = bluetoothMacString.split(':').map((hex) => int.parse(hex, radix: 16)).toList();
+      if (macBytes.length != 6) {
+        _logState?.error('❌ 蓝牙MAC地址格式错误', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('📱 写入MAC地址: $bluetoothMacString', type: LogType.debug);
       
       // 创建命令：CMD 0x0D + OPT 0x00 + 6字节MAC地址
-      final command = ProductionTestCommands.createBluetoothMACCommand(0x00, _generatedBluetoothMAC!);
+      final command = ProductionTestCommands.createBluetoothMACCommand(0x00, Uint8List.fromList(macBytes));
       
       final response = await _serialService.sendCommandAndWaitResponse(
         command,
@@ -6924,10 +6921,15 @@ class TestState extends ChangeNotifier {
     try {
       _logState?.info('📖 开始蓝牙MAC地址读取', type: LogType.debug);
       
-      if (_generatedBluetoothMAC == null || _generatedBluetoothMAC!.length != 6) {
+      // 从设备标识中获取期望的蓝牙 MAC 地址
+      final bluetoothMacString = _currentDeviceIdentity?['bluetoothMac'];
+      if (bluetoothMacString == null || bluetoothMacString.isEmpty) {
         _logState?.error('❌ 本地蓝牙MAC地址未生成', type: LogType.debug);
         return false;
       }
+      
+      // 将字符串格式的 MAC 地址转换为字节数组
+      final expectedMacBytes = bluetoothMacString.split(':').map((hex) => int.parse(hex, radix: 16)).toList();
       
       // 创建命令：CMD 0x0D + OPT 0x01（读取MAC地址）
       final command = ProductionTestCommands.createBluetoothMACCommand(0x01, []);
@@ -6947,18 +6949,17 @@ class TestState extends ChangeNotifier {
           if (payload.length >= 7 && payload[0] == 0x0D) {
             final readMAC = payload.sublist(1, 7);
             final readMACString = readMAC.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
-            final expectedMACString = _generatedBluetoothMAC!.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
             
             _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
             _logState?.info('📱 MAC地址对比:', type: LogType.debug);
-            _logState?.info('   写入的MAC: $expectedMACString', type: LogType.debug);
+            _logState?.info('   写入的MAC: $bluetoothMacString', type: LogType.debug);
             _logState?.info('   读取的MAC: $readMACString', type: LogType.debug);
             _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
             
             // 验证MAC地址是否一致
             bool isMatch = true;
             for (int i = 0; i < 6; i++) {
-              if (readMAC[i] != _generatedBluetoothMAC![i]) {
+              if (readMAC[i] != expectedMacBytes[i]) {
                 isMatch = false;
                 break;
               }
