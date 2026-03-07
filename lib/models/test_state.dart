@@ -406,6 +406,19 @@ class TestState extends ChangeNotifier {
       _logState?.info('   📅 生产日期: ${_currentDeviceIdentity!['productionDate']}', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
+      // 同时保存到 SNManagerService 以便在 SN 记录管理页面显示
+      try {
+        await _snManager.addRecord(
+          sn: _currentDeviceIdentity!['sn']!,
+          wifiMac: _currentDeviceIdentity!['wifiMac'],
+          btMac: _currentDeviceIdentity!['bluetoothMac'],
+          hardwareVersion: _currentDeviceIdentity!['hardwareVersion'] ?? 'V1.0',
+        );
+        _logState?.info('   💾 已保存到SN记录数据库', type: LogType.debug);
+      } catch (e) {
+        _logState?.warning('   ⚠️  保存到SN记录数据库失败: $e', type: LogType.debug);
+      }
+      
       notifyListeners();
     } catch (e) {
       _logState?.error('生成设备标识信息失败: $e', type: LogType.debug);

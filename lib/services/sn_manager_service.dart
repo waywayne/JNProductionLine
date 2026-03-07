@@ -61,8 +61,8 @@ class SNManagerService {
 
   /// 更新 MAC 地址索引（找到最大的已分配索引）
   void _updateMacIndexes() {
-    int maxWifiIndex = 0;
-    int maxBtIndex = 0;
+    int maxWifiIndex = 0x50 - 1; // 初始值为起始索引 - 1
+    int maxBtIndex = 0x50 - 1;
     
     for (final record in _snRecords.values) {
       if (record.wifiMac != null) {
@@ -75,6 +75,7 @@ class SNManagerService {
       }
     }
     
+    // 下一个可用索引 = 最大索引 + 1，但不能小于起始索引 0x50
     _currentWifiMacIndex = maxWifiIndex + 1;
     _currentBtMacIndex = maxBtIndex + 1;
   }
@@ -96,6 +97,30 @@ class SNManagerService {
     } catch (e) {
       print('❌ 保存 SN 记录失败: $e');
     }
+  }
+
+  /// 添加新的 SN 记录
+  Future<void> addRecord({
+    required String sn,
+    String? wifiMac,
+    String? btMac,
+    String? hardwareVersion,
+  }) async {
+    final record = SNRecord(
+      sn: sn,
+      wifiMac: wifiMac,
+      btMac: btMac,
+      hardwareVersion: hardwareVersion ?? 'V1.0',
+      createdAt: DateTime.now().toIso8601String(),
+    );
+    
+    _snRecords[sn] = record;
+    
+    // 更新 MAC 地址索引
+    _updateMacIndexes();
+    
+    // 保存到文件
+    await _saveRecords();
   }
 
   /// 生成 SN 码
