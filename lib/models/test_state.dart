@@ -5158,7 +5158,7 @@ class TestState extends ChangeNotifier {
       {'name': '13. 生成设备标识', 'type': '标识', 'executor': _autoTestGenerateDeviceId, 'skippable': false},
       {'name': '14. 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
       {'name': '15. 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
-      {'name': '16. SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
+      // {'name': '16. SPP蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestSppBluetooth, 'skippable': false},
       {'name': '17. WiFi测试', 'type': 'WiFi', 'executor': _autoTestWiFi, 'skippable': false},
       {'name': '18. Sensor测试', 'type': 'Sensor', 'executor': _autoTestSensor, 'skippable': false},
       {'name': '19. RTC设置时间测试', 'type': 'RTC', 'executor': _autoTestRTCSet, 'skippable': false},
