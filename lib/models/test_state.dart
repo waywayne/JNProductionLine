@@ -7421,24 +7421,27 @@ class TestState extends ChangeNotifier {
       _showBluetoothDialog = true;
       notifyListeners();
       
-      // 步骤1: 生成蓝牙名称
+      // 步骤1: 生成蓝牙名称（使用蓝牙 MAC 地址后四位）
       _bluetoothTestStep = '正在生成蓝牙名称...';
       notifyListeners();
       
-      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['sn'] == null) {
-        _bluetoothTestStep = '❌ 错误：未找到SN码';
+      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['bluetoothMac'] == null) {
+        _bluetoothTestStep = '❌ 错误：未找到蓝牙MAC地址';
         notifyListeners();
-        _logState?.error('❌ 蓝牙测试失败：未找到SN码 ', type: LogType.debug);
+        _logState?.error('❌ 蓝牙测试失败：未找到蓝牙MAC地址', type: LogType.debug);
         await Future.delayed(const Duration(seconds: 3)); // 显示错误信息3秒
         return false;
       }
       
-      final snCode = _currentDeviceIdentity!['sn']!;
-      // 取SN码后四位
-      final last4Digits = snCode.length >= 4 ? snCode.substring(snCode.length - 4) : snCode;
+      final bluetoothMac = _currentDeviceIdentity!['bluetoothMac']!;
+      // 移除分隔符并取后四位
+      // 例如: "48:08:EB:60:00:50" -> "480BEB600050" -> "0050"
+      final macClean = bluetoothMac.replaceAll(':', '').replaceAll('-', '');
+      final last4Digits = macClean.length >= 4 ? macClean.substring(macClean.length - 4) : macClean;
       _bluetoothNameToSet = 'Kanaan-$last4Digits';
       
-      _logState?.info('   蓝牙名称: $_bluetoothNameToSet', type: LogType.debug);
+      _logState?.info('   蓝牙MAC: $bluetoothMac', type: LogType.debug);
+      _logState?.info('   蓝牙名称: $_bluetoothNameToSet (使用MAC后四位)', type: LogType.debug);
       
       // 步骤2: 设置蓝牙名称
       _bluetoothTestStep = '正在设置蓝牙名称...';
