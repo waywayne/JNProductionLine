@@ -1062,6 +1062,50 @@ class ProductionTestCommands {
     }
   }
   
+  /// Create WiFi MAC command
+  /// CMD: 0x04 (cmdControlWifi)
+  /// opt: 0x04=写入WiFi MAC地址, 0x03=读取WiFi MAC地址
+  /// macBytes: MAC地址字节数组（6字节），仅在写入时需要
+  static Uint8List createWiFiMACCommand(int opt, List<int> macBytes) {
+    if (opt == 0x04) {
+      // 写入WiFi MAC地址：CMD 0x04 + OPT 0x04 + 6字节MAC
+      if (macBytes.length != 6) {
+        throw ArgumentError('WiFi MAC地址必须是6字节');
+      }
+      final command = Uint8List(8);
+      command[0] = cmdControlWifi; // 0x04
+      command[1] = opt; // 0x04
+      for (int i = 0; i < 6; i++) {
+        command[2 + i] = macBytes[i];
+      }
+      return command;
+    } else if (opt == 0x03) {
+      // 读取WiFi MAC地址：CMD 0x04 + OPT 0x03
+      final command = Uint8List(2);
+      command[0] = cmdControlWifi; // 0x04
+      command[1] = opt; // 0x03
+      return command;
+    } else {
+      throw ArgumentError('无效的WiFi MAC操作码: $opt (应为0x03或0x04)');
+    }
+  }
+  
+  /// Parse WiFi MAC response
+  /// 响应格式：CMD 0x04 + 6字节MAC地址
+  static String? parseWiFiMACResponse(Uint8List payload) {
+    if (payload.isEmpty || payload[0] != cmdControlWifi) {
+      return null;
+    }
+    
+    if (payload.length >= 7) {
+      // 提取6字节MAC地址
+      final macBytes = payload.sublist(1, 7);
+      return macBytes.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(':');
+    }
+    
+    return null;
+  }
+  
   /// Create power consumption test command (0x0F)
   /// 功耗测试命令 - CMD 0x0F + OPT
   /// [opt] - 测试选项：

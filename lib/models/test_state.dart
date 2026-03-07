@@ -10,6 +10,7 @@ import '../services/python_bluetooth_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
+import '../services/sn_manager_service.dart';
 import 'log_state.dart';
 import '../config/test_config.dart';
 import '../config/production_config.dart';
@@ -137,6 +138,7 @@ class TestState extends ChangeNotifier {
   final SerialService _serialService = SerialService();
   final SppService _sppService = SppService();
   final PythonBluetoothService _pythonBtService = PythonBluetoothService();
+  final SNManagerService _snManager = SNManagerService();
   
   String? _selectedPort;
   bool _isRunningTest = false;
@@ -7695,6 +7697,88 @@ class TestState extends ChangeNotifier {
     }
   }
 
+  /// 30. SN码读取
+  Future<bool> _autoTestReadSN() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📖 开始SN码读取', type: LogType.debug);
+      
+      // 创建SN码读取命令
+      final readSNCmd = ProductionTestCommands.createReadSNCommand();
+      final cmdHex = readSNCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送SN码读取命令: [$cmdHex]', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        readSNCmd,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.warning('⚠️ SN码读取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _logState?.info('   设备可能未写入SN码，将在下一步写入', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true; // 返回true继续流程，在写入步骤处理
+      }
+      
+      // 解析响应中的SN码
+      final payload = response['payload'] as Uint8List?;
+      if (payload == null) {
+        _logState?.warning('⚠️ SN码读取响应无payload', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      }
+      
+      final snCode = ProductionTestCommands.parseReadSNResponse(payload);
+      if (snCode == null || snCode.isEmpty) {
+        _logState?.warning('⚠️ 设备未写入SN码', type: LogType.debug);
+        _logState?.info('   将在下一步写入新的SN码', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      }
+      
+      _logState?.success('✅ SN码读取成功: $snCode', type: LogType.debug);
+      
+      // 查询数据库，检查SN是否已存在
+      final existingRecord = _snManager.querySN(snCode);
+      
+      if (existingRecord != null) {
+        // SN已存在，使用已有的MAC地址
+        _logState?.info('📋 SN码已存在于数据库中', type: LogType.debug);
+        _logState?.info('   WiFi MAC: ${existingRecord.wifiMac}', type: LogType.debug);
+        _logState?.info('   蓝牙 MAC: ${existingRecord.btMac}', type: LogType.debug);
+        _logState?.info('   硬件版本: ${existingRecord.hardwareVersion}', type: LogType.debug);
+        _logState?.info('   创建时间: ${existingRecord.createdAt}', type: LogType.debug);
+        
+        // 更新当前设备标识信息，使用已有的MAC地址
+        _currentDeviceIdentity = {
+          'sn': snCode,
+          'wifiMac': existingRecord.wifiMac ?? '',
+          'bluetoothMac': existingRecord.btMac ?? '',
+          'hardwareVersion': existingRecord.hardwareVersion,
+        };
+        
+        _logState?.success('✅ 已加载设备信息，将使用已有的MAC地址', type: LogType.debug);
+      } else {
+        // SN不存在，需要在写入步骤生成新的MAC地址
+        _logState?.info('📋 SN码不在数据库中，将在写入步骤分配新的MAC地址', type: LogType.debug);
+        
+        // 暂时只保存SN码，MAC地址将在写入步骤生成
+        _currentDeviceIdentity = {
+          'sn': snCode,
+        };
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return true;
+    } catch (e) {
+      _logState?.error('SN码读取异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
   /// 31. SN码写入
   Future<bool> _autoTestWriteSN() async {
     try {
@@ -7764,7 +7848,131 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 31. 结束产测
+  /// 32. WiFi MAC地址写入
+  Future<bool> _autoTestWiFiMACWrite() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📝 开始WiFi MAC地址写入', type: LogType.debug);
+      
+      // 检查是否有生成的WiFi MAC地址
+      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['wifiMac'] == null) {
+        _logState?.error('❌ WiFi MAC地址未生成', type: LogType.debug);
+        _logState?.info('   提示：请先生成设备标识', type: LogType.debug);
+        return false;
+      }
+      
+      final wifiMacString = _currentDeviceIdentity!['wifiMac']!;
+      _logState?.info('📡 写入WiFi MAC: $wifiMacString', type: LogType.debug);
+      
+      // 将MAC地址字符串转换为字节数组
+      // 格式: "48:08:EB:50:00:50" -> [0x48, 0x08, 0xEB, 0x50, 0x00, 0x50]
+      final macParts = wifiMacString.split(':');
+      if (macParts.length != 6) {
+        _logState?.error('❌ WiFi MAC地址格式错误', type: LogType.debug);
+        return false;
+      }
+      
+      final macBytes = macParts.map((part) => int.parse(part, radix: 16)).toList();
+      
+      // 创建WiFi MAC写入命令：CMD 0x04 + OPT 0x04 + 6字节MAC
+      final command = ProductionTestCommands.createWiFiMACCommand(0x04, macBytes);
+      final cmdHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送WiFi MAC写入命令: [$cmdHex]', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ WiFi MAC地址写入成功', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ WiFi MAC地址写入失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('WiFi MAC地址写入异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 33. WiFi MAC地址读取
+  Future<bool> _autoTestWiFiMACRead() async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📖 开始WiFi MAC地址读取', type: LogType.debug);
+      
+      // 检查是否有生成的WiFi MAC地址
+      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['wifiMac'] == null) {
+        _logState?.error('❌ 本地WiFi MAC地址未生成', type: LogType.debug);
+        return false;
+      }
+      
+      final expectedMacString = _currentDeviceIdentity!['wifiMac']!;
+      _logState?.info('📡 期望的WiFi MAC: $expectedMacString', type: LogType.debug);
+      
+      // 创建WiFi MAC读取命令：CMD 0x04 + OPT 0x03
+      final command = ProductionTestCommands.createWiFiMACCommand(0x03, []);
+      final cmdHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送WiFi MAC读取命令: [$cmdHex]', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        
+        if (payload != null && payload.isNotEmpty) {
+          // 解析读取到的MAC地址
+          final readMacString = ProductionTestCommands.parseWiFiMACResponse(payload);
+          
+          if (readMacString == null) {
+            _logState?.error('❌ WiFi MAC地址响应格式错误', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return false;
+          }
+          
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.info('📡 WiFi MAC地址对比:', type: LogType.debug);
+          _logState?.info('   写入的MAC: $expectedMacString', type: LogType.debug);
+          _logState?.info('   读取的MAC: $readMacString', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          
+          if (readMacString == expectedMacString) {
+            _logState?.success('✅ WiFi MAC地址读取成功，验证通过', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return true;
+          } else {
+            _logState?.error('❌ WiFi MAC地址不匹配', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return false;
+          }
+        } else {
+          _logState?.error('❌ WiFi MAC地址响应为空', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return false;
+        }
+      } else {
+        _logState?.error('❌ WiFi MAC地址读取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('WiFi MAC地址读取异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 34. 结束产测
   Future<bool> _autoTestPowerOff() async {
     try {
       _logState?.info('🔌 结束产测 - 检查测试结果', type: LogType.debug);
