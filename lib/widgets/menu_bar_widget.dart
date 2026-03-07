@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../screens/gpib_test_screen.dart';
 import '../screens/production_config_screen.dart';
+import '../screens/sn_records_screen.dart';
 import 'sn_mac_config_section.dart';
 
 class MenuBarWidget extends StatelessWidget {
@@ -31,6 +32,16 @@ class MenuBarWidget extends StatelessWidget {
             title: 'SN/MAC配置',
             onPressed: () {
               _showSNMacConfigDialog(context);
+            },
+          ),
+          _MenuButton(
+            title: 'SN记录管理',
+            icon: Icons.storage,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SNRecordsScreen()),
+              );
             },
           ),
           _MenuButton(
