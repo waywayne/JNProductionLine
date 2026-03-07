@@ -6972,14 +6972,14 @@ class TestState extends ChangeNotifier {
               return true;
             } else {
               _logState?.error('❌ 蓝牙MAC地址不匹配', type: LogType.debug);
-              _logState?.error('   写入的MAC: $expectedMACString', type: LogType.debug);
+              _logState?.error('   写入的MAC: $bluetoothMacString', type: LogType.debug);
               _logState?.error('   读取的MAC: $readMACString', type: LogType.debug);
               
               // 显示每个字节的差异
               final diff = StringBuffer('   差异详情: ');
               for (int i = 0; i < 6; i++) {
-                if (readMAC[i] != _generatedBluetoothMAC![i]) {
-                  diff.write('字节$i [写入:0x${_generatedBluetoothMAC![i].toRadixString(16).toUpperCase().padLeft(2, '0')} != 读取:0x${readMAC[i].toRadixString(16).toUpperCase().padLeft(2, '0')}] ');
+                if (readMAC[i] != expectedMacBytes[i]) {
+                  diff.write('字节$i [写入:0x${expectedMacBytes[i].toRadixString(16).toUpperCase().padLeft(2, '0')} != 读取:0x${readMAC[i].toRadixString(16).toUpperCase().padLeft(2, '0')}] ');
                 }
               }
               _logState?.error(diff.toString(), type: LogType.debug);
