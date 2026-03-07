@@ -7806,13 +7806,22 @@ class TestState extends ChangeNotifier {
         
         _logState?.success('✅ 已加载设备信息，将使用已有的MAC地址', type: LogType.debug);
       } else {
-        // SN不存在，需要在写入步骤生成新的MAC地址
-        _logState?.info('📋 SN码不在数据库中，将在写入步骤分配新的MAC地址', type: LogType.debug);
+        // SN不存在，生成新的设备标识（包括新的SN码和MAC地址）
+        _logState?.warning('⚠️ SN码不在数据库中', type: LogType.debug);
+        _logState?.info('   读取的SN: $snCode', type: LogType.debug);
+        _logState?.info('   将生成新的SN码和MAC地址覆盖设备', type: LogType.debug);
         
-        // 暂时只保存SN码，MAC地址将在写入步骤生成
-        _currentDeviceIdentity = {
-          'sn': snCode,
-        };
+        // 生成新的设备标识
+        await generateDeviceIdentity();
+        
+        if (_currentDeviceIdentity != null) {
+          _logState?.success('✅ 已生成新的设备标识', type: LogType.debug);
+          _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
+        } else {
+          _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
+        }
       }
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
