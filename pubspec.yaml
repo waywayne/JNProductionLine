@@ -15,6 +15,8 @@ dependencies:
   flutter_bluetooth_serial: ^0.4.0  # Android support
   flutter_bluetooth_classic_serial: ^1.3.1  # Windows support
   shared_preferences: ^2.2.2
+  path_provider: ^2.1.1
+  intl: ^0.18.1
 
 dev_dependencies:
   flutter_test:
