@@ -7734,7 +7734,20 @@ class TestState extends ChangeNotifier {
       final snCode = ProductionTestCommands.parseReadSNResponse(payload);
       if (snCode == null || snCode.isEmpty) {
         _logState?.warning('⚠️ 设备未写入SN码', type: LogType.debug);
-        _logState?.info('   将在下一步写入新的SN码', type: LogType.debug);
+        _logState?.info('   将生成新的SN码和MAC地址', type: LogType.debug);
+        
+        // 生成新的设备标识
+        await generateDeviceIdentity();
+        
+        if (_currentDeviceIdentity != null) {
+          _logState?.success('✅ 已生成新的设备标识', type: LogType.debug);
+          _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
+        } else {
+          _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
+        }
+        
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true;
       }
@@ -7753,11 +7766,21 @@ class TestState extends ChangeNotifier {
           _logState?.warning('   ⚠️ SN码包含非法字符（应只包含数字和大写字母）', type: LogType.debug);
         }
         
-        _logState?.info('   将在下一步写入新的有效SN码', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('   将生成新的有效SN码和MAC地址', type: LogType.debug);
         
-        // 清空当前设备标识，强制生成新SN
-        _currentDeviceIdentity = null;
+        // 生成新的设备标识
+        await generateDeviceIdentity();
+        
+        if (_currentDeviceIdentity != null) {
+          _logState?.success('✅ 已生成新的设备标识', type: LogType.debug);
+          _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
+        } else {
+          _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
+        }
+        
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true;
       }
       
