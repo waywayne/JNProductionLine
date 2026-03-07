@@ -7967,10 +7967,9 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 33. WiFi MAC地址读取
-  Future<bool> _autoTestWiFiMACRead() async {
+  /// 33. WiFi MAC地址读取（单次执行）
+  Future<bool> _autoTestWiFiMACReadSingle() async {
     try {
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📖 开始WiFi MAC地址读取', type: LogType.debug);
       
       // 检查是否有生成的WiFi MAC地址
@@ -8036,6 +8035,46 @@ class TestState extends ChangeNotifier {
       _logState?.error('WiFi MAC地址读取异常: $e', type: LogType.debug);
       return false;
     }
+  }
+
+  /// WiFi MAC地址读取（带重试逻辑）
+  Future<bool> _autoTestWiFiMACRead() async {
+    const maxRetries = 3;
+    
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          _logState?.warning('🔄 WiFi MAC读取重试 $attempt/$maxRetries', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+        
+        final result = await _autoTestWiFiMACReadSingle();
+        
+        if (result) {
+          if (attempt > 1) {
+            _logState?.success('✅ WiFi MAC地址读取成功 (第 $attempt 次尝试)', type: LogType.debug);
+          }
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return true;
+        } else {
+          if (attempt < maxRetries) {
+            _logState?.warning('⚠️  WiFi MAC读取失败，准备重试 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+          }
+        }
+      } catch (e) {
+        if (attempt < maxRetries) {
+          _logState?.warning('⚠️  WiFi MAC读取异常，准备重试 (尝试 $attempt/$maxRetries): $e', type: LogType.debug);
+        } else {
+          _logState?.error('❌ WiFi MAC读取失败 (已重试 $maxRetries 次): $e', type: LogType.debug);
+        }
+      }
+    }
+    
+    _logState?.error('❌ WiFi MAC地址读取失败，已达到最大重试次数', type: LogType.debug);
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    return false;
   }
 
   /// 34. 结束产测
