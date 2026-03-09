@@ -5757,7 +5757,7 @@ class TestState extends ChangeNotifier {
       _currentSPKNumber = spkNumber;
       
       // 发送SPK测试命令 (CMD 0x06, SPK号)
-      final testCommand = ProductionTestCommands.createControlSPKCommand(spkNumber, 0x00);
+      final testCommand = ProductionTestCommands.createControlSPKCommand(spkNumber);
       final commandHex = testCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📤 发送SPK测试命令: [$commandHex]', type: LogType.debug);
       _logState?.info('   CMD: 0x06, SPK号: 0x${spkNumber.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
