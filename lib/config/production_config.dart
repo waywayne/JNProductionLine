@@ -9,6 +9,7 @@ class ProductionConfig {
   ProductionConfig._internal();
 
   SharedPreferences? _prefs;
+  bool _isInitialized = false;
 
   // 配置键名
   static const String _keyHardwareVersion = 'hardware_version';
@@ -49,9 +50,42 @@ class ProductionConfig {
   static const String defaultProductionLine = '1';  // 默认产线1
 
   /// 初始化配置
+  /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
   Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
+    if (_isInitialized) {
+      print('⚠️  ProductionConfig 已经初始化，跳过重复初始化');
+      return;
+    }
+
+    try {
+      _prefs = await SharedPreferences.getInstance();
+      _isInitialized = true;
+      
+      // 检查是否有保存的配置
+      final hasConfig = _prefs?.containsKey(_keyHardwareVersion) ?? false;
+      
+      if (hasConfig) {
+        print('✅ 从注册表/SharedPreferences加载配置');
+        print('   硬件版本: $hardwareVersion');
+        print('   产品线: $productLine');
+        print('   工厂: $factory');
+        print('   产线: $productionLine');
+      } else {
+        print('ℹ️  未找到保存的配置，使用默认值');
+        print('   硬件版本: $defaultHardwareVersion');
+        print('   产品线: $defaultProductLine');
+        print('   工厂: $defaultFactory');
+        print('   产线: $defaultProductionLine');
+      }
+    } catch (e) {
+      print('❌ 初始化配置失败: $e');
+      print('   将使用默认配置');
+      _isInitialized = false;
+    }
   }
+  
+  /// 检查是否已初始化
+  bool get isInitialized => _isInitialized;
 
   // ========== 硬件版本号 ==========
   String get hardwareVersion => _prefs?.getString(_keyHardwareVersion) ?? defaultHardwareVersion;
