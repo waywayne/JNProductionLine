@@ -131,6 +131,87 @@ class _SNRecordsScreenState extends State<SNRecordsScreen> {
     }
   }
 
+  /// 清空所有记录
+  Future<void> _clearAllRecords() async {
+    // 显示确认对话框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Text('确认清空'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '此操作将删除所有 SN 记录并重置 MAC 地址索引！',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text('当前记录数: ${_records.length}'),
+            const SizedBox(height: 8),
+            const Text('删除后：'),
+            const Text('• 所有 SN 记录将被永久删除'),
+            const Text('• WiFi MAC 索引重置为: 48:08:EB:50:00:50'),
+            const Text('• 蓝牙 MAC 索引重置为: 48:08:EB:60:00:50'),
+            const SizedBox(height: 12),
+            const Text(
+              '此操作不可恢复，确定要继续吗？',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('确定清空'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final count = await _snManager.clearAllRecords();
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ 已清空所有记录，共删除 $count 条'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        
+        // 重新加载记录
+        await _loadRecords();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('清空失败: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -148,6 +229,11 @@ class _SNRecordsScreenState extends State<SNRecordsScreen> {
             icon: const Icon(Icons.file_download),
             tooltip: '导出 CSV',
             onPressed: _records.isEmpty ? null : _exportToCSV,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep),
+            tooltip: '清空所有记录',
+            onPressed: _records.isEmpty ? null : _clearAllRecords,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),

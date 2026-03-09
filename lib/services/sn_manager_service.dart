@@ -125,6 +125,30 @@ class SNManagerService {
     await _saveRecords();
   }
 
+  /// 清空所有 SN 记录
+  /// 
+  /// 删除所有记录并重置 MAC 地址索引到初始值
+  /// 返回删除的记录数量
+  Future<int> clearAllRecords() async {
+    final count = _snRecords.length;
+    
+    // 清空内存中的记录
+    _snRecords.clear();
+    
+    // 重置 MAC 地址索引到初始值
+    _currentWifiMacIndex = 0;
+    _currentBtMacIndex = 0;
+    
+    // 保存到文件（空记录）
+    await _saveRecords();
+    
+    print('✅ 已清空所有 SN 记录，共删除 $count 条');
+    print('   WiFi MAC 索引已重置为: 0 (48:08:EB:50:00:50)');
+    print('   蓝牙 MAC 索引已重置为: 0 (48:08:EB:60:00:50)');
+    
+    return count;
+  }
+
   /// 生成 SN 码
   /// 
   /// [productLine] 产品线代码，如 '637' (Kanaan-K2)
