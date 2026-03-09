@@ -7596,8 +7596,7 @@ class TestState extends ChangeNotifier {
         notifyListeners();
         
         if (attempt > 1) {
-          _logState?.warning('🔄 蓝牙名称设置重试 $attempt/$
-          maxRetries', type: LogType.debug);
+          _logState?.warning('🔄 蓝牙名称设置重试 $attempt/$maxRetries', type: LogType.debug);
           await Future.delayed(const Duration(milliseconds: 500));
         }
         
