@@ -246,18 +246,20 @@ class SNManagerService {
   }
 
   /// 索引转 MAC 地址
+  /// 
+  /// WiFi MAC 范围: 48:08:EB:50:00:50 ~ 48:08:EB:5F:FF:FF
+  /// 蓝牙 MAC 范围: 48:08:EB:60:00:50 ~ 48:08:EB:6F:FF:FF
   String _indexToMac(int index, {required bool isWifi}) {
-    final basePrefix = isWifi ? '48:08:EB:5' : '48:08:EB:6';
-    final startOffset = 0x000050; // 起始偏移
+    // 起始地址的后3字节: 0x500050 (WiFi) 或 0x600050 (蓝牙)
+    final baseValue = isWifi ? 0x500050 : 0x600050;
+    final macValue = baseValue + index;
     
-    final macValue = startOffset + index;
+    // 分解为3个字节
+    final byte4 = (macValue >> 16) & 0xFF;  // 第4字节 (0x50-0x5F 或 0x60-0x6F)
+    final byte5 = (macValue >> 8) & 0xFF;   // 第5字节 (0x00-0xFF)
+    final byte6 = macValue & 0xFF;          // 第6字节 (0x00-0xFF)
     
-    // 分解为字节
-    final byte3 = (macValue >> 16) & 0xFF;
-    final byte2 = (macValue >> 8) & 0xFF;
-    final byte1 = macValue & 0xFF;
-    
-    return '$basePrefix${byte3.toRadixString(16).padLeft(1, '0').toUpperCase()}:${byte2.toRadixString(16).padLeft(2, '0').toUpperCase()}:${byte1.toRadixString(16).padLeft(2, '0').toUpperCase()}';
+    return '48:08:EB:${byte4.toRadixString(16).padLeft(2, '0').toUpperCase()}:${byte5.toRadixString(16).padLeft(2, '0').toUpperCase()}:${byte6.toRadixString(16).padLeft(2, '0').toUpperCase()}';
   }
 
   /// MAC 地址转索引
@@ -269,8 +271,9 @@ class SNManagerService {
     final lastBytes = macClean.substring(6);
     final macValue = int.parse(lastBytes, radix: 16);
     
-    final startOffset = 0x000050;
-    return macValue - startOffset;
+    // 起始地址的后3字节: 0x500050 (WiFi) 或 0x600050 (蓝牙)
+    final baseValue = isWifi ? 0x500050 : 0x600050;
+    return macValue - baseValue;
   }
 
   /// 查询 SN 记录
