@@ -5278,6 +5278,11 @@ class TestState extends ChangeNotifier {
           _logState?.success('✅ ${test['name']} 通过', type: LogType.debug);
         } else {
           _logState?.error('❌ ${test['name']} 失败', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.error('⛔ 检测到测试失败，终止自动化测试流程', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _shouldStopTest = true;
+          break; // 立即退出测试循环
         }
       } catch (e) {
         final errorMsg = e.toString();
@@ -5299,6 +5304,11 @@ class TestState extends ChangeNotifier {
           );
           _testReportItems[_testReportItems.length - 1] = updatedItem;
           _logState?.error('❌ ${test['name']} 异常: $e', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.error('⛔ 检测到测试异常，终止自动化测试流程', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _shouldStopTest = true;
+          break; // 立即退出测试循环
         }
       }
       
@@ -7460,91 +7470,145 @@ class TestState extends ChangeNotifier {
       _logState?.info('   蓝牙MAC: $bluetoothMac', type: LogType.debug);
       _logState?.info('   蓝牙名称: $_bluetoothNameToSet (使用MAC后四位)', type: LogType.debug);
       
-      // 步骤2: 设置蓝牙名称
-      _bluetoothTestStep = '正在设置蓝牙名称...';
-      notifyListeners();
+      // 步骤2: 设置蓝牙名称（带重试）
+      const maxRetries = 3;
+      bool nameSetSuccess = false;
       
-      final setNameCmd = ProductionTestCommands.createSetBluetoothNameCommand(_bluetoothNameToSet!);
-      final cmdHex = setNameCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-      _logState?.info('📤 发送设置蓝牙名称命令: [$cmdHex]', type: LogType.debug);
-      
-      final setResponse = await _serialService.sendCommandAndWaitResponse(
-        setNameCmd,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-        timeout: const Duration(seconds: 5),
-      );
-      
-      if (setResponse == null || setResponse.containsKey('error')) {
-        _bluetoothTestStep = '❌ 设置蓝牙名称失败: ${setResponse?['error'] ?? '无响应'}';
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        _bluetoothTestStep = '正在设置蓝牙名称... (尝试 $attempt/$maxRetries)';
         notifyListeners();
-        _logState?.error('❌ 设置蓝牙名称失败: ${setResponse?['error'] ?? '无响应'}', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 3)); // 显示错误信息3秒
+        
+        if (attempt > 1) {
+          _logState?.warning('🔄 蓝牙名称设置重试 $attempt/$maxRetries', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+        
+        final setNameCmd = ProductionTestCommands.createSetBluetoothNameCommand(_bluetoothNameToSet!);
+        final cmdHex = setNameCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📤 发送设置蓝牙名称命令: [$cmdHex]', type: LogType.debug);
+        
+        final setResponse = await _serialService.sendCommandAndWaitResponse(
+          setNameCmd,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+          timeout: const Duration(seconds: 5),
+        );
+        
+        if (setResponse == null || setResponse.containsKey('error')) {
+          _logState?.warning('⚠️  设置蓝牙名称失败 (尝试 $attempt/$maxRetries): ${setResponse?['error'] ?? '无响应'}', type: LogType.debug);
+          if (attempt == maxRetries) {
+            _bluetoothTestStep = '❌ 设置蓝牙名称失败: ${setResponse?['error'] ?? '无响应'}';
+            notifyListeners();
+            _logState?.error('❌ 设置蓝牙名称失败，已重试 $maxRetries 次', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 3));
+            return false;
+          }
+          continue;
+        }
+        
+        _logState?.success('✅ 蓝牙名称设置成功', type: LogType.debug);
+        nameSetSuccess = true;
+        break;
+      }
+      
+      if (!nameSetSuccess) {
         return false;
       }
       
-      _logState?.success('✅ 蓝牙名称设置成功', type: LogType.debug);
+      // 步骤3: 获取蓝牙名称进行验证（带重试）
+      bool nameVerifySuccess = false;
       
-      // 步骤3: 获取蓝牙名称进行验证
-      _bluetoothTestStep = '正在验证蓝牙名称...';
-      notifyListeners();
-      
-      final getNameCmd = ProductionTestCommands.createGetBluetoothNameCommand();
-      _logState?.info('📤 发送获取蓝牙名称命令', type: LogType.debug);
-      
-      final getResponse = await _serialService.sendCommandAndWaitResponse(
-        getNameCmd,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-        timeout: const Duration(seconds: 5),
-      );
-      
-      if (getResponse == null || getResponse.containsKey('error')) {
-        _bluetoothTestStep = '❌ 获取蓝牙名称失败: ${getResponse?['error'] ?? '无响应'}';
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        _bluetoothTestStep = '正在验证蓝牙名称... (尝试 $attempt/$maxRetries)';
         notifyListeners();
-        _logState?.error('❌ 获取蓝牙名称失败: ${getResponse?['error'] ?? '无响应'}', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 3));
-        return false;
+        
+        if (attempt > 1) {
+          _logState?.warning('🔄 蓝牙名称验证重试 $attempt/$maxRetries', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+        
+        final getNameCmd = ProductionTestCommands.createGetBluetoothNameCommand();
+        _logState?.info('📤 发送获取蓝牙名称命令', type: LogType.debug);
+        
+        final getResponse = await _serialService.sendCommandAndWaitResponse(
+          getNameCmd,
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+          timeout: const Duration(seconds: 5),
+        );
+        
+        if (getResponse == null || getResponse.containsKey('error')) {
+          _logState?.warning('⚠️  获取蓝牙名称失败 (尝试 $attempt/$maxRetries): ${getResponse?['error'] ?? '无响应'}', type: LogType.debug);
+          if (attempt == maxRetries) {
+            _bluetoothTestStep = '❌ 获取蓝牙名称失败: ${getResponse?['error'] ?? '无响应'}';
+            notifyListeners();
+            _logState?.error('❌ 获取蓝牙名称失败，已重试 $maxRetries 次', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 3));
+            return false;
+          }
+          continue;
+        }
+        
+        final payload = getResponse['payload'] as Uint8List?;
+        if (payload == null) {
+          _logState?.warning('⚠️  获取蓝牙名称失败：响应无payload (尝试 $attempt/$maxRetries)', type: LogType.debug);
+          if (attempt == maxRetries) {
+            _bluetoothTestStep = '❌ 获取蓝牙名称失败：响应无payload';
+            notifyListeners();
+            _logState?.error('❌ 获取蓝牙名称失败：响应无payload，已重试 $maxRetries 次', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 3));
+            return false;
+          }
+          continue;
+        }
+        
+        // 记录原始payload用于调试
+        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📦 收到payload: [$payloadHex]', type: LogType.debug);
+        
+        final receivedName = ProductionTestCommands.parseBluetoothNameResponse(payload);
+        if (receivedName == null) {
+          _logState?.warning('⚠️  无法解析蓝牙名称响应 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+          _logState?.warning('   Payload: [$payloadHex]', type: LogType.debug);
+          if (attempt == maxRetries) {
+            _bluetoothTestStep = '❌ 获取蓝牙名称失败：无法解析响应';
+            notifyListeners();
+            _logState?.error('❌ 获取蓝牙名称失败：无法解析响应，已重试 $maxRetries 次', type: LogType.debug);
+            _logState?.error('   Payload: [$payloadHex]', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 3));
+            return false;
+          }
+          continue;
+        }
+        
+        _logState?.info('📥 设备返回蓝牙名称: $receivedName', type: LogType.debug);
+        
+        // 对比设置的名称和获取的名称
+        if (receivedName != _bluetoothNameToSet) {
+          _logState?.warning('⚠️  蓝牙名称不一致 (尝试 $attempt/$maxRetries)', type: LogType.debug);
+          _logState?.warning('   设置: $_bluetoothNameToSet', type: LogType.debug);
+          _logState?.warning('   返回: $receivedName', type: LogType.debug);
+          if (attempt == maxRetries) {
+            _bluetoothTestStep = '❌ 蓝牙名称验证失败：名称不一致';
+            notifyListeners();
+            _logState?.error('❌ 蓝牙名称验证失败：名称不一致，已重试 $maxRetries 次', type: LogType.debug);
+            _logState?.error('   设置: $_bluetoothNameToSet', type: LogType.debug);
+            _logState?.error('   返回: $receivedName', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 3));
+            return false;
+          }
+          continue;
+        }
+        
+        _logState?.success('✅ 蓝牙名称验证成功！设置值与返回值一致', type: LogType.debug);
+        _logState?.info('   名称: $_bluetoothNameToSet', type: LogType.debug);
+        nameVerifySuccess = true;
+        break;
       }
       
-      final payload = getResponse['payload'] as Uint8List?;
-      if (payload == null) {
-        _bluetoothTestStep = '❌ 获取蓝牙名称失败：响应无payload';
-        notifyListeners();
-        _logState?.error('❌ 获取蓝牙名称失败：响应无payload', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 3));
+      if (!nameVerifySuccess) {
         return false;
       }
-      
-      // 记录原始payload用于调试
-      final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-      _logState?.info('📦 收到payload: [$payloadHex]', type: LogType.debug);
-      
-      final receivedName = ProductionTestCommands.parseBluetoothNameResponse(payload);
-      if (receivedName == null) {
-        _bluetoothTestStep = '❌ 获取蓝牙名称失败：无法解析响应';
-        notifyListeners();
-        _logState?.error('❌ 获取蓝牙名称失败：无法解析响应', type: LogType.debug);
-        _logState?.error('   Payload: [$payloadHex]', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 3));
-        return false;
-      }
-      
-      _logState?.info('📥 设备返回蓝牙名称: $receivedName', type: LogType.debug);
-      
-      // 对比设置的名称和获取的名称
-      if (receivedName != _bluetoothNameToSet) {
-        _bluetoothTestStep = '❌ 蓝牙名称验证失败：名称不一致';
-        notifyListeners();
-        _logState?.error('❌ 蓝牙名称验证失败：名称不一致', type: LogType.debug);
-        _logState?.error('   设置: $_bluetoothNameToSet', type: LogType.debug);
-        _logState?.error('   返回: $receivedName', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 3));
-        return false;
-      }
-      
-      _logState?.success('✅ 蓝牙名称验证成功！设置值与返回值一致', type: LogType.debug);
-      _logState?.info('   名称: $_bluetoothNameToSet', type: LogType.debug);
       
       // 步骤4: 等待用户手动连接蓝牙
       _bluetoothTestStep = '请使用手机搜索并连接蓝牙设备';
