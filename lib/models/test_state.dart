@@ -5073,26 +5073,17 @@ class TestState extends ChangeNotifier {
     // 执行所有测试项
     await _executeAllTests();
     
-    // 检查是否被用户停止
-    if (_shouldStopTest) {
-      _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.warning('🛑 自动化测试已被用户停止，不生成测试报告', type: LogType.debug);
-      _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      
-      // 清理状态
-      _isAutoTesting = false;
-      _shouldStopTest = false;
-      _currentTestReport = null;
-      _testReportItems.clear();
-      _currentAutoTestIndex = 0;
-      notifyListeners();
-      return;
-    }
-    
-    // 生成最终报告
+    // 生成最终报告（无论成功还是失败都生成）
     _finalizeTestReport();
     
-    // 自动保存测试报告
+    // 检查是否因测试失败而停止
+    if (_shouldStopTest) {
+      _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.warning('⛔ 测试因失败而终止，生成失败报告', type: LogType.debug);
+      _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    }
+    
+    // 自动保存测试报告（无论成功还是失败都保存）
     _logState?.info('💾 自动保存测试报告...', type: LogType.debug);
     final savedPath = await saveTestReport();
     if (savedPath != null) {
@@ -5101,7 +5092,11 @@ class TestState extends ChangeNotifier {
       _logState?.warning('⚠️ 测试报告自动保存失败', type: LogType.debug);
     }
     
+    // 重置测试状态，但保留测试报告数据
     _isAutoTesting = false;
+    _shouldStopTest = false;
+    
+    // 显示测试报告弹窗（无论成功还是失败）
     _showTestReportDialog = true;
     notifyListeners();
   }
@@ -7483,6 +7478,12 @@ class TestState extends ChangeNotifier {
       final spkName = spkNumber == 0 ? '左' : '右';
       _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
       
+      // 如果有未完成的旧Completer，先完成它（避免重试时超时计时器残留）
+      if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
+        _spkTestCompleter!.complete(false);
+        _logState?.debug('   清理旧的SPK测试Completer', type: LogType.debug);
+      }
+      
       // 创建Completer用于等待用户确认
       _spkTestCompleter = Completer<bool>();
       
@@ -7535,6 +7536,12 @@ class TestState extends ChangeNotifier {
     try {
       final micName = micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK');
       _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
+      
+      // 如果有未完成的旧Completer，先完成它（避免重试时超时计时器残留）
+      if (_micTestCompleter != null && !_micTestCompleter!.isCompleted) {
+        _micTestCompleter!.complete(false);
+        _logState?.debug('   清理旧的MIC测试Completer', type: LogType.debug);
+      }
       
       // 创建Completer用于等待用户确认
       _micTestCompleter = Completer<bool>();

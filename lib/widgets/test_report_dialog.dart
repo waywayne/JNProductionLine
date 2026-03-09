@@ -76,13 +76,19 @@ class TestReportDialog extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.green[50],
+                    color: report.allTestsPassed ? Colors.green[50] : Colors.orange[50],
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green[200]!),
+                    border: Border.all(
+                      color: report.allTestsPassed ? Colors.green[200]! : Colors.orange[200]!,
+                    ),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                      Icon(
+                        report.allTestsPassed ? Icons.check_circle : Icons.save,
+                        color: report.allTestsPassed ? Colors.green[700] : Colors.orange[700],
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Column(
@@ -93,7 +99,7 @@ class TestReportDialog extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.green[900],
+                                color: report.allTestsPassed ? Colors.green[900] : Colors.orange[900],
                               ),
                             ),
                             if (report.allTestsPassed) ...[
@@ -103,6 +109,15 @@ class TestReportDialog extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.green[700],
+                                ),
+                              ),
+                            ] else ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                '可点击"重新开始测试"按钮重新测试',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.orange[700],
                                 ),
                               ),
                             ],
