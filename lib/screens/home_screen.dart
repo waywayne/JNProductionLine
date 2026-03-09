@@ -11,6 +11,7 @@ import '../widgets/sensor_data_dialog.dart';
 import '../widgets/imu_data_dialog.dart';
 import '../widgets/led_test_dialog.dart';
 import '../widgets/mic_test_dialog.dart';
+import '../widgets/spk_test_dialog.dart';
 import '../widgets/bluetooth_test_dialog.dart';
 import '../widgets/wifi_test_steps_widget.dart';
 import '../widgets/test_report_dialog.dart';
@@ -87,6 +88,10 @@ class _HomeScreenState extends State<HomeScreen> {
             // MIC测试弹窗
             if (testState.showMICDialog)
               const MICTestDialog(),
+            
+            // SPK测试弹窗
+            if (testState.showSPKDialog)
+              const SPKTestDialog(),
             
             // 蓝牙测试弹窗
             if (testState.showBluetoothDialog)
