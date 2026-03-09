@@ -389,6 +389,21 @@ class TestReportDialog extends StatelessWidget {
                 ),
               ),
             ],
+            // 显示测试数据（包含阈值信息）
+            if (item.testData != null && item.testData!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              ...item.testData!.entries.map((entry) => Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '${entry.key}: ${entry.value}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.grey[700],
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              )),
+            ],
           ],
         ),
           ),

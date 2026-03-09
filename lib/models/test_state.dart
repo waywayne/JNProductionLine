@@ -242,6 +242,7 @@ class TestState extends ChangeNotifier {
   List<TestReportItem> _testReportItems = [];
   int _currentAutoTestIndex = 0;
   bool _showTestReportDialog = false;
+  Map<String, dynamic>? _lastTestData; // 临时存储当前测试的数据（阈值等）
   
   // 生成的设备标识（用于蓝牙MAC地址验证）
   String? _generatedDeviceId;
@@ -5275,10 +5276,18 @@ class TestState extends ChangeNotifier {
           notifyListeners();
         }
         
+        // 尝试获取测试数据（如果测试方法返回了额外的数据）
+        Map<String, dynamic>? testData;
+        if (_lastTestData != null) {
+          testData = Map<String, dynamic>.from(_lastTestData!);
+          _lastTestData = null; // 清空，避免影响下一个测试
+        }
+        
         final updatedItem = item.copyWith(
           status: result ? TestReportStatus.pass : TestReportStatus.fail,
           endTime: DateTime.now(),
           errorMessage: result ? null : '测试未通过',
+          testData: testData,
         );
         
         _testReportItems[_testReportItems.length - 1] = updatedItem;
@@ -6402,6 +6411,14 @@ class TestState extends ChangeNotifier {
           _logState?.success('✅ 物奇功耗测试通过', type: LogType.debug);
           _logState?.info('   测量值: ${currentMa.toStringAsFixed(2)} mA ≤ 阈值: ${TestConfig.wuqiPowerThresholdMa} mA', type: LogType.debug);
           _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          
+          // 记录测试数据
+          _recordTestData({
+            '测量值': '${currentMa.toStringAsFixed(2)} mA',
+            '阈值': '≤ ${TestConfig.wuqiPowerThresholdMa} mA',
+            '结果': '通过',
+          });
+          
           return true;
         } else {
           _logState?.error('❌ 超过阈值', type: LogType.debug);
@@ -6415,6 +6432,15 @@ class TestState extends ChangeNotifier {
             continue; // 阈值失败，重试
           } else {
             _logState?.error('❌ 已达最大重试次数，物奇功耗测试失败', type: LogType.debug);
+            
+            // 记录测试数据（失败情况）
+            _recordTestData({
+              '测量值': '${currentMa.toStringAsFixed(2)} mA',
+              '阈值': '≤ ${TestConfig.wuqiPowerThresholdMa} mA',
+              '差值': '+${(currentMa - TestConfig.wuqiPowerThresholdMa).toStringAsFixed(2)} mA',
+              '结果': '失败',
+            });
+            
             return false;
           }
         }
@@ -8444,8 +8470,15 @@ class TestState extends ChangeNotifier {
     _currentAutoTestIndex = 0;
     _isAutoTesting = false;
     _showTestReportDialog = false;
+    _lastTestData = null;
     notifyListeners();
     _logState?.info('测试报告已清空', type: LogType.debug);
+  }
+  
+  /// 记录当前测试的数据（阈值等信息）
+  /// 这些数据会在测试完成时自动添加到测试报告中
+  void _recordTestData(Map<String, dynamic> data) {
+    _lastTestData = data;
   }
 
   // ==================== GPIB检测功能 ====================

@@ -216,6 +216,13 @@ class TestReport {
       if (item.errorMessage != null) {
         buffer.writeln('   错误: ${item.errorMessage}');
       }
+      // 显示测试数据（包含阈值信息）
+      if (item.testData != null && item.testData!.isNotEmpty) {
+        buffer.writeln('   测试数据:');
+        item.testData!.forEach((key, value) {
+          buffer.writeln('      $key: $value');
+        });
+      }
       buffer.writeln('');
     }
     
