@@ -220,6 +220,11 @@ class TestState extends ChangeNotifier {
   int? _currentMICNumber; // 0=左MIC, 1=右MIC, 2=TALK MIC
   Completer<bool>? _micTestCompleter; // 用于等待用户确认MIC测试结果
   
+  // SPK测试弹窗状态
+  bool _showSPKDialog = false;
+  int? _currentSPKNumber; // 0=左SPK, 1=右SPK
+  Completer<bool>? _spkTestCompleter; // 用于等待用户确认SPK测试结果
+  
   // 蓝牙测试弹窗状态
   bool _showBluetoothDialog = false;
   Completer<bool>? _bluetoothTestCompleter; // 用于等待用户确认蓝牙测试结果
@@ -309,6 +314,10 @@ class TestState extends ChangeNotifier {
   // MIC测试状态getter
   bool get showMICDialog => _showMICDialog;
   int? get currentMICNumber => _currentMICNumber;
+
+  // SPK测试状态getter
+  bool get showSPKDialog => _showSPKDialog;
+  int? get currentSPKNumber => _currentSPKNumber;
 
   // 蓝牙测试状态getter
   bool get showBluetoothDialog => _showBluetoothDialog;
@@ -5734,6 +5743,76 @@ class TestState extends ChangeNotifier {
     }
   }
 
+  /// 开始SPK测试（带弹窗）
+  Future<bool> startSPKTest(int spkNumber) async {
+    try {
+      final spkName = spkNumber == 0 ? '左' : '右';
+      _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
+      _logState?.info('   SPK编号: $spkNumber (0=左, 1=右)', type: LogType.debug);
+      
+      // 创建Completer用于等待用户确认
+      _spkTestCompleter = Completer<bool>();
+      
+      // 设置当前测试的SPK编号
+      _currentSPKNumber = spkNumber;
+      
+      // 发送SPK测试命令 (CMD 0x06, SPK号)
+      final testCommand = ProductionTestCommands.createControlSPKCommand(spkNumber, 0x00);
+      final commandHex = testCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送SPK测试命令: [$commandHex]', type: LogType.debug);
+      _logState?.info('   CMD: 0x06, SPK号: 0x${spkNumber.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      
+      // 发送命令并等待响应
+      final response = await _serialService.sendCommandAndWaitResponse(
+        testCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        _logState?.success('✅ ${spkName}SPK测试命令发送成功', type: LogType.debug);
+        
+        // 显示弹窗让用户确认是否听到声音
+        _showSPKDialog = true;
+        notifyListeners();
+        
+        return true;
+      } else {
+        _logState?.error('❌ ${spkName}SPK测试命令发送失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        _currentSPKNumber = null;
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ 启动SPK测试异常: $e', type: LogType.debug);
+      _currentSPKNumber = null;
+      return false;
+    }
+  }
+  
+  /// 用户确认SPK测试结果
+  Future<void> confirmSPKTestResult(bool passed) async {
+    if (_currentSPKNumber == null) {
+      _logState?.warning('[SPK] 没有正在进行的SPK测试', type: LogType.debug);
+      return;
+    }
+    
+    final spkName = _currentSPKNumber == 0 ? '左' : '右';
+    _logState?.info('📝 用户确认${spkName}SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    _logState?.info('   当前SPK编号: $_currentSPKNumber', type: LogType.debug);
+    
+    // 关闭弹窗
+    _showSPKDialog = false;
+    _currentSPKNumber = null;
+    notifyListeners();
+    
+    // 完成Completer，通知测试结果
+    if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
+      _spkTestCompleter!.complete(passed);
+      _logState?.info('📝 记录SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    }
+  }
+
   /// MIC自动测试
   Future<bool> _autoTestMIC(int micNumber) async {
     try {
@@ -7371,18 +7450,56 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 23-24. SPK测试
+  /// 23-24. SPK测试（使用弹窗）
   Future<bool> _autoTestSPK(int spkNumber) async {
+    bool started = false;
     try {
       final spkName = spkNumber == 0 ? '左' : '右';
       _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
-      // TODO: 发送SPK测试命令
-      // 暂时模拟
-      await Future.delayed(const Duration(milliseconds: 500));
-      return true;
+      
+      // 创建Completer用于等待用户确认
+      _spkTestCompleter = Completer<bool>();
+      
+      // 开始SPK测试（添加超时保护）
+      started = await startSPKTest(spkNumber).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          _logState?.error('❌ ${spkName}SPK测试启动超时（10秒）', type: LogType.debug);
+          return false;
+        },
+      );
+      
+      if (!started) {
+        _logState?.error('❌ ${spkName}SPK测试启动失败', type: LogType.debug);
+        if (!_spkTestCompleter!.isCompleted) {
+          _spkTestCompleter?.complete(false);
+        }
+        return false;
+      }
+      
+      _logState?.success('✅ ${spkName}SPK测试已开始，等待用户确认...', type: LogType.debug);
+      
+      // 等待用户点击"测试成功"或"测试失败"按钮（添加超时保护）
+      final userResult = await _spkTestCompleter!.future.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () {
+          _logState?.error('❌ ${spkName}SPK测试等待用户确认超时（2分钟）', type: LogType.debug);
+          return false;
+        },
+      );
+      
+      _logState?.info('👤 用户确认${spkName}SPK测试结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
+      
+      return userResult;
     } catch (e) {
       _logState?.error('${spkNumber == 0 ? '左' : '右'}SPK测试异常: $e', type: LogType.debug);
+      if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
+        _spkTestCompleter?.complete(false);
+      }
       return false;
+    } finally {
+      // 清理Completer
+      _spkTestCompleter = null;
     }
   }
 
@@ -7479,7 +7596,8 @@ class TestState extends ChangeNotifier {
         notifyListeners();
         
         if (attempt > 1) {
-          _logState?.warning('🔄 蓝牙名称设置重试 $attempt/$maxRetries', type: LogType.debug);
+          _logState?.warning('🔄 蓝牙名称设置重试 $attempt/$
+          maxRetries', type: LogType.debug);
           await Future.delayed(const Duration(milliseconds: 500));
         }
         
