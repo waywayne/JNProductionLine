@@ -1,3 +1,5 @@
+import '../config/production_config.dart';
+
 /// Touch测试步骤状态枚举
 enum TouchStepStatus {
   waiting,    // 等待开始
@@ -76,8 +78,8 @@ class TouchTestConfig {
   static const int touchLeft = 0x00;   // 左Touch
   static const int touchRight = 0x01;  // 右Touch
   
-  // CDC阈值配置
-  static const int cdcThreshold = 500; // CDC差值阈值
+  // CDC阈值配置 - 从 ProductionConfig 读取
+  static int get cdcThreshold => ProductionConfig().touchThreshold;
 
   // 左Touch动作ID (ActionID)
   static const int leftActionUntouched = 0x00;  // 未触摸
