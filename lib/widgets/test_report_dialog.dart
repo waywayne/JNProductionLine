@@ -407,17 +407,7 @@ class TestReportDialog extends StatelessWidget {
             // 显示测试数据（包含阈值信息）
             if (item.testData != null && item.testData!.isNotEmpty) ...[
               const SizedBox(height: 4),
-              ...item.testData!.entries.map((entry) => Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  '${entry.key}: ${entry.value}',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.grey[700],
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              )),
+              ..._buildTestDataWidgets(item),
             ],
           ],
         ),
@@ -440,5 +430,89 @@ class TestReportDialog extends StatelessWidget {
     } else {
       return '${seconds}秒';
     }
+  }
+
+  /// 构建测试数据显示组件
+  List<Widget> _buildTestDataWidgets(TestReportItem item) {
+    final testData = item.testData!;
+    
+    // 电量检测测试
+    if (testData.containsKey('battery') && testData.containsKey('temperature')) {
+      return [
+        _buildDataRow(
+          Icons.battery_charging_full,
+          '电量',
+          '${testData['battery']}%',
+          testData['batteryOk'] == true ? Colors.green : Colors.red,
+        ),
+        _buildDataRow(
+          Icons.thermostat,
+          '温度',
+          '${testData['temperature']}℃ (阈值: ≤${testData['temperatureThreshold']}℃)',
+          testData['temperatureOk'] == true ? Colors.green : Colors.red,
+        ),
+      ];
+    }
+    
+    // 充电状态测试
+    if (testData.containsKey('chargeMode') && testData.containsKey('faultCode')) {
+      return [
+        _buildDataRow(
+          Icons.power,
+          '充电状态',
+          testData['chargeModeName'],
+          Colors.blue,
+        ),
+        _buildDataRow(
+          Icons.error_outline,
+          '故障码',
+          '${testData['faultCodeHex']} (${testData['faultStatus']})',
+          testData['faultCode'] == 0 ? Colors.green : Colors.red,
+        ),
+      ];
+    }
+    
+    // 其他测试数据（默认显示）
+    return testData.entries.map((entry) => Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        '${entry.key}: ${entry.value}',
+        style: TextStyle(
+          fontSize: 10,
+          color: Colors.grey[700],
+          fontFamily: 'monospace',
+        ),
+      ),
+    )).toList();
+  }
+
+  /// 构建数据行
+  Widget _buildDataRow(IconData icon, String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.grey[700],
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 10,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

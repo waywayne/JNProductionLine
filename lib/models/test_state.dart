@@ -5063,12 +5063,16 @@ class TestState extends ChangeNotifier {
     final bluetoothMAC = _currentDeviceIdentity?['bluetoothMac'];
     final wifiMAC = _currentDeviceIdentity?['wifiMac'];
     
+    // 获取测试序列的总数
+    final testSequence = _getTestSequence();
+    
     _currentTestReport = TestReport(
       deviceSN: deviceSN,
       bluetoothMAC: bluetoothMAC,
       wifiMAC: wifiMAC,
       startTime: DateTime.now(),
       items: [],
+      expectedTotalTests: testSequence.length,  // 设置预期总测试数
     );
     
     notifyListeners();
@@ -6916,6 +6920,15 @@ class TestState extends ChangeNotifier {
             // 检查温度阈值
             final temperatureOk = temperature <= tempThreshold;
             
+            // 保存测试数据到报告
+            _lastTestData = {
+              'battery': battery,
+              'temperature': temperature,
+              'temperatureThreshold': tempThreshold,
+              'batteryOk': batteryOk,
+              'temperatureOk': temperatureOk,
+            };
+            
             if (batteryOk && temperatureOk) {
               _logState?.success('✅ 电量和温度检测通过', type: LogType.debug);
               return true;
@@ -6967,6 +6980,15 @@ class TestState extends ChangeNotifier {
               final faultStatus = fault == 0x00 ? '正常' : '故障';
               
               _logState?.info('📊 充电状态: $modeName, 故障码: 0x${fault.toRadixString(16).toUpperCase().padLeft(2, '0')} ($faultStatus)', type: LogType.debug);
+              
+              // 保存测试数据到报告
+              _lastTestData = {
+                'chargeMode': mode,
+                'chargeModeName': modeName,
+                'faultCode': fault,
+                'faultCodeHex': '0x${fault.toRadixString(16).toUpperCase().padLeft(2, '0')}',
+                'faultStatus': faultStatus,
+              };
               
               // 只要故障码为0x00就判断成功，不限制充电状态
               if (fault == 0x00) {
@@ -7029,6 +7051,7 @@ class TestState extends ChangeNotifier {
           wifiMAC: _currentDeviceIdentity!['wifiMac'],
           startTime: _currentTestReport!.startTime,
           endTime: _currentTestReport!.endTime,
+          expectedTotalTests: _currentTestReport!.expectedTotalTests,
           items: _currentTestReport!.items,
         );
         _logState?.info('   📝 已更新测试报告设备信息', type: LogType.debug);
@@ -8394,6 +8417,7 @@ class TestState extends ChangeNotifier {
         startTime: _currentTestReport!.startTime,
         endTime: DateTime.now(),
         items: List.from(_testReportItems),
+        expectedTotalTests: _currentTestReport!.expectedTotalTests,
       );
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);

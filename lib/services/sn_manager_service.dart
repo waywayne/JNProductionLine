@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
+import '../config/sn_mac_config.dart';
 
 /// SN 码管理服务
 /// 负责 SN 码生成、分配、记录和查询
@@ -374,13 +375,32 @@ class SNManagerService {
   }
 
   /// 获取统计信息
+  /// 从 SNMacConfig 获取真实的 MAC 地址计数器和下一个 MAC 地址
   Map<String, dynamic> getStatistics() {
+    final config = SNMacConfig.getCurrentConfig();
+    final wifiMacCounter = config['wifiMacCounter'] as int? ?? 0;
+    final btMacCounter = config['bluetoothMacCounter'] as int? ?? 0;
+    
+    // 计算下一个 WiFi MAC 地址
+    final nextWifiMacValue = SNMacConfig.wifiMacBaseValue + wifiMacCounter;
+    final wifiByte4 = (nextWifiMacValue >> 16) & 0xFF;
+    final wifiByte5 = (nextWifiMacValue >> 8) & 0xFF;
+    final wifiByte6 = nextWifiMacValue & 0xFF;
+    final nextWifiMac = '${SNMacConfig.wifiMacPrefix}:${wifiByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+    
+    // 计算下一个蓝牙 MAC 地址
+    final nextBtMacValue = SNMacConfig.bluetoothMacBaseValue + btMacCounter;
+    final btByte4 = (nextBtMacValue >> 16) & 0xFF;
+    final btByte5 = (nextBtMacValue >> 8) & 0xFF;
+    final btByte6 = nextBtMacValue & 0xFF;
+    final nextBtMac = '${SNMacConfig.bluetoothMacPrefix}:${btByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+    
     return {
       'total_records': _snRecords.length,
-      'current_wifi_mac_index': _currentWifiMacIndex,
-      'current_bt_mac_index': _currentBtMacIndex,
-      'next_wifi_mac': _indexToMac(_currentWifiMacIndex, isWifi: true),
-      'next_bt_mac': _indexToMac(_currentBtMacIndex, isWifi: false),
+      'current_wifi_mac_index': wifiMacCounter,
+      'current_bt_mac_index': btMacCounter,
+      'next_wifi_mac': nextWifiMac,
+      'next_bt_mac': nextBtMac,
     };
   }
 }

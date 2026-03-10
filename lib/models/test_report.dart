@@ -123,6 +123,7 @@ class TestReport {
   final DateTime startTime;
   final DateTime? endTime;
   final List<TestReportItem> items;
+  final int expectedTotalTests;  // 应该执行的总测试数
   final String? notes;
   
   // 向后兼容：保留 deviceMAC getter
@@ -135,6 +136,7 @@ class TestReport {
     required this.startTime,
     this.endTime,
     required this.items,
+    required this.expectedTotalTests,  // 必须提供预期总测试数
     this.notes,
   });
   
@@ -145,7 +147,11 @@ class TestReport {
     return null;
   }
   
-  int get totalTests => items.length;
+  /// 实际执行的测试数
+  int get executedTests => items.length;
+  
+  /// 总测试数（使用预期总数）
+  int get totalTests => expectedTotalTests;
   
   int get passedTests => items.where((item) => item.status == TestReportStatus.pass).length;
   
@@ -153,15 +159,20 @@ class TestReport {
   
   int get skippedTests => items.where((item) => item.status == TestReportStatus.skip).length;
   
+  /// 通过率：按照预期总测试数计算
   double get passRate {
-    if (totalTests == 0) return 0.0;
-    return (passedTests / totalTests) * 100;
+    if (expectedTotalTests == 0) return 0.0;
+    return (passedTests / expectedTotalTests) * 100;
   }
   
-  bool get allTestsPassed => failedTests == 0 && totalTests > 0;
+  /// 全部通过：必须所有测试都执行且全部通过
+  bool get allTestsPassed => 
+      executedTests == expectedTotalTests &&  // 所有测试都已执行
+      failedTests == 0 &&                     // 没有失败项
+      passedTests == expectedTotalTests;      // 所有项都通过
   
   String get summaryText {
-    return '总计: $totalTests | 通过: $passedTests | 失败: $failedTests | 跳过: $skippedTests | 通过率: ${passRate.toStringAsFixed(1)}%';
+    return '总计: $totalTests | 已执行: $executedTests | 通过: $passedTests | 失败: $failedTests | 跳过: $skippedTests | 通过率: ${passRate.toStringAsFixed(1)}%';
   }
   
   Map<String, dynamic> toJson() {
@@ -172,6 +183,8 @@ class TestReport {
       'startTime': startTime.toIso8601String(),
       'endTime': endTime?.toIso8601String(),
       'totalDuration': totalDuration?.inMilliseconds,
+      'expectedTotalTests': expectedTotalTests,
+      'executedTests': executedTests,
       'totalTests': totalTests,
       'passedTests': passedTests,
       'failedTests': failedTests,
