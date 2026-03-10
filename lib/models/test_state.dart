@@ -355,27 +355,31 @@ class TestState extends ChangeNotifier {
   /// 关闭Touch测试弹窗
   Future<void> closeTouchDialog() async {
     // 用户主动关闭弹窗，判定测试失败
-    bool wasLeftTesting = _isLeftTouchTesting;
-    bool wasRightTesting = _isRightTouchTesting;
     
-    // 如果正在测试，清理测试状态
+    // 如果正在测试，将所有步骤标记为失败
     if (_isLeftTouchTesting) {
-      _isLeftTouchTesting = false;
-      _leftTouchTestSteps.clear();
-      // 通知左Touch测试失败
-      if (_leftTouchTestCompleter != null && !_leftTouchTestCompleter!.isCompleted) {
-        _leftTouchTestCompleter!.complete(false);
-        _logState?.warning('⚠️ 用户关闭左Touch测试弹窗，判定测试失败', type: LogType.debug);
+      // 将所有未完成的步骤标记为失败
+      for (var i = 0; i < _leftTouchTestSteps.length; i++) {
+        if (_leftTouchTestSteps[i].status != TouchStepStatus.success) {
+          _leftTouchTestSteps[i] = _leftTouchTestSteps[i].copyWith(
+            status: TouchStepStatus.failed,
+          );
+        }
       }
+      _isLeftTouchTesting = false;
+      _logState?.warning('⚠️ 用户关闭左Touch测试弹窗，判定测试失败', type: LogType.debug);
     }
     if (_isRightTouchTesting) {
-      _isRightTouchTesting = false;
-      _rightTouchTestSteps.clear();
-      // 通知右Touch测试失败
-      if (_rightTouchTestCompleter != null && !_rightTouchTestCompleter!.isCompleted) {
-        _rightTouchTestCompleter!.complete(false);
-        _logState?.warning('⚠️ 用户关闭右Touch测试弹窗，判定测试失败', type: LogType.debug);
+      // 将所有未完成的步骤标记为失败
+      for (var i = 0; i < _rightTouchTestSteps.length; i++) {
+        if (_rightTouchTestSteps[i].status != TouchStepStatus.success) {
+          _rightTouchTestSteps[i] = _rightTouchTestSteps[i].copyWith(
+            status: TouchStepStatus.failed,
+          );
+        }
       }
+      _isRightTouchTesting = false;
+      _logState?.warning('⚠️ 用户关闭右Touch测试弹窗，判定测试失败', type: LogType.debug);
     }
     
     _showTouchDialog = false;
