@@ -657,12 +657,14 @@ class AutomationTestState extends ChangeNotifier {
         return {'success': false, 'error': response?['error'] ?? '无法获取设备响应'};
       }
       
-      // 解析电量值（%）
-      final capacity = ProductionTestCommands.parseCurrentResponse(response['payload']);
-      if (capacity == null) {
+      // 解析电量和温度
+      final batteryData = ProductionTestCommands.parseCurrentResponse(response['payload']);
+      if (batteryData == null) {
         return {'success': false, 'error': '无法解析电量数据'};
       }
       
+      final capacity = batteryData['battery']!;
+      final temperature = batteryData['temperature']!;
       final capacityDouble = capacity.toDouble();
       final success = capacityDouble >= AutomationTestConfig.batteryCapacityMin && 
                      capacityDouble <= AutomationTestConfig.batteryCapacityMax;
@@ -671,6 +673,7 @@ class AutomationTestState extends ChangeNotifier {
         'success': success,
         'data': {
           'capacity': capacityDouble,
+          'temperature': temperature,
           'min': AutomationTestConfig.batteryCapacityMin,
           'max': AutomationTestConfig.batteryCapacityMax,
           'unit': '%',

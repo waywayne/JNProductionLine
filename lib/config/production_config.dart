@@ -21,6 +21,7 @@ class ProductionConfig {
   static const String _keyMinVoltage = 'min_voltage_v';
   static const String _keyMinBattery = 'min_battery_percent';
   static const String _keyMaxBattery = 'max_battery_percent';
+  static const String _keyTemperatureThreshold = 'temperature_threshold_c';
   static const String _keyTouchThreshold = 'touch_threshold';
   static const String _keyEmmcMinCapacityGb = 'emmc_min_capacity_gb';
   static const String _keyGpibAddress = 'gpib_address';
@@ -40,6 +41,7 @@ class ProductionConfig {
   static const double defaultMinVoltageV = 2.5;
   static const int defaultMinBatteryPercent = 0;
   static const int defaultMaxBatteryPercent = 100;
+  static const int defaultTemperatureThresholdC = 50;  // 默认50℃
   static const int defaultTouchThreshold = 500;
   static const double defaultEmmcMinCapacityGb = 1.0; // 默认1GB
   static const String defaultGpibAddress = 'GPIB0::5::INSTR';
@@ -138,6 +140,12 @@ class ProductionConfig {
   int get maxBatteryPercent => _prefs?.getInt(_keyMaxBattery) ?? defaultMaxBatteryPercent;
   Future<void> setMaxBatteryPercent(int value) async {
     await _prefs?.setInt(_keyMaxBattery, value);
+  }
+
+  // ========== 温度阈值 (℃) ==========
+  int get temperatureThresholdC => _prefs?.getInt(_keyTemperatureThreshold) ?? defaultTemperatureThresholdC;
+  Future<void> setTemperatureThresholdC(int value) async {
+    await _prefs?.setInt(_keyTemperatureThreshold, value);
   }
 
   // ========== Touch阈值变化量 ==========

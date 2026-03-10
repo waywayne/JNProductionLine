@@ -24,6 +24,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _minVoltageController;
   late TextEditingController _minBatteryController;
   late TextEditingController _maxBatteryController;
+  late TextEditingController _temperatureThresholdController;
   late TextEditingController _touchThresholdController;
   late TextEditingController _emmcMinCapacityController;
   late TextEditingController _gpibAddressController;
@@ -46,6 +47,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _minVoltageController = TextEditingController(text: _config.minVoltageV.toString());
     _minBatteryController = TextEditingController(text: _config.minBatteryPercent.toString());
     _maxBatteryController = TextEditingController(text: _config.maxBatteryPercent.toString());
+    _temperatureThresholdController = TextEditingController(text: _config.temperatureThresholdC.toString());
     _touchThresholdController = TextEditingController(text: _config.touchThreshold.toString());
     _emmcMinCapacityController = TextEditingController(text: _config.emmcMinCapacityGb.toString());
     _gpibAddressController = TextEditingController(text: _config.gpibAddress);
@@ -64,6 +66,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _minVoltageController.dispose();
     _minBatteryController.dispose();
     _maxBatteryController.dispose();
+    _temperatureThresholdController.dispose();
     _touchThresholdController.dispose();
     _emmcMinCapacityController.dispose();
     _gpibAddressController.dispose();
@@ -83,6 +86,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setMinVoltageV(double.parse(_minVoltageController.text));
       await _config.setMinBatteryPercent(int.parse(_minBatteryController.text));
       await _config.setMaxBatteryPercent(int.parse(_maxBatteryController.text));
+      await _config.setTemperatureThresholdC(int.parse(_temperatureThresholdController.text));
       await _config.setTouchThreshold(int.parse(_touchThresholdController.text));
       await _config.setEmmcMinCapacityGb(double.parse(_emmcMinCapacityController.text));
       await _config.setGpibAddress(_gpibAddressController.text);
@@ -264,6 +268,16 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _temperatureThresholdController,
+              label: '温度阈值',
+              hint: '50',
+              suffix: '℃',
+              icon: Icons.thermostat,
+              inputType: TextInputType.number,
+              validator: (value) => _validateRange(value, 0, 100),
             ),
             const SizedBox(height: 24),
 

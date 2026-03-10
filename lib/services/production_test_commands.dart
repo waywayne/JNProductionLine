@@ -131,7 +131,7 @@ class ProductionTestCommands {
   }
   
   /// Create get current command (0x02)
-  /// 获取设备电量 - 返回 uint8_t 类型的电量
+  /// 获取设备电量和温度 - 返回 uint8_t 电量 + uint8_t 温度
   static Uint8List createGetCurrentCommand() {
     return Uint8List.fromList([cmdGetCurrent]);
   }
@@ -485,16 +485,19 @@ class ProductionTestCommands {
   }
   
   /// Parse current response
-  /// Returns current in % (uint8_t)
-  /// 设备返回格式：[CMD] + [1字节电量百分比]
-  static int? parseCurrentResponse(Uint8List payload) {
+  /// Returns map with 'battery' (%) and 'temperature' (℃)
+  /// 设备返回格式：[CMD] + [1字节电量百分比] + [1字节温度摄氏度]
+  static Map<String, int>? parseCurrentResponse(Uint8List payload) {
     if (payload.isEmpty) return null;
     
     // 跳过第一个命令字节
     int offset = payload[0] == cmdGetCurrent ? 1 : 0;
-    if (payload.length < offset + 1) return null;
+    if (payload.length < offset + 2) return null;  // 需要至少 2 字节：电量 + 温度
     
-    return payload[offset];
+    return {
+      'battery': payload[offset],      // 电量百分比 (0-100)
+      'temperature': payload[offset + 1],  // 温度摄氏度
+    };
   }
   
   /// Parse charge status response

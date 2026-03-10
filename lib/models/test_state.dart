@@ -1322,11 +1322,18 @@ class TestState extends ChangeNotifier {
                   break;
 
                 case ProductionTestCommands.cmdGetCurrent:
-                  final current = ProductionTestCommands.parseCurrentResponse(
+                  final batteryData = ProductionTestCommands.parseCurrentResponse(
                       response['payload']);
-                  result = current != null ? 'Pass ($current%)' : 'Fail';
-                  status = current != null ? TestStatus.pass : TestStatus.fail;
-                  if (current == null) errorMsg = '无法解析电量数据';
+                  if (batteryData != null) {
+                    final battery = batteryData['battery']!;
+                    final temp = batteryData['temperature']!;
+                    result = 'Pass (电量:$battery%, 温度:$temp℃)';
+                    status = TestStatus.pass;
+                  } else {
+                    result = 'Fail';
+                    status = TestStatus.fail;
+                    errorMsg = '无法解析电量数据';
+                  }
                   break;
 
                 case ProductionTestCommands.cmdGetChargeStatus:
@@ -6895,10 +6902,32 @@ class TestState extends ChangeNotifier {
       if (response != null && !response.containsKey('error')) {
         final payload = response['payload'] as Uint8List?;
         if (payload != null) {
-          final battery = ProductionTestCommands.parseCurrentResponse(payload);
-          if (battery != null) {
-            _logState?.success('✅ 电量: $battery%', type: LogType.debug);
-            return battery >= 0 && battery <= 100;
+          final batteryData = ProductionTestCommands.parseCurrentResponse(payload);
+          if (batteryData != null) {
+            final battery = batteryData['battery']!;
+            final temperature = batteryData['temperature']!;
+            final tempThreshold = TestConfig.temperatureThresholdC;
+            
+            _logState?.info('   电量: $battery%', type: LogType.debug);
+            _logState?.info('   温度: $temperature℃ (阈值: ≤$tempThreshold℃)', type: LogType.debug);
+            
+            // 检查电量范围
+            final batteryOk = battery >= 0 && battery <= 100;
+            // 检查温度阈值
+            final temperatureOk = temperature <= tempThreshold;
+            
+            if (batteryOk && temperatureOk) {
+              _logState?.success('✅ 电量和温度检测通过', type: LogType.debug);
+              return true;
+            } else {
+              if (!batteryOk) {
+                _logState?.error('❌ 电量超出范围: $battery%', type: LogType.debug);
+              }
+              if (!temperatureOk) {
+                _logState?.error('❌ 温度超出阈值: $temperature℃ > $tempThreshold℃', type: LogType.debug);
+              }
+              return false;
+            }
           }
         }
       }

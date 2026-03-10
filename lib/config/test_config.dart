@@ -78,6 +78,9 @@ class TestConfig {
   /// 电量最大值 (%)
   static int get maxBatteryPercent => _prodConfig.maxBatteryPercent;
   
+  /// 温度阈值 (℃)
+  static int get temperatureThresholdC => _prodConfig.temperatureThresholdC;
+  
   /// Touch阈值变化量
   static int get touchThreshold => _prodConfig.touchThreshold;
   
