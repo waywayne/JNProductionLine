@@ -5266,8 +5266,9 @@ class TestState extends ChangeNotifier {
       try {
         final executor = test['executor'] as Future<bool> Function();
         
-        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED测试内部已有完整的逻辑，不使用外层重试包装器
+        // WiFi、IMU、Touch、Sensor、蓝牙、MIC、LED、唤醒、指令测试内部已有完整的逻辑，不使用外层重试包装器
         // WiFi有重试，IMU/Touch/Sensor/蓝牙等待用户确认，MIC/LED有弹窗和完整流程
+        // 唤醒和产测初始化内部有10次重试，不需要外层再重试
         // 电流测试（功耗测试）通过异常机制区分通信失败（重试）和阈值失败（不重试）
         final result = (test['type'] == 'WiFi' || 
                        test['type'] == 'IMU' || 
@@ -5275,7 +5276,9 @@ class TestState extends ChangeNotifier {
                        test['type'] == 'Sensor' ||
                        test['type'] == '蓝牙' ||
                        test['type'] == 'MIC' ||
-                       test['type'] == 'LED')
+                       test['type'] == 'LED' ||
+                       test['type'] == '唤醒' ||
+                       test['type'] == '指令')
             ? await executor()
             : await _executeTestWithRetry(test['name'] as String, executor);
         
