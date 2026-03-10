@@ -44,10 +44,13 @@ class IMUDataDialog extends StatelessWidget {
                   children: [
                     TextButton.icon(
                       onPressed: () async {
-                        // 关闭弹窗时停止IMU测试
+                        // 用户主动关闭弹窗，判定测试失败
                         if (state.isIMUTesting) {
                           await state.stopIMUDataStream();
                         }
+                        // 通知测试失败
+                        state.confirmIMUTestResult(false);
+                        Navigator.of(context).pop();
                       },
                       icon: Icon(Icons.close),
                       label: Text('关闭'),

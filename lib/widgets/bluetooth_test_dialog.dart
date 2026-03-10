@@ -25,19 +25,33 @@ class BluetoothTestDialog extends StatelessWidget {
           backgroundColor: Colors.white,
           elevation: 8,
           title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(
-                Icons.bluetooth,
-                color: Colors.blue[600],
-                size: 28,
+              Row(
+                children: [
+                  Icon(
+                    Icons.bluetooth,
+                    color: Colors.blue[600],
+                    size: 28,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '蓝牙连接测试',
+                    style: TextStyle(
+                      color: Colors.blue[800],
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                '蓝牙连接测试',
-                style: TextStyle(
-                  color: Colors.blue[800],
-                  fontWeight: FontWeight.bold,
-                ),
+              IconButton(
+                onPressed: () {
+                  // 用户主动关闭弹窗，判定测试失败
+                  state.confirmBluetoothTestResult(false);
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.close),
+                tooltip: '关闭',
               ),
             ],
           ),

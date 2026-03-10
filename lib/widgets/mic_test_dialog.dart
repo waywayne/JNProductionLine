@@ -18,17 +18,31 @@ class MICTestDialog extends StatelessWidget {
           backgroundColor: Colors.white,
           elevation: 8,
           title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Icon(
-                Icons.mic,
-                color: Colors.blue,
+              Row(
+                children: [
+                  const Icon(
+                    Icons.mic,
+                    color: Colors.blue,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${micName}MIC测试',
+                    style: const TextStyle(
+                      color: Colors.blue,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                '${micName}MIC测试',
-                style: const TextStyle(
-                  color: Colors.blue,
-                ),
+              IconButton(
+                onPressed: () {
+                  // 用户主动关闭弹窗，判定测试失败
+                  state.confirmMICTestResult(false);
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.close),
+                tooltip: '关闭',
               ),
             ],
           ),

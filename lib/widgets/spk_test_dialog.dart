@@ -18,17 +18,31 @@ class SPKTestDialog extends StatelessWidget {
           backgroundColor: Colors.white,
           elevation: 8,
           title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Icon(
-                Icons.volume_up,
-                color: Colors.orange,
+              Row(
+                children: [
+                  const Icon(
+                    Icons.volume_up,
+                    color: Colors.orange,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${spkName}SPK测试',
+                    style: const TextStyle(
+                      color: Colors.orange,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                '${spkName}SPK测试',
-                style: const TextStyle(
-                  color: Colors.orange,
-                ),
+              IconButton(
+                onPressed: () {
+                  // 用户主动关闭弹窗，判定测试失败
+                  state.confirmSPKTestResult(false);
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.close),
+                tooltip: '关闭',
               ),
             ],
           ),

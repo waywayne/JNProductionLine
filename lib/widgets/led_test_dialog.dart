@@ -175,11 +175,13 @@ class _LEDTestDialogState extends State<LEDTestDialog> {
                 ),
                 IconButton(
                   onPressed: () async {
-                    // 关闭弹窗时先停止LED测试
+                    // 用户主动关闭弹窗，判定测试失败
                     final testState = context.read<TestState>();
                     if (testState.currentLEDType != null) {
                       await testState.stopLEDTest(widget.ledType);
                     }
+                    // 通知测试失败
+                    testState.confirmLEDTestResult(false);
                     if (context.mounted) {
                       Navigator.of(context).pop();
                     }
@@ -343,11 +345,13 @@ class _LEDTestDialogState extends State<LEDTestDialog> {
                   ),
                   TextButton(
                     onPressed: () async {
-                      // 关闭弹窗时先停止LED测试
+                      // 用户主动关闭弹窗，判定测试失败
                       final testState = context.read<TestState>();
                       if (testState.currentLEDType != null) {
                         await testState.stopLEDTest(widget.ledType);
                       }
+                      // 通知测试失败
+                      testState.confirmLEDTestResult(false);
                       if (context.mounted) {
                         Navigator.of(context).pop();
                       }

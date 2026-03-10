@@ -60,6 +60,15 @@ class SensorDataDialog extends StatelessWidget {
                     ],
                   ),
                 ),
+              IconButton(
+                onPressed: () {
+                  // 用户主动关闭弹窗，判定测试失败
+                  state.confirmSensorTestResult(false);
+                  Navigator.of(context).pop();
+                },
+                icon: const Icon(Icons.close),
+                tooltip: '关闭',
+              ),
             ],
           ),
           content: SizedBox(
