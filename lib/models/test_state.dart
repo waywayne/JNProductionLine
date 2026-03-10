@@ -429,6 +429,14 @@ class TestState extends ChangeNotifier {
         _logState?.warning('   ⚠️  保存到SN记录数据库失败: $e', type: LogType.debug);
       }
       
+      // 立即记录到全局设备记录文件（未测试状态）
+      try {
+        await _saveDeviceToGlobalRecord(testStatus: '未测试');
+        _logState?.info('   📝 已记录到全局设备文件（未测试）', type: LogType.debug);
+      } catch (e) {
+        _logState?.warning('   ⚠️  记录到全局设备文件失败: $e', type: LogType.debug);
+      }
+      
       notifyListeners();
     } catch (e) {
       _logState?.error('生成设备标识信息失败: $e', type: LogType.debug);
@@ -5614,6 +5622,12 @@ class TestState extends ChangeNotifier {
       _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
       _logState?.info('   MIC编号: $micNumber (0=左, 1=右, 2=TALK)', type: LogType.debug);
       
+      // 关闭旧弹窗（如果存在）
+      if (_showMICDialog) {
+        _showMICDialog = false;
+        _logState?.debug('   关闭旧的MIC测试弹窗', type: LogType.debug);
+      }
+      
       // 创建Completer用于等待用户确认
       _micTestCompleter = Completer<bool>();
       
@@ -5724,8 +5738,11 @@ class TestState extends ChangeNotifier {
   
   /// 用户确认MIC测试结果
   Future<void> confirmMICTestResult(bool passed) async {
-    if (_currentMICNumber == null) {
-      _logState?.warning('[MIC] 没有正在进行的MIC测试', type: LogType.debug);
+    // 检查是否有正在进行的MIC测试（必须同时满足：有MIC编号 且 有未完成的Completer）
+    if (_currentMICNumber == null || _micTestCompleter == null || _micTestCompleter!.isCompleted) {
+      _logState?.warning('[MIC] 没有正在进行的MIC测试或测试已完成', type: LogType.debug);
+      _logState?.debug('   _currentMICNumber: $_currentMICNumber', type: LogType.debug);
+      _logState?.debug('   _micTestCompleter: ${_micTestCompleter != null ? (_micTestCompleter!.isCompleted ? "已完成" : "未完成") : "null"}', type: LogType.debug);
       return;
     }
     
@@ -5741,10 +5758,8 @@ class TestState extends ChangeNotifier {
     }
     
     // 完成Completer，通知测试结果
-    if (_micTestCompleter != null && !_micTestCompleter!.isCompleted) {
-      _micTestCompleter!.complete(passed);
-      _logState?.info('📝 记录MIC测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
-    }
+    _micTestCompleter!.complete(passed);
+    _logState?.info('📝 记录MIC测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
   }
 
   /// 开始SPK测试（带弹窗）
@@ -5753,6 +5768,12 @@ class TestState extends ChangeNotifier {
       final spkName = spkNumber == 0 ? '左' : '右';
       _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
       _logState?.info('   SPK编号: $spkNumber (0=左, 1=右)', type: LogType.debug);
+      
+      // 关闭旧弹窗（如果存在）
+      if (_showSPKDialog) {
+        _showSPKDialog = false;
+        _logState?.debug('   关闭旧的SPK测试弹窗', type: LogType.debug);
+      }
       
       // 创建Completer用于等待用户确认
       _spkTestCompleter = Completer<bool>();
@@ -5796,8 +5817,11 @@ class TestState extends ChangeNotifier {
   
   /// 用户确认SPK测试结果
   Future<void> confirmSPKTestResult(bool passed) async {
-    if (_currentSPKNumber == null) {
-      _logState?.warning('[SPK] 没有正在进行的SPK测试', type: LogType.debug);
+    // 检查是否有正在进行的SPK测试（必须同时满足：有SPK编号 且 有未完成的Completer）
+    if (_currentSPKNumber == null || _spkTestCompleter == null || _spkTestCompleter!.isCompleted) {
+      _logState?.warning('[SPK] 没有正在进行的SPK测试或测试已完成', type: LogType.debug);
+      _logState?.debug('   _currentSPKNumber: $_currentSPKNumber', type: LogType.debug);
+      _logState?.debug('   _spkTestCompleter: ${_spkTestCompleter != null ? (_spkTestCompleter!.isCompleted ? "已完成" : "未完成") : "null"}', type: LogType.debug);
       return;
     }
     
@@ -5805,16 +5829,14 @@ class TestState extends ChangeNotifier {
     _logState?.info('📝 用户确认${spkName}SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
     _logState?.info('   当前SPK编号: $_currentSPKNumber', type: LogType.debug);
     
-    // 关闭弹窗
+    // 完成Completer，通知测试结果
+    _spkTestCompleter!.complete(passed);
+    _logState?.info('📝 记录SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    
+    // 关闭弹窗并清理状态
     _showSPKDialog = false;
     _currentSPKNumber = null;
     notifyListeners();
-    
-    // 完成Completer，通知测试结果
-    if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
-      _spkTestCompleter!.complete(passed);
-      _logState?.info('📝 记录SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
-    }
   }
 
   /// MIC自动测试
@@ -8350,15 +8372,16 @@ class TestState extends ChangeNotifier {
       _logState?.info(_currentTestReport!.summaryText, type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 如果测试全部通过，记录设备信息到全局文件
-      if (_currentTestReport!.allTestsPassed) {
-        _saveDeviceToGlobalRecord();
-      }
+      // 更新全局设备记录的测试状态
+      final testStatus = _currentTestReport!.allTestsPassed ? '通过' : '失败';
+      _saveDeviceToGlobalRecord(testStatus: testStatus);
     }
   }
 
   /// 保存设备信息到全局记录文件
-  Future<void> _saveDeviceToGlobalRecord() async {
+  /// 
+  /// [testStatus] 测试状态：'未测试'、'通过'、'失败'
+  Future<void> _saveDeviceToGlobalRecord({String testStatus = '未测试'}) async {
     try {
       if (_currentDeviceIdentity == null) {
         _logState?.warning('⚠️ 无设备标识信息，跳过全局记录', type: LogType.debug);
@@ -8382,34 +8405,68 @@ class TestState extends ChangeNotifier {
       
       final globalRecordFile = File(path.join(saveDir.path, 'device_records.csv'));
       
-      // 检查文件是否存在，如果不存在则创建并写入表头
-      bool fileExists = await globalRecordFile.exists();
-      if (!fileExists) {
-        await globalRecordFile.writeAsString(
-          '时间戳,SN号,蓝牙MAC地址,WiFi MAC地址,测试结果,通过率\n',
-          mode: FileMode.write,
-        );
-      }
-      
-      // 准备记录数据
-      final timestamp = DateTime.now().toIso8601String();
       final snCode = _currentDeviceIdentity!['sn'] ?? 'UNKNOWN';
       final bluetoothMac = _currentDeviceIdentity!['bluetoothMac'] ?? 'UNKNOWN';
       final wifiMac = _currentDeviceIdentity!['wifiMac'] ?? 'UNKNOWN';
-      final testResult = _currentTestReport?.allTestsPassed == true ? '通过' : '失败';
-      final passRate = _currentTestReport?.passRate.toStringAsFixed(1) ?? '0.0';
       
-      // 追加记录到文件
-      final recordLine = '$timestamp,$snCode,$bluetoothMac,$wifiMac,$testResult,$passRate%\n';
-      await globalRecordFile.writeAsString(
-        recordLine,
-        mode: FileMode.append,
-      );
+      // 检查文件是否存在
+      bool fileExists = await globalRecordFile.exists();
       
-      _logState?.success('✅ 设备信息已记录到全局文件', type: LogType.debug);
+      if (!fileExists) {
+        // 创建新文件并写入表头和第一条记录
+        await globalRecordFile.writeAsString(
+          '分配时间,SN号,蓝牙MAC地址,WiFi MAC地址,测试状态,通过率,最后更新时间\n',
+          mode: FileMode.write,
+        );
+        
+        final timestamp = DateTime.now().toIso8601String();
+        final passRate = testStatus == '通过' 
+            ? (_currentTestReport?.passRate.toStringAsFixed(1) ?? '100.0')
+            : (testStatus == '失败' ? (_currentTestReport?.passRate.toStringAsFixed(1) ?? '0.0') : '-');
+        final recordLine = '$timestamp,$snCode,$bluetoothMac,$wifiMac,$testStatus,$passRate%,$timestamp\n';
+        
+        await globalRecordFile.writeAsString(recordLine, mode: FileMode.append);
+      } else {
+        // 读取现有文件内容
+        final lines = await globalRecordFile.readAsLines();
+        
+        // 查找是否已存在该SN的记录
+        int existingLineIndex = -1;
+        for (int i = 1; i < lines.length; i++) {
+          if (lines[i].contains(snCode)) {
+            existingLineIndex = i;
+            break;
+          }
+        }
+        
+        final timestamp = DateTime.now().toIso8601String();
+        final passRate = testStatus == '通过' 
+            ? (_currentTestReport?.passRate.toStringAsFixed(1) ?? '100.0')
+            : (testStatus == '失败' ? (_currentTestReport?.passRate.toStringAsFixed(1) ?? '0.0') : '-');
+        
+        if (existingLineIndex != -1) {
+          // 更新现有记录（保留原分配时间，更新测试状态和最后更新时间）
+          final oldLine = lines[existingLineIndex].split(',');
+          final allocTime = oldLine[0]; // 保留原分配时间
+          lines[existingLineIndex] = '$allocTime,$snCode,$bluetoothMac,$wifiMac,$testStatus,$passRate%,$timestamp';
+          
+          // 写回文件
+          await globalRecordFile.writeAsString(lines.join('\n') + '\n', mode: FileMode.write);
+          
+          _logState?.success('✅ 已更新设备记录（$testStatus）', type: LogType.debug);
+        } else {
+          // 添加新记录
+          final recordLine = '$timestamp,$snCode,$bluetoothMac,$wifiMac,$testStatus,$passRate%,$timestamp\n';
+          await globalRecordFile.writeAsString(recordLine, mode: FileMode.append);
+          
+          _logState?.success('✅ 已添加设备记录（$testStatus）', type: LogType.debug);
+        }
+      }
+      
       _logState?.info('   📋 SN: $snCode', type: LogType.debug);
       _logState?.info('   📶 蓝牙MAC: $bluetoothMac', type: LogType.debug);
       _logState?.info('   📡 WiFi MAC: $wifiMac', type: LogType.debug);
+      _logState?.info('   📊 状态: $testStatus', type: LogType.debug);
       _logState?.info('   📁 文件: ${globalRecordFile.path}', type: LogType.debug);
     } catch (e) {
       _logState?.error('❌ 保存全局设备记录失败: $e', type: LogType.debug);

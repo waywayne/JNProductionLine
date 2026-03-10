@@ -16,15 +16,17 @@ class SNMacConfig {
     '2': '工厂B',
   };
   
-  // WiFi MAC地址范围: 48-08-EB-50-00-00 到 48-08-EB-5F-FF-FF
-  static const String wifiMacPrefix = '48:08:EB:5';
-  static const int wifiMacRangeStart = 0x0; // 50-00-00
-  static const int wifiMacRangeEnd = 0xFFFFF; // 5F-FF-FF
+  // WiFi MAC地址范围: 48:08:EB:50:00:00 到 48:08:EB:5F:FF:FF
+  static const String wifiMacPrefix = '48:08:EB';
+  static const int wifiMacRangeStart = 0x0;      // 从0开始计数
+  static const int wifiMacRangeEnd = 0xFFFFF;    // 最多1048575个地址
+  static const int wifiMacBaseValue = 0x500000;  // 起始地址：50:00:00
   
-  // 蓝牙MAC地址范围: 48-08-EB-60-00-00 到 48-08-EB-6F-FF-FF  
-  static const String bluetoothMacPrefix = '48:08:EB:6';
-  static const int bluetoothMacRangeStart = 0x0; // 60-00-00
-  static const int bluetoothMacRangeEnd = 0xFFFFF; // 6F-FF-FF
+  // 蓝牙MAC地址范围: 48:08:EB:60:00:00 到 48:08:EB:6F:FF:FF  
+  static const String bluetoothMacPrefix = '48:08:EB';
+  static const int bluetoothMacRangeStart = 0x0;      // 从0开始计数
+  static const int bluetoothMacRangeEnd = 0xFFFFF;    // 最多1048575个地址
+  static const int bluetoothMacBaseValue = 0x600000;  // 起始地址：60:00:00
   
   // Base36字符集
   static const String base36Chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -38,8 +40,8 @@ class SNMacConfig {
     'factory': '1',
     'productionLine': '1',
     'serialCounter': 1,
-    'wifiMacCounter': 0,
-    'bluetoothMacCounter': 0,
+    'wifiMacCounter': 20,        // 从20开始计数
+    'bluetoothMacCounter': 20,   // 从20开始计数
     'allocatedSNs': <String>[],
     'allocatedWifiMacs': <String>[],
     'allocatedBluetoothMacs': <String>[],
@@ -133,24 +135,44 @@ class SNMacConfig {
   
   /// 生成WiFi MAC地址
   static Future<String> generateWifiMac() async {
-    final counter = _currentConfig['wifiMacCounter'] as int;
+    final allocatedWifiMacs = _currentConfig['allocatedWifiMacs'] as List<dynamic>;
+    int counter = _currentConfig['wifiMacCounter'] as int;
     
-    if (counter > wifiMacRangeEnd) {
-      throw Exception('WiFi MAC地址已用完');
-    }
+    // 循环查找未分配的MAC地址
+    String macAddress;
+    int attempts = 0;
+    const maxAttempts = 1000; // 防止无限循环
     
-    // 计算MAC地址的后3字节
-    final macSuffix = counter;
-    final byte1 = (macSuffix >> 16) & 0xFF;
-    final byte2 = (macSuffix >> 8) & 0xFF;
-    final byte3 = macSuffix & 0xFF;
-    
-    // 生成完整MAC地址
-    final macAddress = '$wifiMacPrefix${byte1.toRadixString(16).toUpperCase().padLeft(1, '0')}:${byte2.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte3.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+    do {
+      if (counter > wifiMacRangeEnd) {
+        throw Exception('WiFi MAC地址已用完');
+      }
+      
+      if (attempts >= maxAttempts) {
+        throw Exception('无法找到可用的WiFi MAC地址（尝试次数过多）');
+      }
+      
+      // 计算MAC地址：基础地址 + 计数器
+      final macValue = wifiMacBaseValue + counter;
+      final byte4 = (macValue >> 16) & 0xFF;  // 第4字节 (0x50-0x5F)
+      final byte5 = (macValue >> 8) & 0xFF;   // 第5字节 (0x00-0xFF)
+      final byte6 = macValue & 0xFF;          // 第6字节 (0x00-0xFF)
+      
+      // 生成完整MAC地址
+      macAddress = '$wifiMacPrefix:${byte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      
+      // 如果已存在，递增计数器继续查找
+      if (allocatedWifiMacs.contains(macAddress)) {
+        counter++;
+        attempts++;
+        continue;
+      }
+      
+      break;
+    } while (true);
     
     // 更新计数器并保存
     _currentConfig['wifiMacCounter'] = counter + 1;
-    final allocatedWifiMacs = _currentConfig['allocatedWifiMacs'] as List<dynamic>;
     allocatedWifiMacs.add(macAddress);
     await _saveConfig();
     
@@ -159,24 +181,44 @@ class SNMacConfig {
   
   /// 生成蓝牙MAC地址
   static Future<String> generateBluetoothMac() async {
-    final counter = _currentConfig['bluetoothMacCounter'] as int;
+    final allocatedBluetoothMacs = _currentConfig['allocatedBluetoothMacs'] as List<dynamic>;
+    int counter = _currentConfig['bluetoothMacCounter'] as int;
     
-    if (counter > bluetoothMacRangeEnd) {
-      throw Exception('蓝牙MAC地址已用完');
-    }
+    // 循环查找未分配的MAC地址
+    String macAddress;
+    int attempts = 0;
+    const maxAttempts = 1000; // 防止无限循环
     
-    // 计算MAC地址的后3字节
-    final macSuffix = counter;
-    final byte1 = (macSuffix >> 16) & 0xFF;
-    final byte2 = (macSuffix >> 8) & 0xFF;
-    final byte3 = macSuffix & 0xFF;
-    
-    // 生成完整MAC地址
-    final macAddress = '$bluetoothMacPrefix${byte1.toRadixString(16).toUpperCase().padLeft(1, '0')}:${byte2.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte3.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+    do {
+      if (counter > bluetoothMacRangeEnd) {
+        throw Exception('蓝牙MAC地址已用完');
+      }
+      
+      if (attempts >= maxAttempts) {
+        throw Exception('无法找到可用的蓝牙MAC地址（尝试次数过多）');
+      }
+      
+      // 计算MAC地址：基础地址 + 计数器
+      final macValue = bluetoothMacBaseValue + counter;
+      final byte4 = (macValue >> 16) & 0xFF;  // 第4字节 (0x60-0x6F)
+      final byte5 = (macValue >> 8) & 0xFF;   // 第5字节 (0x00-0xFF)
+      final byte6 = macValue & 0xFF;          // 第6字节 (0x00-0xFF)
+      
+      // 生成完整MAC地址
+      macAddress = '$bluetoothMacPrefix:${byte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      
+      // 如果已存在，递增计数器继续查找
+      if (allocatedBluetoothMacs.contains(macAddress)) {
+        counter++;
+        attempts++;
+        continue;
+      }
+      
+      break;
+    } while (true);
     
     // 更新计数器并保存
     _currentConfig['bluetoothMacCounter'] = counter + 1;
-    final allocatedBluetoothMacs = _currentConfig['allocatedBluetoothMacs'] as List<dynamic>;
     allocatedBluetoothMacs.add(macAddress);
     await _saveConfig();
     
