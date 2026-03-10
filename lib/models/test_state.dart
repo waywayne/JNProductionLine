@@ -5059,17 +5059,18 @@ class TestState extends ChangeNotifier {
     _currentAutoTestIndex = 0;
     _testReportItems.clear();
     
-    final deviceSN = _currentDeviceIdentity?['sn'] ?? 'UNKNOWN';
-    final bluetoothMAC = _currentDeviceIdentity?['bluetoothMac'];
-    final wifiMAC = _currentDeviceIdentity?['wifiMac'];
+    // 清空旧的设备标识信息，确保使用新生成的SN号
+    _currentDeviceIdentity = null;
+    _logState?.debug('   已清空旧的设备标识信息', type: LogType.debug);
     
     // 获取测试序列的总数
     final testSequence = _getTestSequence();
     
+    // 创建测试报告，SN号初始为"待分配"，后续在生成设备标识后更新
     _currentTestReport = TestReport(
-      deviceSN: deviceSN,
-      bluetoothMAC: bluetoothMAC,
-      wifiMAC: wifiMAC,
+      deviceSN: '待分配',
+      bluetoothMAC: null,
+      wifiMAC: null,
       startTime: DateTime.now(),
       items: [],
       expectedTotalTests: testSequence.length,  // 设置预期总测试数
@@ -5079,13 +5080,7 @@ class TestState extends ChangeNotifier {
     
     _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     _logState?.info('🚀 开始自动化测试', type: LogType.debug);
-    _logState?.info('📱 设备SN: $deviceSN', type: LogType.debug);
-    if (bluetoothMAC != null) {
-      _logState?.info('📶 蓝牙MAC: $bluetoothMAC', type: LogType.debug);
-    }
-    if (wifiMAC != null) {
-      _logState?.info('📡 WiFi MAC: $wifiMAC', type: LogType.debug);
-    }
+    _logState?.info('📱 设备SN: ${_currentTestReport!.deviceSN} (将在测试过程中生成)', type: LogType.debug);
     _logState?.info('⏱️  开始时间: ${DateTime.now()}', type: LogType.debug);
     _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     
@@ -7080,7 +7075,7 @@ class TestState extends ChangeNotifier {
           startTime: _currentTestReport!.startTime,
           endTime: _currentTestReport!.endTime,
           expectedTotalTests: _currentTestReport!.expectedTotalTests,
-          items: _currentTestReport!.items,
+          items: List.from(_testReportItems),  // 使用当前的测试项列表
         );
         _logState?.info('   📝 已更新测试报告设备信息', type: LogType.debug);
         _logState?.info('      SN: ${_currentDeviceIdentity!["sn"]}', type: LogType.debug);
