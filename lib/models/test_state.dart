@@ -5628,55 +5628,83 @@ class TestState extends ChangeNotifier {
 
   /// 开始MIC测试（带弹窗）
   Future<bool> startMICTest(int micNumber) async {
-    try {
-      final micName = micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK');
-      _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
-      _logState?.info('   MIC编号: $micNumber (0=左, 1=右, 2=TALK)', type: LogType.debug);
-      
-      // 关闭旧弹窗（如果存在）
-      if (_showMICDialog) {
-        _showMICDialog = false;
-        _logState?.debug('   关闭旧的MIC测试弹窗', type: LogType.debug);
-      }
-      
-      // 创建Completer用于等待用户确认
-      _micTestCompleter = Completer<bool>();
-      
-      // 设置当前测试的MIC编号
-      _currentMICNumber = micNumber;
-      
-      // 发送打开MIC命令 (CMD 0x08, MIC号, OPT 0x00)
-      final openCommand = ProductionTestCommands.createControlMICCommand(micNumber, ProductionTestCommands.micControlOpen);
-      final commandHex = openCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-      _logState?.info('📤 发送打开命令: [$commandHex]', type: LogType.debug);
-      _logState?.info('   CMD: 0x08, MIC号: 0x${micNumber.toRadixString(16).toUpperCase().padLeft(2, '0')}, OPT: 0x00(打开)', type: LogType.debug);
-      
-      // 发送命令并等待响应
-      final response = await _serialService.sendCommandAndWaitResponse(
-        openCommand,
-        timeout: const Duration(seconds: 5),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-      
-      if (response != null && !response.containsKey('error')) {
-        _logState?.success('✅ ${micName}MIC打开成功', type: LogType.debug);
+    const maxRetries = 3;
+    
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        final micName = micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK');
         
-        // 显示弹窗
-        _showMICDialog = true;
-        notifyListeners();
+        if (attempt == 1) {
+          _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
+          _logState?.info('   MIC编号: $micNumber (0=左, 1=右, 2=TALK)', type: LogType.debug);
+        } else {
+          _logState?.warning('🔄 ${micName}MIC测试重试 $attempt/$maxRetries', type: LogType.debug);
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
         
-        return true;
-      } else {
-        _logState?.error('❌ ${micName}MIC打开失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
+        // 关闭旧弹窗（如果存在）
+        if (_showMICDialog) {
+          _showMICDialog = false;
+          _logState?.debug('   关闭旧的MIC测试弹窗', type: LogType.debug);
+        }
+        
+        // 创建Completer用于等待用户确认
+        _micTestCompleter = Completer<bool>();
+        
+        // 设置当前测试的MIC编号
+        _currentMICNumber = micNumber;
+        
+        // 发送打开MIC命令 (CMD 0x08, MIC号, OPT 0x00)
+        final openCommand = ProductionTestCommands.createControlMICCommand(micNumber, ProductionTestCommands.micControlOpen);
+        final commandHex = openCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📤 发送打开命令: [$commandHex]', type: LogType.debug);
+        _logState?.info('   CMD: 0x08, MIC号: 0x${micNumber.toRadixString(16).toUpperCase().padLeft(2, '0')}, OPT: 0x00(打开)', type: LogType.debug);
+        
+        // 发送命令并等待响应
+        final response = await _serialService.sendCommandAndWaitResponse(
+          openCommand,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+        
+        if (response != null && !response.containsKey('error')) {
+          _logState?.success('✅ ${micName}MIC打开成功', type: LogType.debug);
+          
+          // 显示弹窗
+          _showMICDialog = true;
+          notifyListeners();
+          
+          return true;
+        } else {
+          _logState?.error('❌ ${micName}MIC打开失败 (尝试 $attempt/$maxRetries): ${response?['error'] ?? '无响应'}', type: LogType.debug);
+          
+          // 如果不是最后一次尝试，继续重试
+          if (attempt < maxRetries) {
+            continue;
+          }
+          
+          // 最后一次尝试也失败了
+          _currentMICNumber = null;
+          return false;
+        }
+      } catch (e) {
+        _logState?.error('❌ 启动MIC测试异常 (尝试 $attempt/$maxRetries): $e', type: LogType.debug);
+        
+        // 如果不是最后一次尝试，继续重试
+        if (attempt < maxRetries) {
+          continue;
+        }
+        
+        // 最后一次尝试也失败了
         _currentMICNumber = null;
         return false;
       }
-    } catch (e) {
-      _logState?.error('❌ 启动MIC测试异常: $e', type: LogType.debug);
-      _currentMICNumber = null;
-      return false;
     }
+    
+    // 所有重试都失败
+    _currentMICNumber = null;
+    return false;
   }
 
   /// 停止MIC测试（关闭MIC）
