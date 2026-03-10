@@ -8455,10 +8455,15 @@ class TestState extends ChangeNotifier {
   /// 完成测试报告
   void _finalizeTestReport() {
     if (_currentTestReport != null) {
+      // 如果设备标识已生成，使用最新的设备信息；否则保留原有信息
+      final deviceSN = _currentDeviceIdentity?['sn'] ?? _currentTestReport!.deviceSN;
+      final bluetoothMAC = _currentDeviceIdentity?['bluetoothMac'] ?? _currentTestReport!.bluetoothMAC;
+      final wifiMAC = _currentDeviceIdentity?['wifiMac'] ?? _currentTestReport!.wifiMAC;
+      
       _currentTestReport = TestReport(
-        deviceSN: _currentTestReport!.deviceSN,
-        bluetoothMAC: _currentTestReport!.bluetoothMAC,
-        wifiMAC: _currentTestReport!.wifiMAC,
+        deviceSN: deviceSN,
+        bluetoothMAC: bluetoothMAC,
+        wifiMAC: wifiMAC,
         startTime: _currentTestReport!.startTime,
         endTime: DateTime.now(),
         items: List.from(_testReportItems),
@@ -8467,6 +8472,9 @@ class TestState extends ChangeNotifier {
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📊 测试完成', type: LogType.debug);
+      _logState?.info('   设备SN: $deviceSN', type: LogType.debug);
+      _logState?.info('   WiFi MAC: ${wifiMAC ?? "未分配"}', type: LogType.debug);
+      _logState?.info('   蓝牙MAC: ${bluetoothMAC ?? "未分配"}', type: LogType.debug);
       _logState?.info(_currentTestReport!.summaryText, type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       

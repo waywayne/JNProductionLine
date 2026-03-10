@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math';
+import '../services/sn_manager_service.dart';
 
 /// SN码和MAC地址统一分配管理器
 class SNMacConfig {
@@ -135,6 +136,9 @@ class SNMacConfig {
   
   /// 生成WiFi MAC地址
   static Future<String> generateWifiMac() async {
+    // 导入数据库服务
+    final snManager = SNManagerService();
+    
     final allocatedWifiMacs = _currentConfig['allocatedWifiMacs'] as List<dynamic>;
     int counter = _currentConfig['wifiMacCounter'] as int;
     
@@ -161,10 +165,11 @@ class SNMacConfig {
       // 生成完整MAC地址
       macAddress = '$wifiMacPrefix:${byte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
       
-      // 如果已存在，递增计数器继续查找
-      if (allocatedWifiMacs.contains(macAddress)) {
+      // 检查是否已存在（内存中的配置文件 或 数据库中）
+      if (allocatedWifiMacs.contains(macAddress) || snManager.isWifiMacExists(macAddress)) {
         counter++;
         attempts++;
+        print('⚠️  WiFi MAC $macAddress 已存在，自动递增计数器到 $counter');
         continue;
       }
       
@@ -176,11 +181,15 @@ class SNMacConfig {
     allocatedWifiMacs.add(macAddress);
     await _saveConfig();
     
+    print('✅ 分配WiFi MAC: $macAddress (计数器: $counter)');
     return macAddress;
   }
   
   /// 生成蓝牙MAC地址
   static Future<String> generateBluetoothMac() async {
+    // 导入数据库服务
+    final snManager = SNManagerService();
+    
     final allocatedBluetoothMacs = _currentConfig['allocatedBluetoothMacs'] as List<dynamic>;
     int counter = _currentConfig['bluetoothMacCounter'] as int;
     
@@ -207,10 +216,11 @@ class SNMacConfig {
       // 生成完整MAC地址
       macAddress = '$bluetoothMacPrefix:${byte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${byte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
       
-      // 如果已存在，递增计数器继续查找
-      if (allocatedBluetoothMacs.contains(macAddress)) {
+      // 检查是否已存在（内存中的配置文件 或 数据库中）
+      if (allocatedBluetoothMacs.contains(macAddress) || snManager.isBluetoothMacExists(macAddress)) {
         counter++;
         attempts++;
+        print('⚠️  蓝牙MAC $macAddress 已存在，自动递增计数器到 $counter');
         continue;
       }
       
@@ -222,6 +232,7 @@ class SNMacConfig {
     allocatedBluetoothMacs.add(macAddress);
     await _saveConfig();
     
+    print('✅ 分配蓝牙MAC: $macAddress (计数器: $counter)');
     return macAddress;
   }
   

@@ -374,33 +374,93 @@ class SNManagerService {
     return buffer.toString();
   }
 
+  /// 检查WiFi MAC地址是否已存在于数据库中
+  bool isWifiMacExists(String macAddress) {
+    for (final record in _snRecords.values) {
+      if (record.wifiMac != null && record.wifiMac == macAddress) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// 检查蓝牙MAC地址是否已存在于数据库中
+  bool isBluetoothMacExists(String macAddress) {
+    for (final record in _snRecords.values) {
+      if (record.btMac != null && record.btMac == macAddress) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// 获取统计信息
   /// 从 SNMacConfig 获取真实的 MAC 地址计数器和下一个 MAC 地址
+  /// 下一个 MAC 地址会检查数据库去重，确保返回真正可用的地址
   Map<String, dynamic> getStatistics() {
     final config = SNMacConfig.getCurrentConfig();
-    final wifiMacCounter = config['wifiMacCounter'] as int? ?? 0;
-    final btMacCounter = config['bluetoothMacCounter'] as int? ?? 0;
+    int wifiMacCounter = config['wifiMacCounter'] as int? ?? 0;
+    int btMacCounter = config['bluetoothMacCounter'] as int? ?? 0;
     
-    // 计算下一个 WiFi MAC 地址
-    final nextWifiMacValue = SNMacConfig.wifiMacBaseValue + wifiMacCounter;
-    final wifiByte4 = (nextWifiMacValue >> 16) & 0xFF;
-    final wifiByte5 = (nextWifiMacValue >> 8) & 0xFF;
-    final wifiByte6 = nextWifiMacValue & 0xFF;
-    final nextWifiMac = '${SNMacConfig.wifiMacPrefix}:${wifiByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+    // 计算下一个可用的 WiFi MAC 地址（检查数据库去重）
+    String nextWifiMac;
+    int wifiAttempts = 0;
+    const maxAttempts = 1000;
     
-    // 计算下一个蓝牙 MAC 地址
-    final nextBtMacValue = SNMacConfig.bluetoothMacBaseValue + btMacCounter;
-    final btByte4 = (nextBtMacValue >> 16) & 0xFF;
-    final btByte5 = (nextBtMacValue >> 8) & 0xFF;
-    final btByte6 = nextBtMacValue & 0xFF;
-    final nextBtMac = '${SNMacConfig.bluetoothMacPrefix}:${btByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+    do {
+      if (wifiAttempts >= maxAttempts) {
+        nextWifiMac = '无可用地址';
+        break;
+      }
+      
+      final nextWifiMacValue = SNMacConfig.wifiMacBaseValue + wifiMacCounter;
+      final wifiByte4 = (nextWifiMacValue >> 16) & 0xFF;
+      final wifiByte5 = (nextWifiMacValue >> 8) & 0xFF;
+      final wifiByte6 = nextWifiMacValue & 0xFF;
+      nextWifiMac = '${SNMacConfig.wifiMacPrefix}:${wifiByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      
+      // 检查是否已存在于数据库中
+      if (isWifiMacExists(nextWifiMac)) {
+        wifiMacCounter++;
+        wifiAttempts++;
+        continue;
+      }
+      
+      break;
+    } while (true);
+    
+    // 计算下一个可用的蓝牙 MAC 地址（检查数据库去重）
+    String nextBtMac;
+    int btAttempts = 0;
+    
+    do {
+      if (btAttempts >= maxAttempts) {
+        nextBtMac = '无可用地址';
+        break;
+      }
+      
+      final nextBtMacValue = SNMacConfig.bluetoothMacBaseValue + btMacCounter;
+      final btByte4 = (nextBtMacValue >> 16) & 0xFF;
+      final btByte5 = (nextBtMacValue >> 8) & 0xFF;
+      final btByte6 = nextBtMacValue & 0xFF;
+      nextBtMac = '${SNMacConfig.bluetoothMacPrefix}:${btByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      
+      // 检查是否已存在于数据库中
+      if (isBluetoothMacExists(nextBtMac)) {
+        btMacCounter++;
+        btAttempts++;
+        continue;
+      }
+      
+      break;
+    } while (true);
     
     return {
-      'total_records': _snRecords.length,
+      'total_records': _snRecords.length,  // 直接从数据库读取总记录数
       'current_wifi_mac_index': wifiMacCounter,
       'current_bt_mac_index': btMacCounter,
-      'next_wifi_mac': nextWifiMac,
-      'next_bt_mac': nextBtMac,
+      'next_wifi_mac': nextWifiMac,  // 已去重的下一个可用WiFi MAC
+      'next_bt_mac': nextBtMac,      // 已去重的下一个可用蓝牙MAC
     };
   }
 }
