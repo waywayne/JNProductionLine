@@ -62,7 +62,15 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             
-            // Touch测试弹窗
+            // 测试报告弹窗（放在最底层）
+            if (testState.showTestReportDialog)
+              const TestReportDialog(),
+            
+            // GPIB检测弹窗
+            if (testState.showGpibDialog)
+              const GpibDetectionDialog(),
+            
+            // Touch测试弹窗（放在测试报告之上）
             if (testState.showTouchDialog)
               TouchTestDialog(
                 isLeftTouch: testState.isLeftTouchDialog,
@@ -125,14 +133,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-            
-            // 测试报告弹窗
-            if (testState.showTestReportDialog)
-              const TestReportDialog(),
-            
-            // GPIB检测弹窗
-            if (testState.showGpibDialog)
-              const GpibDetectionDialog(),
           ],
         );
       },

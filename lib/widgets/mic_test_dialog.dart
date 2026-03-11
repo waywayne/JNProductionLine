@@ -37,8 +37,8 @@ class MICTestDialog extends StatelessWidget {
               ),
               IconButton(
                 onPressed: () {
-                  // 用户主动关闭弹窗，判定测试失败
-                  state.confirmMICTestResult(false);
+                  // 用户主动关闭弹窗，判定测试失败且不重试
+                  state.confirmMICTestResult(false, userCancelled: true);
                   Navigator.of(context).pop();
                 },
                 icon: const Icon(Icons.close),
@@ -106,7 +106,8 @@ class MICTestDialog extends StatelessWidget {
                         padding: const EdgeInsets.only(right: 8),
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            state.confirmMICTestResult(false);
+                            // 用户点击失败按钮，判定测试失败且不重试
+                            state.confirmMICTestResult(false, userCancelled: true);
                           },
                           icon: const Icon(Icons.cancel, size: 18),
                           label: const Text('测试失败'),

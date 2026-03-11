@@ -25,7 +25,8 @@ class TouchTestDialog extends StatelessWidget {
         return Dialog(
           backgroundColor: Colors.transparent,
           child: Container(
-            width: 500,
+            width: 600,
+            constraints: const BoxConstraints(maxHeight: 800),
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: Colors.white,
@@ -341,20 +342,17 @@ class TouchTestDialog extends StatelessWidget {
   }
 
   Widget _buildStepsList(List<TouchTestStep> steps) {
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 200),
-      child: ListView.builder(
-        shrinkWrap: true,
-        itemCount: steps.length,
-        itemBuilder: (context, index) {
-          final step = steps[index];
-          return Consumer<TestState>(
-            builder: (context, state, child) {
-              return _buildStepListItem(step, index, state);
-            },
-          );
-        },
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: steps.asMap().entries.map((entry) {
+        final index = entry.key;
+        final step = entry.value;
+        return Consumer<TestState>(
+          builder: (context, state, child) {
+            return _buildStepListItem(step, index, state);
+          },
+        );
+      }).toList(),
     );
   }
 

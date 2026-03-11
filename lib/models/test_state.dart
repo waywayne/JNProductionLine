@@ -224,6 +224,7 @@ class TestState extends ChangeNotifier {
   bool _showSPKDialog = false;
   int? _currentSPKNumber; // 0=左SPK, 1=右SPK
   Completer<bool>? _spkTestCompleter; // 用于等待用户确认SPK测试结果
+  bool _userCancelledTest = false; // 用户是否主动取消测试（点击关闭或失败按钮）
   
   // 蓝牙测试弹窗状态
   bool _showBluetoothDialog = false;
@@ -616,6 +617,15 @@ class TestState extends ChangeNotifier {
       
       if (result) {
         _logState?.success('✅ ${test['name']} 重试成功', type: LogType.debug);
+        
+        // 如果重试成功，关闭测试报告弹窗并继续执行后续测试
+        _showTestReportDialog = false;
+        notifyListeners();
+        
+        // 从下一个测试项继续执行
+        _currentAutoTestIndex = testIndex + 1;
+        _logState?.info('📋 继续执行后续测试，从第 ${_currentAutoTestIndex + 1} 项开始', type: LogType.debug);
+        await _continueAutoTestFromIndex(_currentAutoTestIndex);
       } else {
         _logState?.error('❌ ${test['name']} 重试失败', type: LogType.debug);
       }
@@ -632,6 +642,97 @@ class TestState extends ChangeNotifier {
     }
     
     notifyListeners();
+  }
+  
+  /// 从指定索引继续执行自动化测试
+  Future<void> _continueAutoTestFromIndex(int startIndex) async {
+    final testSequence = _getTestSequence();
+    
+    if (startIndex >= testSequence.length) {
+      _logState?.info('✅ 所有测试项已完成', type: LogType.debug);
+      await _finalizeTestReport();
+      return;
+    }
+    
+    for (int i = startIndex; i < testSequence.length; i++) {
+      if (_shouldStopTest) {
+        _logState?.warning('⛔ 用户停止测试', type: LogType.debug);
+        break;
+      }
+      
+      final test = testSequence[i];
+      _currentAutoTestIndex = i;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📋 测试项 ${i + 1}/${testSequence.length}: ${test['name']}', type: LogType.debug);
+      
+      // 创建测试报告项
+      final reportItem = TestReportItem(
+        testName: test['name'] as String,
+        testType: test['type'] as String,
+        status: TestReportStatus.running,
+        startTime: DateTime.now(),
+      );
+      
+      _testReportItems.add(reportItem);
+      notifyListeners();
+      
+      try {
+        final executor = test['executor'] as Future<bool> Function();
+        
+        // 根据测试类型决定是否使用重试包装器
+        final result = (test['type'] == 'WiFi' || 
+                       test['type'] == 'IMU' || 
+                       test['type'] == 'Touch' || 
+                       test['type'] == 'Sensor' ||
+                       test['type'] == '电源' ||
+                       test['type'] == '唤醒' ||
+                       test['type'] == '指令')
+            ? await executor()
+            : await _executeTestWithRetry(test['name'] as String, executor);
+        
+        // 更新测试项状态
+        final updatedItem = reportItem.copyWith(
+          status: result ? TestReportStatus.pass : TestReportStatus.fail,
+          endTime: DateTime.now(),
+          errorMessage: result ? null : '测试未通过',
+          testData: _lastTestData,
+        );
+        
+        _testReportItems[_testReportItems.length - 1] = updatedItem;
+        _lastTestData = null;
+        
+        if (result) {
+          _logState?.success('✅ ${test['name']} 成功', type: LogType.debug);
+        } else {
+          _logState?.error('❌ ${test['name']} 失败', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.error('⛔ 检测到测试失败，终止自动化测试流程', type: LogType.debug);
+          _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          break;
+        }
+      } catch (e) {
+        _logState?.error('❌ ${test['name']} 异常: $e', type: LogType.debug);
+        
+        final updatedItem = reportItem.copyWith(
+          status: TestReportStatus.fail,
+          endTime: DateTime.now(),
+          errorMessage: '测试异常: $e',
+        );
+        
+        _testReportItems[_testReportItems.length - 1] = updatedItem;
+        
+        _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.error('⛔ 检测到测试异常，终止自动化测试流程', type: LogType.debug);
+        _logState?.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        break;
+      }
+      
+      notifyListeners();
+    }
+    
+    // 完成测试
+    await _finalizeTestReport();
   }
   
   /// 获取测试序列
@@ -5188,6 +5289,12 @@ class TestState extends ChangeNotifier {
           rethrow;
         }
         
+        // 如果是用户取消异常，直接返回失败，不重试
+        if (e.toString().contains('USER_CANCELLED')) {
+          _logState?.error('❌ $testName 被用户取消，不进行重试', type: LogType.debug);
+          return false;
+        }
+        
         if (attempt < maxRetries) {
           _logState?.warning('⚠️  $testName 异常，准备重试 (尝试 $attempt/$maxRetries): $e', type: LogType.debug);
           await Future.delayed(const Duration(milliseconds: 300));
@@ -5793,7 +5900,7 @@ class TestState extends ChangeNotifier {
   }
   
   /// 用户确认MIC测试结果
-  Future<void> confirmMICTestResult(bool passed) async {
+  Future<void> confirmMICTestResult(bool passed, {bool userCancelled = false}) async {
     // 检查是否有正在进行的MIC测试（必须同时满足：有MIC编号 且 有未完成的Completer）
     if (_currentMICNumber == null || _micTestCompleter == null || _micTestCompleter!.isCompleted) {
       _logState?.warning('[MIC] 没有正在进行的MIC测试或测试已完成', type: LogType.debug);
@@ -5803,7 +5910,15 @@ class TestState extends ChangeNotifier {
     }
     
     final micName = _currentMICNumber == 0 ? '左' : (_currentMICNumber == 1 ? '右' : 'TALK');
-    _logState?.info('📝 用户确认${micName}MIC测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    
+    // 如果用户主动取消（点击关闭或失败按钮），设置标志
+    if (!passed || userCancelled) {
+      _userCancelledTest = true;
+      _logState?.warning('👤 用户主动取消${micName}MIC测试', type: LogType.debug);
+    } else {
+      _logState?.info('👤 用户确认${micName}MIC测试通过', type: LogType.debug);
+    }
+    
     _logState?.info('   当前MIC编号: $_currentMICNumber', type: LogType.debug);
     
     // 先关闭MIC
@@ -5815,7 +5930,7 @@ class TestState extends ChangeNotifier {
     
     // 完成Completer，通知测试结果
     _micTestCompleter!.complete(passed);
-    _logState?.info('📝 记录MIC测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    _logState?.info('✅ MIC测试结果已记录: ${passed ? "通过" : "不通过"}', type: LogType.debug);
   }
 
   /// 开始SPK测试（带弹窗）
@@ -5825,13 +5940,25 @@ class TestState extends ChangeNotifier {
       _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
       _logState?.info('   SPK编号: $spkNumber (0=左, 1=右)', type: LogType.debug);
       
+      // 检查是否已有正在进行的SPK测试
+      if (_currentSPKNumber != null && _spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
+        _logState?.warning('⚠️ 已有SPK测试正在进行，跳过新的测试请求', type: LogType.debug);
+        return false;
+      }
+      
+      // 清理旧状态
+      if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
+        _spkTestCompleter!.complete(false);
+        _logState?.debug('   清理旧的SPK测试Completer', type: LogType.debug);
+      }
+      
       // 关闭旧弹窗（如果存在）
       if (_showSPKDialog) {
         _showSPKDialog = false;
         _logState?.debug('   关闭旧的SPK测试弹窗', type: LogType.debug);
       }
       
-      // 创建Completer用于等待用户确认
+      // 创建新的Completer用于等待用户确认
       _spkTestCompleter = Completer<bool>();
       
       // 设置当前测试的SPK编号
@@ -5862,32 +5989,54 @@ class TestState extends ChangeNotifier {
       } else {
         _logState?.error('❌ ${spkName}SPK测试命令发送失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
         _currentSPKNumber = null;
+        _spkTestCompleter = null;
         return false;
       }
     } catch (e) {
       _logState?.error('❌ 启动SPK测试异常: $e', type: LogType.debug);
       _currentSPKNumber = null;
+      _spkTestCompleter = null;
       return false;
     }
   }
   
   /// 用户确认SPK测试结果
-  Future<void> confirmSPKTestResult(bool passed) async {
+  Future<void> confirmSPKTestResult(bool passed, {bool userCancelled = false}) async {
     // 检查是否有正在进行的SPK测试（必须同时满足：有SPK编号 且 有未完成的Completer）
     if (_currentSPKNumber == null || _spkTestCompleter == null || _spkTestCompleter!.isCompleted) {
       _logState?.warning('[SPK] 没有正在进行的SPK测试或测试已完成', type: LogType.debug);
       _logState?.debug('   _currentSPKNumber: $_currentSPKNumber', type: LogType.debug);
       _logState?.debug('   _spkTestCompleter: ${_spkTestCompleter != null ? (_spkTestCompleter!.isCompleted ? "已完成" : "未完成") : "null"}', type: LogType.debug);
+      
+      // 即使状态异常，也要关闭弹窗
+      if (_showSPKDialog) {
+        _showSPKDialog = false;
+        notifyListeners();
+      }
       return;
     }
     
     final spkName = _currentSPKNumber == 0 ? '左' : '右';
-    _logState?.info('📝 用户确认${spkName}SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    
+    // 如果用户主动取消（点击关闭或失败按钮），设置标志
+    if (!passed || userCancelled) {
+      _userCancelledTest = true;
+      _logState?.warning('👤 用户主动取消${spkName}SPK测试', type: LogType.debug);
+    } else {
+      _logState?.info('👤 用户确认${spkName}SPK测试通过', type: LogType.debug);
+    }
+    
     _logState?.info('   当前SPK编号: $_currentSPKNumber', type: LogType.debug);
     
-    // 完成Completer，通知测试结果
-    _spkTestCompleter!.complete(passed);
-    _logState?.info('📝 记录SPK测试结果: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+    try {
+      // 完成Completer，通知测试结果
+      if (!_spkTestCompleter!.isCompleted) {
+        _spkTestCompleter!.complete(passed);
+        _logState?.info('✅ SPK测试结果已记录: ${passed ? "通过" : "不通过"}', type: LogType.debug);
+      }
+    } catch (e) {
+      _logState?.error('❌ 完成SPK测试Completer时出错: $e', type: LogType.debug);
+    }
     
     // 关闭弹窗并清理状态
     _showSPKDialog = false;
@@ -7593,18 +7742,28 @@ class TestState extends ChangeNotifier {
   /// 23-24. SPK测试（使用弹窗）
   Future<bool> _autoTestSPK(int spkNumber) async {
     bool started = false;
+    Completer<bool>? localCompleter;
+    
     try {
       final spkName = spkNumber == 0 ? '左' : '右';
-      _logState?.info('🔊 开始${spkName}SPK测试', type: LogType.debug);
+      _logState?.info('🔊 ${spkName}SPK自动测试开始', type: LogType.debug);
       
-      // 如果有未完成的旧Completer，先完成它（避免重试时超时计时器残留）
+      // 重置用户取消标志
+      _userCancelledTest = false;
+      
+      // 清理旧状态
       if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
         _spkTestCompleter!.complete(false);
         _logState?.debug('   清理旧的SPK测试Completer', type: LogType.debug);
       }
       
-      // 创建Completer用于等待用户确认
-      _spkTestCompleter = Completer<bool>();
+      // 关闭旧弹窗
+      if (_showSPKDialog) {
+        _showSPKDialog = false;
+        _currentSPKNumber = null;
+        notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
       
       // 开始SPK测试（添加超时保护）
       started = await startSPKTest(spkNumber).timeout(
@@ -7617,44 +7776,74 @@ class TestState extends ChangeNotifier {
       
       if (!started) {
         _logState?.error('❌ ${spkName}SPK测试启动失败', type: LogType.debug);
-        if (!_spkTestCompleter!.isCompleted) {
-          _spkTestCompleter?.complete(false);
-        }
+        return false;
+      }
+      
+      // 保存本地引用
+      localCompleter = _spkTestCompleter;
+      
+      if (localCompleter == null) {
+        _logState?.error('❌ ${spkName}SPK测试Completer为空', type: LogType.debug);
         return false;
       }
       
       _logState?.success('✅ ${spkName}SPK测试已开始，等待用户确认...', type: LogType.debug);
       
       // 等待用户点击"测试成功"或"测试失败"按钮（添加超时保护）
-      final userResult = await _spkTestCompleter!.future.timeout(
+      final userResult = await localCompleter.future.timeout(
         const Duration(minutes: 2),
         onTimeout: () {
           _logState?.error('❌ ${spkName}SPK测试等待用户确认超时（2分钟）', type: LogType.debug);
+          _userCancelledTest = true; // 超时也视为用户取消
           return false;
         },
       );
       
-      _logState?.info('👤 用户确认${spkName}SPK测试结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
+      // 检查用户是否主动取消
+      if (_userCancelledTest) {
+        _logState?.warning('⛔ ${spkName}SPK测试被用户取消，不进入重试逻辑', type: LogType.debug);
+        // 抛出特殊异常，阻止重试
+        throw Exception('USER_CANCELLED');
+      }
+      
+      _logState?.info('✅ ${spkName}SPK测试完成，结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
       
       return userResult;
     } catch (e) {
       _logState?.error('${spkNumber == 0 ? '左' : '右'}SPK测试异常: $e', type: LogType.debug);
-      if (_spkTestCompleter != null && !_spkTestCompleter!.isCompleted) {
-        _spkTestCompleter?.complete(false);
+      
+      // 尝试完成Completer
+      if (localCompleter != null && !localCompleter.isCompleted) {
+        try {
+          localCompleter.complete(false);
+        } catch (e2) {
+          _logState?.debug('   完成Completer时出错: $e2', type: LogType.debug);
+        }
       }
+      
       return false;
     } finally {
-      // 清理Completer
+      // 清理状态
+      if (_showSPKDialog) {
+        _showSPKDialog = false;
+      }
+      _currentSPKNumber = null;
       _spkTestCompleter = null;
+      notifyListeners();
     }
   }
 
   /// 25-27. MIC录音测试（使用弹窗）
   Future<bool> _autoTestMICRecord(int micNumber) async {
     bool started = false;
+    Completer<bool>? localCompleter;
+    
     try {
       final micName = micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK');
-      _logState?.info('🎤 开始${micName}MIC测试', type: LogType.debug);
+      _logState?.info('🎤 ${micName}MIC自动测试开始', type: LogType.debug);
+      
+      // 重置用户取消标志
+      _userCancelledTest = false;
       
       // 如果有未完成的旧Completer，先完成它（避免重试时超时计时器残留）
       if (_micTestCompleter != null && !_micTestCompleter!.isCompleted) {
@@ -7676,31 +7865,56 @@ class TestState extends ChangeNotifier {
       
       if (!started) {
         _logState?.error('❌ ${micName}MIC测试启动失败', type: LogType.debug);
-        if (!_micTestCompleter!.isCompleted) {
-          _micTestCompleter?.complete(false);
-        }
+        return false;
+      }
+      
+      // 保存本地引用
+      localCompleter = _micTestCompleter;
+      
+      if (localCompleter == null) {
+        _logState?.error('❌ ${micName}MIC测试Completer为空', type: LogType.debug);
         return false;
       }
       
       _logState?.success('✅ ${micName}MIC测试已开始，等待用户确认...', type: LogType.debug);
       
       // 等待用户点击"测试成功"或"测试失败"按钮（添加超时保护）
-      final userResult = await _micTestCompleter!.future.timeout(
+      final userResult = await localCompleter.future.timeout(
         const Duration(minutes: 2),
         onTimeout: () {
           _logState?.error('❌ ${micName}MIC测试等待用户确认超时（2分钟）', type: LogType.debug);
+          _userCancelledTest = true; // 超时也视为用户取消
           return false;
         },
       );
       
-      _logState?.info('👤 用户确认${micName}MIC测试结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
+      // 检查用户是否主动取消
+      if (_userCancelledTest) {
+        _logState?.warning('⛔ ${micName}MIC测试被用户取消，不进入重试逻辑', type: LogType.debug);
+        // 抛出特殊异常，阻止重试
+        throw Exception('USER_CANCELLED');
+      }
+      
+      _logState?.info('✅ ${micName}MIC测试完成，结果: ${userResult ? "通过" : "不通过"}', type: LogType.debug);
       
       return userResult;
     } catch (e) {
       _logState?.error('${micNumber == 0 ? '左' : (micNumber == 1 ? '右' : 'TALK')}MIC测试异常: $e', type: LogType.debug);
-      if (_micTestCompleter != null && !_micTestCompleter!.isCompleted) {
-        _micTestCompleter?.complete(false);
+      
+      // 尝试完成Completer
+      if (localCompleter != null && !localCompleter.isCompleted) {
+        try {
+          localCompleter.complete(false);
+        } catch (e2) {
+          _logState?.debug('   完成Completer时出错: $e2', type: LogType.debug);
+        }
       }
+      
+      // 如果是用户取消，重新抛出
+      if (e.toString().contains('USER_CANCELLED')) {
+        rethrow;
+      }
+      
       return false;
     } finally {
       // 清理Completer
@@ -8153,7 +8367,7 @@ class TestState extends ChangeNotifier {
         
         _logState?.success('✅ 已加载设备信息，将使用已有的MAC地址', type: LogType.debug);
       } else {
-        // SN不存在，生成新的设备标识（包括新的SN码和MAC地址）
+        // SN不存在，生成新的设备标识（包括新的SN码和MAC地址）覆盖设备
         _logState?.warning('⚠️ SN码不在数据库中', type: LogType.debug);
         _logState?.info('   读取的SN: $snCode', type: LogType.debug);
         _logState?.info('   将生成新的SN码和MAC地址覆盖设备', type: LogType.debug);
@@ -8168,7 +8382,26 @@ class TestState extends ChangeNotifier {
           _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
         } else {
           _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
+          return false;
         }
+      }
+      
+      // 更新测试报告中的设备信息
+      if (_currentTestReport != null && _currentDeviceIdentity != null) {
+        _currentTestReport = TestReport(
+          deviceSN: _currentDeviceIdentity!['sn'] ?? 'UNKNOWN',
+          bluetoothMAC: _currentDeviceIdentity!['bluetoothMac'],
+          wifiMAC: _currentDeviceIdentity!['wifiMac'],
+          startTime: _currentTestReport!.startTime,
+          endTime: _currentTestReport!.endTime,
+          expectedTotalTests: _currentTestReport!.expectedTotalTests,
+          items: List.from(_testReportItems),
+        );
+        _logState?.info('📝 已更新测试报告设备信息', type: LogType.debug);
+        _logState?.info('   SN: ${_currentDeviceIdentity!["sn"]}', type: LogType.debug);
+        _logState?.info('   蓝牙MAC: ${_currentDeviceIdentity!["bluetoothMac"]}', type: LogType.debug);
+        _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!["wifiMac"]}', type: LogType.debug);
+        notifyListeners(); // 通知UI更新
       }
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);

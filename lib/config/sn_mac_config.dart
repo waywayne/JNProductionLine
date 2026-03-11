@@ -339,4 +339,59 @@ class SNMacConfig {
       'checksum': checksum,
     };
   }
+  
+  /// 从SN码生成对应的MAC地址
+  /// 使用SN中的序列号部分作为MAC地址的偏移量
+  Map<String, String>? generateMACFromSN(String sn) {
+    if (!SNMacConfig.validateSN(sn)) {
+      print('❌ SN码格式无效: $sn');
+      return null;
+    }
+    
+    try {
+      // 从SN中提取序列号部分 (位置10-14，5位Base36)
+      final serialNumberStr = sn.substring(10, 15);
+      
+      // 将Base36序列号转换为十进制数字
+      int serialNumber = 0;
+      for (int i = 0; i < serialNumberStr.length; i++) {
+        final char = serialNumberStr[i];
+        final value = SNMacConfig.base36Chars.indexOf(char);
+        if (value == -1) {
+          print('❌ 无效的Base36字符: $char');
+          return null;
+        }
+        serialNumber = serialNumber * 36 + value;
+      }
+      
+      print('📊 从SN提取序列号: $serialNumberStr (Base36) = $serialNumber (十进制)');
+      
+      // 使用序列号作为MAC地址的偏移量
+      // WiFi MAC: 48:08:EB:50:00:00 + offset
+      final wifiMacValue = SNMacConfig.wifiMacBaseValue + serialNumber;
+      final wifiByte4 = (wifiMacValue >> 16) & 0xFF;
+      final wifiByte5 = (wifiMacValue >> 8) & 0xFF;
+      final wifiByte6 = wifiMacValue & 0xFF;
+      final wifiMac = '${SNMacConfig.wifiMacPrefix}:${wifiByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${wifiByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      
+      // 蓝牙MAC: 48:08:EB:60:00:00 + offset
+      final bluetoothMacValue = SNMacConfig.bluetoothMacBaseValue + serialNumber;
+      final btByte4 = (bluetoothMacValue >> 16) & 0xFF;
+      final btByte5 = (bluetoothMacValue >> 8) & 0xFF;
+      final btByte6 = bluetoothMacValue & 0xFF;
+      final bluetoothMac = '${SNMacConfig.bluetoothMacPrefix}:${btByte4.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte5.toRadixString(16).toUpperCase().padLeft(2, '0')}:${btByte6.toRadixString(16).toUpperCase().padLeft(2, '0')}';
+      
+      print('✅ 生成MAC地址:');
+      print('   WiFi MAC: $wifiMac');
+      print('   蓝牙 MAC: $bluetoothMac');
+      
+      return {
+        'wifiMac': wifiMac,
+        'bluetoothMac': bluetoothMac,
+      };
+    } catch (e) {
+      print('❌ 从SN生成MAC地址失败: $e');
+      return null;
+    }
+  }
 }
