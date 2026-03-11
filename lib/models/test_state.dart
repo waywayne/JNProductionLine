@@ -409,14 +409,11 @@ class TestState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 初始化SN/MAC配置
+  /// 初始化SN/MAC配置（已废弃，配置现在在ProductionConfig中）
+  @Deprecated('配置现在在ProductionConfig中管理')
   Future<void> initializeSNMacConfig() async {
-    try {
-      await SNMacConfig.initialize();
-      _logState?.info('SN/MAC配置初始化成功');
-    } catch (e) {
-      _logState?.error('SN/MAC配置初始化失败: $e');
-    }
+    // 不再需要，所有配置都在ProductionConfig中
+    _logState?.info('SN/MAC配置已迁移到ProductionConfig');
   }
 
   /// 生成新的设备标识信息（从服务端API获取）
@@ -474,7 +471,7 @@ class TestState extends ChangeNotifier {
       _logState?.info('   📦 硬件版本: ${_currentDeviceIdentity!['hardwareVersion']}', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 同时保存到 SNManagerService 以便在 SN 记录管理页面显示
+      // 保存到 SNManagerService 仅用于历史记录显示（不用于校验）
       try {
         await _snManager.addRecord(
           sn: _currentDeviceIdentity!['sn']!,
@@ -482,9 +479,9 @@ class TestState extends ChangeNotifier {
           btMac: _currentDeviceIdentity!['bluetoothMac'],
           hardwareVersion: _currentDeviceIdentity!['hardwareVersion'] ?? 'V1.0',
         );
-        _logState?.info('   💾 已保存到SN记录数据库', type: LogType.debug);
+        _logState?.info('   💾 已保存到本地历史记录', type: LogType.debug);
       } catch (e) {
-        _logState?.warning('   ⚠️  保存到SN记录数据库失败: $e', type: LogType.debug);
+        _logState?.warning('   ⚠️  保存到本地历史记录失败: $e', type: LogType.debug);
       }
       
       // 立即记录到全局设备记录文件（未测试状态）
@@ -500,47 +497,32 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 设置产品线
+  // 以下方法已废弃，配置现在在ProductionConfig中管理
+  // 产品线、工厂、产线配置请使用 ProductionConfig
+  
+  @Deprecated('请使用 ProductionConfig().setProductLine()')
   Future<void> setProductLine(String productLine) async {
-    try {
-      await SNMacConfig.setProductLine(productLine);
-      _logState?.info('产品线设置为: $productLine');
-      notifyListeners();
-    } catch (e) {
-      _logState?.error('设置产品线失败: $e');
-    }
+    _logState?.warning('此方法已废弃，请使用 ProductionConfig');
   }
 
-  /// 设置工厂
+  @Deprecated('请使用 ProductionConfig().setFactory()')
   Future<void> setFactory(String factory) async {
-    try {
-      await SNMacConfig.setFactory(factory);
-      _logState?.info('工厂设置为: $factory');
-      notifyListeners();
-    } catch (e) {
-      _logState?.error('设置工厂失败: $e');
-    }
+    _logState?.warning('此方法已废弃，请使用 ProductionConfig');
   }
 
-  /// 设置产线
+  @Deprecated('请使用 ProductionConfig().setProductionLine()')
   Future<void> setProductionLine(int line) async {
-    try {
-      await SNMacConfig.setProductionLine(line);
-      _logState?.info('产线设置为: $line');
-      notifyListeners();
-    } catch (e) {
-      _logState?.error('设置产线失败: $e');
-    }
+    _logState?.warning('此方法已废弃，请使用 ProductionConfig');
   }
 
-  /// 获取SN/MAC统计信息
+  @Deprecated('SN/MAC统计信息现在由服务端管理')
   Map<String, dynamic> getSNMacStatistics() {
-    return SNMacConfig.getStatistics();
+    return {'message': '请使用服务端统计接口'};
   }
 
-  /// 获取当前SN/MAC配置
+  @Deprecated('SN/MAC配置现在在ProductionConfig中')
   Map<String, dynamic> getSNMacConfig() {
-    return SNMacConfig.getCurrentConfig();
+    return {'message': '请使用 ProductionConfig'};
   }
 
   /// 停止当前测试
