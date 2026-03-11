@@ -51,6 +51,7 @@ class SNApiService {
       if (existingSn != null && existingSn.isNotEmpty) {
         print('   现有SN: $existingSn');
       }
+      print('   请求体: ${json.encode(body)}');
       
       // 发送POST请求
       final response = await http.post(
@@ -64,27 +65,30 @@ class SNApiService {
       ).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
+          print('❌ API请求超时（10秒）');
           throw Exception('请求超时');
         },
       );
       
       print('   状态码: ${response.statusCode}');
+      print('   响应体: ${response.body}');
       
       if (response.statusCode != 200) {
         print('❌ API请求失败: HTTP ${response.statusCode}');
-        print('   响应: ${response.body}');
+        print('   完整响应: ${response.body}');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         return null;
       }
       
       // 解析响应
       final responseData = json.decode(response.body);
-      print('   响应: ${response.body}');
       
       // 检查错误码
       final errorCode = responseData['error_code'];
       if (errorCode != 0) {
         final msg = responseData['msg'] ?? '未知错误';
         print('❌ API返回错误: $msg (错误码: $errorCode)');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         return null;
       }
       
@@ -92,6 +96,8 @@ class SNApiService {
       final data = responseData['data'];
       if (data == null) {
         print('❌ API响应中没有data字段');
+        print('   完整响应: ${response.body}');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         return null;
       }
       
@@ -104,6 +110,7 @@ class SNApiService {
         print('   sn_code: $snCode');
         print('   bluetooth_address: $bluetoothAddress');
         print('   mac_address: $macAddress');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         return null;
       }
       
@@ -119,8 +126,10 @@ class SNApiService {
         'bluetoothMac': _formatMacAddress(bluetoothAddress),
         'wifiMac': _formatMacAddress(macAddress),
       };
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ 请求SN码API异常: $e');
+      print('   异常类型: ${e.runtimeType}');
+      print('   堆栈跟踪: $stackTrace');
       print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       return null;
     }
