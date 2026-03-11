@@ -442,6 +442,7 @@ class TestState extends ChangeNotifier {
         lineCode: lineCode,
         hardwareVersion: config.hardwareVersion,
         existingSn: existingSn,
+        logState: _logState,
       );
       
       if (result == null) {
@@ -8691,6 +8692,7 @@ class TestState extends ChangeNotifier {
         final updateSuccess = await SNApiService.updateSNStatus(
           sn: deviceSN,
           status: 4,
+          logState: _logState,
         );
         
         if (updateSuccess) {
