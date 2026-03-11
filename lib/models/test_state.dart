@@ -11,6 +11,7 @@ import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
 import '../services/sn_manager_service.dart';
+import '../services/sn_api_service.dart';
 import 'log_state.dart';
 import '../config/test_config.dart';
 import '../config/production_config.dart';
@@ -418,21 +419,58 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 生成新的设备标识信息
-  Future<void> generateDeviceIdentity() async {
+  /// 生成新的设备标识信息（从服务端API获取）
+  Future<void> generateDeviceIdentity({String? existingSn}) async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('🏷️  开始生成设备标识信息', type: LogType.debug);
+      _logState?.info('🏷️  开始从服务端获取设备标识信息', type: LogType.debug);
       
-      _currentDeviceIdentity = await SNMacConfig.generateDeviceIdentity();
+      // 从通用配置获取产品线、工厂、产线信息
+      final config = ProductionConfig();
+      final productLine = config.productLine;
+      final factoryCode = config.factory;
+      final lineCode = config.productionLine;
       
-      _logState?.info('✅ 设备标识信息生成成功:', type: LogType.debug);
+      _logState?.info('   产品线: $productLine', type: LogType.debug);
+      _logState?.info('   工厂: $factoryCode', type: LogType.debug);
+      _logState?.info('   产线: $lineCode', type: LogType.debug);
+      if (existingSn != null && existingSn.isNotEmpty) {
+        _logState?.info('   现有SN: $existingSn', type: LogType.debug);
+      }
+      
+      // 调用API获取SN和MAC地址
+      final result = await SNApiService.fetchSN(
+        productLine: productLine,
+        factoryCode: factoryCode,
+        lineCode: lineCode,
+        existingSn: existingSn,
+      );
+      
+      if (result == null) {
+        _logState?.error('❌ 从服务端获取SN失败', type: LogType.debug);
+        _logState?.error('   请检查网络连接和API配置', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        throw Exception('从服务端获取SN失败');
+      }
+      
+      // 设置设备标识信息
+      _currentDeviceIdentity = {
+        'sn': result['sn']!,
+        'wifiMac': result['wifiMac']!,
+        'bluetoothMac': result['bluetoothMac']!,
+        'hardwareVersion': config.hardwareVersion,
+        'productLine': productLine,
+        'factory': factoryCode,
+        'productionLine': lineCode,
+      };
+      
+      _logState?.info('✅ 设备标识信息获取成功:', type: LogType.debug);
       _logState?.info('   📋 SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
       _logState?.info('   📡 WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
       _logState?.info('   📶 蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
       _logState?.info('   🏭 产品线: ${_currentDeviceIdentity!['productLine']}', type: LogType.debug);
       _logState?.info('   🏢 工厂: ${_currentDeviceIdentity!['factory']}', type: LogType.debug);
-      _logState?.info('   📅 生产日期: ${_currentDeviceIdentity!['productionDate']}', type: LogType.debug);
+      _logState?.info('   📦 硬件版本: ${_currentDeviceIdentity!['hardwareVersion']}', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
       // 同时保存到 SNManagerService 以便在 SN 记录管理页面显示
@@ -8296,18 +8334,19 @@ class TestState extends ChangeNotifier {
       final snCode = ProductionTestCommands.parseReadSNResponse(payload);
       if (snCode == null || snCode.isEmpty) {
         _logState?.warning('⚠️ 设备未写入SN码', type: LogType.debug);
-        _logState?.info('   将生成新的SN码和MAC地址', type: LogType.debug);
+        _logState?.info('   将从服务端获取新的SN码和MAC地址', type: LogType.debug);
         
-        // 生成新的设备标识
+        // 从服务端获取新的设备标识（不传入现有SN）
         await generateDeviceIdentity();
         
         if (_currentDeviceIdentity != null) {
-          _logState?.success('✅ 已生成新的设备标识', type: LogType.debug);
+          _logState?.success('✅ 已从服务端获取设备标识', type: LogType.debug);
           _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
           _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
           _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
         } else {
-          _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
+          _logState?.error('❌ 从服务端获取设备标识失败', type: LogType.debug);
+          return false;
         }
         
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
@@ -8316,74 +8355,21 @@ class TestState extends ChangeNotifier {
       
       _logState?.success('✅ SN码读取成功: $snCode', type: LogType.debug);
       
-      // 验证SN码格式
-      if (!_snManager.validateSN(snCode)) {
-        _logState?.warning('⚠️ SN码格式无效或校验失败', type: LogType.debug);
-        _logState?.info('   读取的SN: $snCode', type: LogType.debug);
-        _logState?.info('   SN码长度: ${snCode.length} (应为19位)', type: LogType.debug);
-        
-        // 检查是否包含非法字符
-        final hasInvalidChars = !RegExp(r'^[0-9A-Z]+$').hasMatch(snCode);
-        if (hasInvalidChars) {
-          _logState?.warning('   ⚠️ SN码包含非法字符（应只包含数字和大写字母）', type: LogType.debug);
-        }
-        
-        _logState?.info('   将生成新的有效SN码和MAC地址', type: LogType.debug);
-        
-        // 生成新的设备标识
-        await generateDeviceIdentity();
-        
-        if (_currentDeviceIdentity != null) {
-          _logState?.success('✅ 已生成新的设备标识', type: LogType.debug);
-          _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
-          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
-          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
-        } else {
-          _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
-        }
-        
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true;
-      }
+      // 将读取到的SN发送给服务端，由服务端决定是使用现有SN还是分配新SN
+      _logState?.info('📤 将读取到的SN发送给服务端验证', type: LogType.debug);
+      _logState?.info('   读取的SN: $snCode', type: LogType.debug);
       
-      // 查询数据库，检查SN是否已存在
-      final existingRecord = _snManager.querySN(snCode);
+      // 调用API，传入读取到的SN
+      await generateDeviceIdentity(existingSn: snCode);
       
-      if (existingRecord != null) {
-        // SN已存在，使用已有的MAC地址
-        _logState?.info('📋 SN码已存在于数据库中', type: LogType.debug);
-        _logState?.info('   WiFi MAC: ${existingRecord.wifiMac}', type: LogType.debug);
-        _logState?.info('   蓝牙 MAC: ${existingRecord.btMac}', type: LogType.debug);
-        _logState?.info('   硬件版本: ${existingRecord.hardwareVersion}', type: LogType.debug);
-        _logState?.info('   创建时间: ${existingRecord.createdAt}', type: LogType.debug);
-        
-        // 更新当前设备标识信息，使用已有的MAC地址
-        _currentDeviceIdentity = {
-          'sn': snCode,
-          'wifiMac': existingRecord.wifiMac ?? '',
-          'bluetoothMac': existingRecord.btMac ?? '',
-          'hardwareVersion': existingRecord.hardwareVersion,
-        };
-        
-        _logState?.success('✅ 已加载设备信息，将使用已有的MAC地址', type: LogType.debug);
+      if (_currentDeviceIdentity != null) {
+        _logState?.success('✅ 服务端已确认设备标识', type: LogType.debug);
+        _logState?.info('   SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+        _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+        _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
       } else {
-        // SN不存在，生成新的设备标识（包括新的SN码和MAC地址）覆盖设备
-        _logState?.warning('⚠️ SN码不在数据库中', type: LogType.debug);
-        _logState?.info('   读取的SN: $snCode', type: LogType.debug);
-        _logState?.info('   将生成新的SN码和MAC地址覆盖设备', type: LogType.debug);
-        
-        // 生成新的设备标识
-        await generateDeviceIdentity();
-        
-        if (_currentDeviceIdentity != null) {
-          _logState?.success('✅ 已生成新的设备标识', type: LogType.debug);
-          _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
-          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
-          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
-        } else {
-          _logState?.error('❌ 生成设备标识失败', type: LogType.debug);
-          return false;
-        }
+        _logState?.error('❌ 从服务端获取设备标识失败', type: LogType.debug);
+        return false;
       }
       
       // 更新测试报告中的设备信息
