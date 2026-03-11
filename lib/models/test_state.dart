@@ -650,7 +650,7 @@ class TestState extends ChangeNotifier {
     
     if (startIndex >= testSequence.length) {
       _logState?.info('✅ 所有测试项已完成', type: LogType.debug);
-      await _finalizeTestReport();
+      _finalizeTestReport();
       return;
     }
     
@@ -732,7 +732,7 @@ class TestState extends ChangeNotifier {
     }
     
     // 完成测试
-    await _finalizeTestReport();
+    _finalizeTestReport();
   }
   
   /// 获取测试序列
