@@ -443,6 +443,7 @@ class TestState extends ChangeNotifier {
         productLine: productLine,
         factoryCode: factoryCode,
         lineCode: lineCode,
+        hardwareVersion: config.hardwareVersion,
         existingSn: existingSn,
       );
       
@@ -489,7 +490,6 @@ class TestState extends ChangeNotifier {
       // 立即记录到全局设备记录文件（未测试状态）
       try {
         await _saveDeviceToGlobalRecord(testStatus: '未测试');
-        _logState?.info('   📝 已记录到全局设备文件（未测试）', type: LogType.debug);
       } catch (e) {
         _logState?.warning('   ⚠️  记录到全局设备文件失败: $e', type: LogType.debug);
       }
@@ -688,7 +688,7 @@ class TestState extends ChangeNotifier {
     
     if (startIndex >= testSequence.length) {
       _logState?.info('✅ 所有测试项已完成', type: LogType.debug);
-      _finalizeTestReport();
+      await _finalizeTestReport();
       return;
     }
     
@@ -770,7 +770,7 @@ class TestState extends ChangeNotifier {
     }
     
     // 完成测试
-    _finalizeTestReport();
+    await _finalizeTestReport();
   }
   
   /// 获取测试序列
@@ -5245,7 +5245,7 @@ class TestState extends ChangeNotifier {
     await _executeAllTests();
     
     // 生成最终报告（无论成功还是失败都生成）
-    _finalizeTestReport();
+    await _finalizeTestReport();
     
     // 检查是否因测试失败而停止
     if (_shouldStopTest) {
@@ -8672,7 +8672,7 @@ class TestState extends ChangeNotifier {
   }
 
   /// 完成测试报告
-  void _finalizeTestReport() {
+  Future<void> _finalizeTestReport() async {
     if (_currentTestReport != null) {
       // 如果设备标识已生成，使用最新的设备信息；否则保留原有信息
       final deviceSN = _currentDeviceIdentity?['sn'] ?? _currentTestReport!.deviceSN;
@@ -8699,7 +8699,25 @@ class TestState extends ChangeNotifier {
       
       // 更新全局设备记录的测试状态
       final testStatus = _currentTestReport!.allTestsPassed ? '通过' : '失败';
-      _saveDeviceToGlobalRecord(testStatus: testStatus);
+      await _saveDeviceToGlobalRecord(testStatus: testStatus);
+      
+      // 如果测试通过，调用API更新SN状态为4
+      if (_currentTestReport!.allTestsPassed && deviceSN != '待分配' && deviceSN != 'UNKNOWN') {
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('📤 更新服务端SN状态...', type: LogType.debug);
+        
+        final updateSuccess = await SNApiService.updateSNStatus(
+          sn: deviceSN,
+          status: 4,
+        );
+        
+        if (updateSuccess) {
+          _logState?.success('✅ 服务端SN状态已更新为"产测通过"', type: LogType.debug);
+        } else {
+          _logState?.warning('⚠️  服务端SN状态更新失败', type: LogType.debug);
+        }
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      }
     }
   }
 
@@ -8773,26 +8791,30 @@ class TestState extends ChangeNotifier {
           // 更新现有记录（保留原分配时间，更新测试状态和最后更新时间）
           final oldLine = lines[existingLineIndex].split(',');
           final allocTime = oldLine[0]; // 保留原分配时间
+          final oldStatus = oldLine.length > 4 ? oldLine[4] : '未知';
           lines[existingLineIndex] = '$allocTime,$snCode,$bluetoothMac,$wifiMac,$testStatus,$passRate%,$timestamp';
           
           // 写回文件
           await globalRecordFile.writeAsString(lines.join('\n') + '\n', mode: FileMode.write);
           
-          _logState?.success('✅ 已更新设备记录（$testStatus）', type: LogType.debug);
+          _logState?.success('✅ 已更新CSV设备记录', type: LogType.debug);
+          _logState?.info('   📋 SN: $snCode', type: LogType.debug);
+          _logState?.info('   📊 状态: $oldStatus → $testStatus', type: LogType.debug);
+          _logState?.info('   📈 通过率: $passRate%', type: LogType.debug);
+          _logState?.info('   📁 文件: ${globalRecordFile.path}', type: LogType.debug);
         } else {
           // 添加新记录
           final recordLine = '$timestamp,$snCode,$bluetoothMac,$wifiMac,$testStatus,$passRate%,$timestamp\n';
           await globalRecordFile.writeAsString(recordLine, mode: FileMode.append);
           
-          _logState?.success('✅ 已添加设备记录（$testStatus）', type: LogType.debug);
+          _logState?.success('✅ 已添加CSV设备记录', type: LogType.debug);
+          _logState?.info('   📋 SN: $snCode', type: LogType.debug);
+          _logState?.info('   📶 蓝牙MAC: $bluetoothMac', type: LogType.debug);
+          _logState?.info('   📡 WiFi MAC: $wifiMac', type: LogType.debug);
+          _logState?.info('   📊 状态: $testStatus', type: LogType.debug);
+          _logState?.info('   📁 文件: ${globalRecordFile.path}', type: LogType.debug);
         }
       }
-      
-      _logState?.info('   📋 SN: $snCode', type: LogType.debug);
-      _logState?.info('   📶 蓝牙MAC: $bluetoothMac', type: LogType.debug);
-      _logState?.info('   📡 WiFi MAC: $wifiMac', type: LogType.debug);
-      _logState?.info('   📊 状态: $testStatus', type: LogType.debug);
-      _logState?.info('   📁 文件: ${globalRecordFile.path}', type: LogType.debug);
     } catch (e) {
       _logState?.error('❌ 保存全局设备记录失败: $e', type: LogType.debug);
     }
