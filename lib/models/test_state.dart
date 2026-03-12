@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:path/path.dart' as path;
 import '../services/serial_service.dart';
 import '../services/spp_service.dart';
+import '../services/linux_bluetooth_spp_service.dart';
 import '../services/python_bluetooth_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
@@ -138,6 +139,7 @@ class TestState extends ChangeNotifier {
   // Communication services
   final SerialService _serialService = SerialService();
   final SppService _sppService = SppService();
+  final LinuxBluetoothSppService _linuxBtService = LinuxBluetoothSppService();
   final PythonBluetoothService _pythonBtService = PythonBluetoothService();
   final SNManagerService _snManager = SNManagerService();
   
@@ -349,6 +351,7 @@ class TestState extends ChangeNotifier {
     _logState = logState;
     _serialService.setLogState(logState);
     _sppService.setLogState(logState);
+    _linuxBtService.setLogState(logState);
     _pythonBtService.setLogState(logState);
     
     // Python 蓝牙服务将在首次使用时初始化
@@ -3023,6 +3026,103 @@ class TestState extends ChangeNotifier {
     } catch (e) {
       _logState?.error('❌ Python 蓝牙测试异常: $e', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// Linux 蓝牙 SPP 测试（基于自定义 UUID 服务发现）
+  Future<bool> testLinuxBluetooth({
+    String? deviceAddress,
+    String? deviceName,
+    String? uuid,
+    int? channel,
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🐧 开始 Linux 蓝牙 SPP 测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 如果指定了 UUID，设置服务 UUID
+      if (uuid != null && uuid.isNotEmpty) {
+        _linuxBtService.setServiceUuid(uuid);
+        _logState?.info('   自定义 UUID: $uuid', type: LogType.debug);
+      }
+      
+      String? targetAddress = deviceAddress;
+      String? targetName = deviceName;
+      
+      // 如果未指定设备地址，扫描设备
+      if (targetAddress == null || targetAddress.isEmpty) {
+        _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
+        final devices = await _linuxBtService.scanDevices(timeout: const Duration(seconds: 10));
+        
+        if (devices.isEmpty) {
+          _logState?.error('❌ 未找到蓝牙设备', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return false;
+        }
+        
+        // 使用第一个设备
+        targetAddress = devices.first['address'];
+        targetName = devices.first['name'];
+        _logState?.info('   选择设备: $targetName ($targetAddress)', type: LogType.debug);
+      }
+      
+      // 连接设备
+      _logState?.info('🔗 连接蓝牙设备...', type: LogType.debug);
+      final connected = await _linuxBtService.connect(
+        targetAddress!,
+        deviceName: targetName,
+        channel: channel,
+        uuid: uuid,
+      );
+      
+      if (!connected) {
+        _logState?.error('❌ 连接失败', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      // 测试通信：读取蓝牙 MAC 地址
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📖 测试通信: 读取蓝牙 MAC 地址', type: LogType.debug);
+      
+      final command = ProductionTestCommands.createBluetoothMacCommand(
+        ProductionTestCommands.bluetoothOptReadMac,
+      );
+      
+      final response = await _linuxBtService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+      );
+      
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'] as Uint8List?;
+        if (payload != null) {
+          final mac = ProductionTestCommands.parseBluetoothMacResponse(payload);
+          if (mac != null) {
+            _logState?.success('✅ Linux 蓝牙测试成功', type: LogType.debug);
+            _logState?.info('   蓝牙 MAC: $mac', type: LogType.debug);
+            _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            
+            // 断开连接
+            await _linuxBtService.disconnect();
+            return true;
+          }
+        }
+      }
+      
+      _logState?.error('❌ Linux 蓝牙测试失败', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 断开连接
+      await _linuxBtService.disconnect();
+      return false;
+    } catch (e) {
+      _logState?.error('❌ Linux 蓝牙测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      await _linuxBtService.disconnect();
       return false;
     }
   }
