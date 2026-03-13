@@ -73,23 +73,39 @@ jobs:
         tar -czf ../../../../../jn-production-line-linux-x64.tar.gz .
         cd ../../../../../
         
-    - name: Copy install script to artifacts
+    - name: Prepare artifacts
       run: |
-        cp scripts/install-linux.sh .
+        # 创建 artifacts 目录
+        mkdir -p artifacts
+        
+        # 复制文件到 artifacts 目录
+        cp jn-production-line-linux-x64.tar.gz artifacts/
+        cp scripts/install-linux.sh artifacts/
+        cp scripts/README-ARTIFACT.md artifacts/README.md
+        
+        # 验证文件
+        echo "📦 Artifact contents:"
+        ls -lh artifacts/
+        echo ""
+        echo "Files to be uploaded:"
+        find artifacts -type f
         
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: linux-build
-        path: |
-          jn-production-line-linux-x64.tar.gz
-          install-linux.sh
+        path: artifacts/*
         retention-days: 30
         
     - name: Display build info
       run: |
-        echo "Build completed successfully!"
-        echo "Build size:"
+        echo "✅ Build completed successfully!"
+        echo ""
+        echo "📊 Build size:"
         du -sh build/linux/x64/release/bundle
-        echo "Archive size:"
+        echo ""
+        echo "📦 Archive size:"
         ls -lh jn-production-line-linux-x64.tar.gz
+        echo ""
+        echo "📋 Artifacts:"
+        ls -lh artifacts/
