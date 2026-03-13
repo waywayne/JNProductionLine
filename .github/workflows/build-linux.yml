@@ -52,10 +52,21 @@ jobs:
       
     - name: Fix plugin configuration for Linux
       run: |
-        echo "Removing flutter_bluetooth_classic_serial from Linux build (Windows-only plugin)"
+        echo "🔧 Fixing flutter_bluetooth_classic_serial plugin issue for Linux..."
+        echo "   This plugin is Windows-only and has broken CMakeLists.txt for Linux"
+        
+        # Remove the plugin from generated_plugins.cmake
+        echo "   Step 1: Removing from generated_plugins.cmake"
         sed -i '/flutter_bluetooth_classic_serial/d' linux/flutter/generated_plugins.cmake
-        echo "Updated plugin list:"
-        cat linux/flutter/generated_plugins.cmake
+        
+        # Remove the plugin symlink to prevent CMake from finding it
+        echo "   Step 2: Removing plugin symlink"
+        rm -rf linux/flutter/ephemeral/.plugin_symlinks/flutter_bluetooth_classic_serial
+        
+        # Verify the fix
+        echo "✅ Plugin configuration fixed"
+        echo "   Updated plugin list:"
+        grep "FLUTTER_PLUGIN_LIST" -A 5 linux/flutter/generated_plugins.cmake || true
       
     - name: Analyze code
       run: flutter analyze

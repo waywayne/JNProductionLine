@@ -37,8 +37,16 @@ flutter pub get
 # 修复插件配置
 echo ""
 echo "🔧 Fixing plugin configuration for Linux..."
-echo "   Removing flutter_bluetooth_classic_serial (Windows-only plugin)"
+echo "   This plugin is Windows-only and has broken CMakeLists.txt for Linux"
+
+# 移除插件配置
+echo "   Step 1: Removing from generated_plugins.cmake"
 sed -i '/flutter_bluetooth_classic_serial/d' linux/flutter/generated_plugins.cmake
+
+# 移除插件符号链接
+echo "   Step 2: Removing plugin symlink"
+rm -rf linux/flutter/ephemeral/.plugin_symlinks/flutter_bluetooth_classic_serial
+
 echo "✅ Plugin configuration fixed"
 
 # 代码分析
