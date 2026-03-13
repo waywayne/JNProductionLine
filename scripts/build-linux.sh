@@ -34,6 +34,13 @@ echo ""
 echo "📥 Getting Flutter dependencies..."
 flutter pub get
 
+# 修复插件配置
+echo ""
+echo "🔧 Fixing plugin configuration for Linux..."
+echo "   Removing flutter_bluetooth_classic_serial (Windows-only plugin)"
+sed -i '/flutter_bluetooth_classic_serial/d' linux/flutter/generated_plugins.cmake
+echo "✅ Plugin configuration fixed"
+
 # 代码分析
 echo ""
 echo "🔍 Analyzing code..."
