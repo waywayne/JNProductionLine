@@ -82,8 +82,13 @@ sudo tar -xzf jn-production-line-linux-x64.tar.gz -C /opt/jn-production-line
 # 4. 设置执行权限
 sudo chmod +x /opt/jn-production-line/jn_production_line
 
-# 5. 创建符号链接（可选）
-sudo ln -s /opt/jn-production-line/jn_production_line /usr/local/bin/jn-production-line
+# 5. 创建启动脚本（可选）
+sudo tee /usr/local/bin/jn-production-line > /dev/null <<'EOF'
+#!/bin/bash
+cd /opt/jn-production-line
+exec ./jn_production_line "$@"
+EOF
+sudo chmod +x /usr/local/bin/jn-production-line
 
 # 6. 配置蓝牙权限
 sudo usermod -a -G bluetooth $USER

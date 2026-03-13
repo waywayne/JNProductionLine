@@ -36,8 +36,13 @@ sudo tar -xzf jn-production-line-linux-x64.tar.gz -C /opt/jn-production-line
 # 3. 设置执行权限
 sudo chmod +x /opt/jn-production-line/jn_production_line
 
-# 4. 创建快捷方式（可选）
-sudo ln -s /opt/jn-production-line/jn_production_line /usr/local/bin/jn-production-line
+# 4. 创建启动脚本（可选）
+sudo tee /usr/local/bin/jn-production-line > /dev/null <<'EOF'
+#!/bin/bash
+cd /opt/jn-production-line
+exec ./jn_production_line "$@"
+EOF
+sudo chmod +x /usr/local/bin/jn-production-line
 ```
 
 ## 🎮 运行应用

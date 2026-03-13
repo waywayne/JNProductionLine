@@ -7,10 +7,28 @@ set -e
 APP_NAME="jn-production-line"
 INSTALL_DIR="/opt/$APP_NAME"
 BINARY_NAME="jn_production_line"
-ARCHIVE_NAME="jn-production-line-linux-x64.tar.gz"
+
+# 检测系统架构
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64|amd64)
+        ARCHIVE_NAME="jn-production-line-linux-x64.tar.gz"
+        ARCH_NAME="x64"
+        ;;
+    aarch64|arm64)
+        ARCHIVE_NAME="jn-production-line-linux-arm64.tar.gz"
+        ARCH_NAME="ARM64"
+        ;;
+    *)
+        echo "❌ 不支持的架构: $ARCH"
+        echo "   仅支持 x86_64 和 ARM64"
+        exit 1
+        ;;
+esac
 
 echo "📦 JN Production Line 安装程序"
 echo "================================"
+echo "🖥️  检测到架构: $ARCH_NAME"
 echo ""
 
 # 检查是否为 root
@@ -64,9 +82,16 @@ tar -xzf "$ARCHIVE_NAME" -C "$INSTALL_DIR"
 echo "🔐 设置权限..."
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
-# 创建符号链接
-echo "🔗 创建符号链接..."
-ln -sf "$INSTALL_DIR/$BINARY_NAME" /usr/local/bin/$APP_NAME
+# 创建启动脚本
+echo "🔗 创建启动脚本..."
+cat > /usr/local/bin/$APP_NAME <<EOF
+#!/bin/bash
+# JN Production Line 启动脚本
+cd "$INSTALL_DIR"
+exec "./$BINARY_NAME" "\$@"
+EOF
+
+chmod +x /usr/local/bin/$APP_NAME
 
 # 创建桌面文件
 echo "🖥️  创建桌面快捷方式..."
