@@ -47,13 +47,15 @@ jobs:
     - name: Enable Linux desktop
       run: flutter config --enable-linux-desktop
       
+    - name: Remove problematic plugin from pubspec
+      run: |
+        echo "🔧 Removing flutter_bluetooth_classic_serial from pubspec.yaml (Windows-only)"
+        sed -i '/flutter_bluetooth_classic_serial/d' pubspec.yaml
+        echo "Updated pubspec.yaml:"
+        cat pubspec.yaml
+      
     - name: Get dependencies
       run: flutter pub get
-      
-    - name: Fix Linux plugin configuration
-      run: |
-        chmod +x scripts/fix-linux-plugins.sh
-        ./scripts/fix-linux-plugins.sh
       
     - name: Analyze code
       run: flutter analyze

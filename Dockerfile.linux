@@ -40,13 +40,13 @@ WORKDIR /app
 
 # 复制项目文件
 COPY pubspec.yaml pubspec.lock ./
+
+# 移除 Windows-only 插件
+RUN sed -i '/flutter_bluetooth_classic_serial/d' pubspec.yaml
+
 RUN flutter pub get
 
 COPY . .
-
-# 修复 flutter_bluetooth_classic_serial 插件在 Linux 上的问题
-RUN chmod +x scripts/fix-linux-plugins.sh && \
-    ./scripts/fix-linux-plugins.sh
 
 # 构建应用
 RUN flutter build linux --release

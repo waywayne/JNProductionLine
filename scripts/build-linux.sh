@@ -29,14 +29,16 @@ echo ""
 echo "🔧 Enabling Linux desktop..."
 flutter config --enable-linux-desktop
 
+# 移除问题插件
+echo ""
+echo "🔧 Removing flutter_bluetooth_classic_serial from pubspec.yaml..."
+echo "   (Windows-only plugin with broken Linux CMakeLists.txt)"
+sed -i.bak '/flutter_bluetooth_classic_serial/d' pubspec.yaml
+
 # 获取依赖
 echo ""
 echo "📥 Getting Flutter dependencies..."
 flutter pub get
-
-# 修复插件配置
-echo ""
-./scripts/fix-linux-plugins.sh
 
 # 代码分析
 echo ""
