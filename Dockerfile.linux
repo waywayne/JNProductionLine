@@ -45,9 +45,8 @@ RUN flutter pub get
 COPY . .
 
 # 修复 flutter_bluetooth_classic_serial 插件在 Linux 上的问题
-# 该插件仅用于 Windows，在 Linux 上会导致 CMake 错误
-RUN sed -i '/flutter_bluetooth_classic_serial/d' linux/flutter/generated_plugins.cmake && \
-    rm -rf linux/flutter/ephemeral/.plugin_symlinks/flutter_bluetooth_classic_serial
+RUN chmod +x scripts/fix-linux-plugins.sh && \
+    ./scripts/fix-linux-plugins.sh
 
 # 构建应用
 RUN flutter build linux --release
