@@ -7,8 +7,7 @@ import '../config/test_config.dart';
 
 // Conditional imports for platform-specific Bluetooth plugins
 // Android: flutter_bluetooth_serial
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart'
-    if (dart.library.io) 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 // Windows: flutter_bluetooth_classic_serial
 import 'package:flutter_bluetooth_classic_serial/flutter_bluetooth_classic.dart'
     as classic;

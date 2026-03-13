@@ -35,6 +35,9 @@ echo "🔧 Removing flutter_bluetooth_classic_serial from pubspec.yaml..."
 echo "   (Windows-only plugin with broken Linux CMakeLists.txt)"
 sed -i.bak '/flutter_bluetooth_classic_serial/d' pubspec.yaml
 
+echo "🔧 Updating import to use stub implementation..."
+sed -i.bak "s|package:flutter_bluetooth_classic_serial/flutter_bluetooth_classic.dart|flutter_bluetooth_classic_stub.dart|g" lib/services/spp_service.dart
+
 # 获取依赖
 echo ""
 echo "📥 Getting Flutter dependencies..."

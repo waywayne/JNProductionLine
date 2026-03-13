@@ -48,6 +48,9 @@ RUN flutter pub get
 
 COPY . .
 
+# 更新导入使用 stub 实现
+RUN sed -i "s|package:flutter_bluetooth_classic_serial/flutter_bluetooth_classic.dart|flutter_bluetooth_classic_stub.dart|g" lib/services/spp_service.dart
+
 # 构建应用
 RUN flutter build linux --release
 
