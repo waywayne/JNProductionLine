@@ -8,12 +8,91 @@
 ### 自动触发
 - Push 到 main/master/develop 分支
 - 创建 Pull Request
-- 手动触发
+- 手动触发（推荐）
 
-### 构建产物
-构建完成后，可在 GitHub Actions 页面下载：
-- `jn-production-line-linux-x64.tar.gz`: Linux 应用程序包
-- `*.AppImage`: AppImage 格式（可选）
+### 手动触发构建
+
+1. **访问 GitHub Actions 页面**
+   ```
+   https://github.com/waywayne/JNProductionLine/actions
+   ```
+
+2. **选择 "Build Linux Application" workflow**
+
+3. **点击 "Run workflow" 按钮**
+   - 选择分支（通常是 main）
+   - 点击绿色的 "Run workflow" 按钮
+
+4. **等待构建完成**（约 5-10 分钟）
+   - 绿色 ✓ = 构建成功
+   - 红色 ✗ = 构建失败（查看日志）
+
+### 下载构建产物
+
+#### 方法 1: 从 GitHub Actions 页面下载（推荐）
+
+1. 进入 Actions 页面
+2. 点击最新的成功构建（绿色 ✓）
+3. 滚动到页面底部 "Artifacts" 部分
+4. 下载 `linux-build` 压缩包
+5. 解压后得到：
+   - `jn-production-line-linux-x64.tar.gz` - 主程序包
+   - `*.AppImage` - AppImage 格式（如果构建成功）
+
+#### 方法 2: 使用 GitHub CLI
+
+```bash
+# 安装 GitHub CLI
+sudo apt install gh
+
+# 登录
+gh auth login
+
+# 列出最近的 workflow runs
+gh run list --repo waywayne/JNProductionLine --workflow="Build Linux Application"
+
+# 下载最新的构建产物
+gh run download --repo waywayne/JNProductionLine
+
+# 或指定特定的 run ID
+gh run download <RUN_ID> --repo waywayne/JNProductionLine
+```
+
+#### 方法 3: 使用 API 下载
+
+```bash
+# 获取最新的 artifact URL
+curl -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  https://api.github.com/repos/waywayne/JNProductionLine/actions/artifacts
+
+# 下载 artifact
+curl -L -H "Authorization: token YOUR_GITHUB_TOKEN" \
+  -o linux-build.zip \
+  "ARTIFACT_DOWNLOAD_URL"
+```
+
+### 构建产物说明
+
+#### jn-production-line-linux-x64.tar.gz
+- **格式**: tar.gz 压缩包
+- **内容**: 完整的 Linux 应用程序
+- **大小**: 约 50-100 MB
+- **包含**:
+  - `jn_production_line` - 主程序可执行文件
+  - `lib/` - 共享库文件
+  - `data/` - 资源文件（图标、字体等）
+
+#### *.AppImage（可选）
+- **格式**: AppImage 自包含格式
+- **优点**: 
+  - 无需安装，直接运行
+  - 包含所有依赖
+  - 适合便携使用
+- **使用**:
+  ```bash
+  chmod +x *.AppImage
+  ./*.AppImage
+  ```
 
 ## 本地构建
 
@@ -81,7 +160,116 @@ tar -czf jn-production-line-linux-x64.tar.gz .
 
 ## 部署
 
-### 解压并运行
+### 快速安装（推荐）
+
+```bash
+# 1. 从 GitHub Actions 下载 linux-build.zip 并解压
+unzip linux-build.zip
+
+# 2. 安装系统依赖
+sudo apt-get update
+sudo apt-get install -y libgtk-3-0 libblkid1 liblzma5 bluez bluez-tools socat
+
+# 3. 创建安装目录
+sudo mkdir -p /opt/jn-production-line
+
+# 4. 解压应用到安装目录
+sudo tar -xzf jn-production-line-linux-x64.tar.gz -C /opt/jn-production-line
+
+# 5. 设置执行权限
+sudo chmod +x /opt/jn-production-line/jn_production_line
+
+# 6. 创建符号链接（可选，方便命令行启动）
+sudo ln -s /opt/jn-production-line/jn_production_line /usr/local/bin/jn-production-line
+
+# 7. 运行应用
+jn-production-line
+# 或
+/opt/jn-production-line/jn_production_line
+```
+
+### 一键安装脚本
+
+创建 `install.sh`:
+
+```bash
+#!/bin/bash
+set -e
+
+echo "📦 JN Production Line 安装程序"
+echo "================================"
+
+# 检查是否为 root
+if [ "$EUID" -ne 0 ]; then 
+    echo "❌ 请使用 sudo 运行此脚本"
+    exit 1
+fi
+
+# 检查文件是否存在
+if [ ! -f "jn-production-line-linux-x64.tar.gz" ]; then
+    echo "❌ 找不到 jn-production-line-linux-x64.tar.gz"
+    echo "   请先从 GitHub Actions 下载构建产物"
+    exit 1
+fi
+
+# 安装系统依赖
+echo "📥 安装系统依赖..."
+apt-get update
+apt-get install -y libgtk-3-0 libblkid1 liblzma5 bluez bluez-tools socat
+
+# 创建安装目录
+echo "📁 创建安装目录..."
+mkdir -p /opt/jn-production-line
+
+# 解压应用
+echo "📦 解压应用..."
+tar -xzf jn-production-line-linux-x64.tar.gz -C /opt/jn-production-line
+
+# 设置权限
+echo "🔐 设置权限..."
+chmod +x /opt/jn-production-line/jn_production_line
+
+# 创建符号链接
+echo "🔗 创建符号链接..."
+ln -sf /opt/jn-production-line/jn_production_line /usr/local/bin/jn-production-line
+
+# 创建桌面文件
+echo "🖥️  创建桌面快捷方式..."
+cat > /usr/share/applications/jn-production-line.desktop <<EOF
+[Desktop Entry]
+Name=JN Production Line
+Comment=Flutter production line test application
+Exec=/opt/jn-production-line/jn_production_line
+Terminal=false
+Type=Application
+Categories=Utility;Development;
+EOF
+
+update-desktop-database 2>/dev/null || true
+
+# 配置蓝牙权限
+echo "🔧 配置蓝牙权限..."
+usermod -a -G bluetooth $SUDO_USER 2>/dev/null || true
+
+echo ""
+echo "✅ 安装完成！"
+echo ""
+echo "使用方法："
+echo "  1. 命令行运行: jn-production-line"
+echo "  2. 应用菜单中搜索 'JN Production Line'"
+echo ""
+echo "⚠️  注意: 如果配置了蓝牙权限，请重新登录以生效"
+```
+
+使用方法:
+
+```bash
+# 下载并解压 linux-build.zip 后
+chmod +x install.sh
+sudo ./install.sh
+```
+
+### 手动解压并运行
 
 ```bash
 # 解压

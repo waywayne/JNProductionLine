@@ -1,0 +1,137 @@
+#!/bin/bash
+# JN Production Line - Linux 安装脚本
+# 用于在 Ubuntu/Debian 系统上安装从 CI 构建的应用
+
+set -e
+
+APP_NAME="jn-production-line"
+INSTALL_DIR="/opt/$APP_NAME"
+BINARY_NAME="jn_production_line"
+ARCHIVE_NAME="jn-production-line-linux-x64.tar.gz"
+
+echo "📦 JN Production Line 安装程序"
+echo "================================"
+echo ""
+
+# 检查是否为 root
+if [ "$EUID" -ne 0 ]; then 
+    echo "❌ 请使用 sudo 运行此脚本"
+    echo "   示例: sudo ./install-linux.sh"
+    exit 1
+fi
+
+# 检查文件是否存在
+if [ ! -f "$ARCHIVE_NAME" ]; then
+    echo "❌ 找不到 $ARCHIVE_NAME"
+    echo ""
+    echo "请按以下步骤操作："
+    echo "1. 访问 https://github.com/waywayne/JNProductionLine/actions"
+    echo "2. 选择最新的成功构建"
+    echo "3. 下载 'linux-build' artifact"
+    echo "4. 解压 linux-build.zip"
+    echo "5. 将此脚本放在解压后的目录中"
+    echo "6. 重新运行: sudo ./install-linux.sh"
+    exit 1
+fi
+
+# 安装系统依赖
+echo "📥 安装系统依赖..."
+apt-get update -qq
+apt-get install -y \
+    libgtk-3-0 \
+    libblkid1 \
+    liblzma5 \
+    bluez \
+    bluez-tools \
+    socat
+
+# 创建安装目录
+echo "📁 创建安装目录..."
+mkdir -p "$INSTALL_DIR"
+
+# 备份旧版本（如果存在）
+if [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
+    echo "🔄 备份旧版本..."
+    mv "$INSTALL_DIR" "${INSTALL_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$INSTALL_DIR"
+fi
+
+# 解压应用
+echo "📦 解压应用..."
+tar -xzf "$ARCHIVE_NAME" -C "$INSTALL_DIR"
+
+# 设置权限
+echo "🔐 设置权限..."
+chmod +x "$INSTALL_DIR/$BINARY_NAME"
+
+# 创建符号链接
+echo "🔗 创建符号链接..."
+ln -sf "$INSTALL_DIR/$BINARY_NAME" /usr/local/bin/$APP_NAME
+
+# 创建桌面文件
+echo "🖥️  创建桌面快捷方式..."
+cat > /usr/share/applications/$APP_NAME.desktop <<EOF
+[Desktop Entry]
+Name=JN Production Line
+Comment=Flutter production line test application
+Exec=$INSTALL_DIR/$BINARY_NAME
+Terminal=false
+Type=Application
+Categories=Utility;Development;
+StartupNotify=true
+EOF
+
+# 更新桌面数据库
+if command -v update-desktop-database &> /dev/null; then
+    update-desktop-database /usr/share/applications 2>/dev/null || true
+fi
+
+# 配置蓝牙权限
+echo "🔧 配置蓝牙权限..."
+if [ -n "$SUDO_USER" ]; then
+    usermod -a -G bluetooth "$SUDO_USER" 2>/dev/null || true
+    echo "   已将用户 $SUDO_USER 添加到 bluetooth 组"
+fi
+
+# 配置 udev 规则
+echo "🔧 配置串口权限..."
+cat > /etc/udev/rules.d/99-jn-production.rules <<EOF
+# Serial ports
+KERNEL=="ttyUSB[0-9]*", MODE="0666"
+KERNEL=="ttyACM[0-9]*", MODE="0666"
+# Bluetooth RFCOMM
+KERNEL=="rfcomm[0-9]*", GROUP="bluetooth", MODE="0660"
+EOF
+
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger 2>/dev/null || true
+
+# 显示安装信息
+echo ""
+echo "✅ 安装完成！"
+echo ""
+echo "安装位置: $INSTALL_DIR"
+echo "可执行文件: $INSTALL_DIR/$BINARY_NAME"
+echo ""
+echo "使用方法："
+echo "  方法 1: 命令行运行"
+echo "    $ $APP_NAME"
+echo ""
+echo "  方法 2: 从应用菜单启动"
+echo "    在应用菜单中搜索 'JN Production Line'"
+echo ""
+echo "  方法 3: 直接运行"
+echo "    $ $INSTALL_DIR/$BINARY_NAME"
+echo ""
+
+if [ -n "$SUDO_USER" ]; then
+    echo "⚠️  重要提示:"
+    echo "   蓝牙权限已配置，请重新登录以使权限生效"
+    echo "   或运行: newgrp bluetooth"
+    echo ""
+fi
+
+echo "📚 更多信息请查看:"
+echo "   - 文档: docs/CI_BUILD_GUIDE.md"
+echo "   - GitHub: https://github.com/waywayne/JNProductionLine"
+echo ""
