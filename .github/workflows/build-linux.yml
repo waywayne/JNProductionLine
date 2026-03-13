@@ -9,7 +9,15 @@ on:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm64
+    
+    runs-on: ${{ matrix.runner }}
     
     steps:
     - name: Checkout code
@@ -69,8 +77,8 @@ jobs:
         
     - name: Package application
       run: |
-        cd build/linux/x64/release/bundle
-        tar -czf ../../../../../jn-production-line-linux-x64.tar.gz .
+        cd build/linux/${{ matrix.arch }}/release/bundle
+        tar -czf ../../../../../jn-production-line-linux-${{ matrix.arch }}.tar.gz .
         cd ../../../../../
         
     - name: Prepare artifacts
@@ -79,7 +87,7 @@ jobs:
         mkdir -p artifacts
         
         # 复制文件到 artifacts 目录
-        cp jn-production-line-linux-x64.tar.gz artifacts/
+        cp jn-production-line-linux-${{ matrix.arch }}.tar.gz artifacts/
         cp scripts/install-linux.sh artifacts/
         cp scripts/README-ARTIFACT.md artifacts/README.md
         
@@ -93,19 +101,19 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: linux-build
+        name: linux-build-${{ matrix.arch }}
         path: artifacts/*
         retention-days: 30
         
     - name: Display build info
       run: |
-        echo "✅ Build completed successfully!"
+        echo "✅ Build completed successfully for ${{ matrix.arch }}!"
         echo ""
         echo "📊 Build size:"
-        du -sh build/linux/x64/release/bundle
+        du -sh build/linux/${{ matrix.arch }}/release/bundle
         echo ""
         echo "📦 Archive size:"
-        ls -lh jn-production-line-linux-x64.tar.gz
+        ls -lh jn-production-line-linux-${{ matrix.arch }}.tar.gz
         echo ""
         echo "📋 Artifacts:"
         ls -lh artifacts/

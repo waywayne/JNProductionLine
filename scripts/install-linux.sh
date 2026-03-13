@@ -32,7 +32,7 @@ echo "🖥️  检测到架构: $ARCH_NAME"
 echo ""
 
 # 检查是否为 root
-if [ "$EUID" -ne 0 ]; then 
+if [ "$(id -u)" -ne 0 ]; then 
     echo "❌ 请使用 sudo 运行此脚本"
     echo "   示例: sudo ./install-linux.sh"
     exit 1

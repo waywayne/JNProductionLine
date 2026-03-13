@@ -2,20 +2,22 @@
 
 ## 📦 包含文件
 
-- `jn-production-line-linux-x64.tar.gz` - Linux 应用程序包（约 50-100 MB）
-- `install-linux.sh` - 一键安装脚本
+- `jn-production-line-linux-x64.tar.gz` - Linux x86_64 应用程序包（约 50-100 MB）
+- `jn-production-line-linux-arm64.tar.gz` - Linux ARM64 应用程序包（约 50-100 MB）
+- `install-linux.sh` - 一键安装脚本（自动检测架构）
 
 ## 🚀 快速安装
 
 ### 方法 1: 一键安装（推荐）
 
 ```bash
-# 运行安装脚本
+# 运行安装脚本（会自动检测 x64 或 ARM64）
 chmod +x install-linux.sh
 sudo ./install-linux.sh
 ```
 
 安装脚本会自动：
+- ✅ 检测系统架构（x86_64 或 ARM64）
 - ✅ 安装系统依赖（GTK3, BlueZ 等）
 - ✅ 解压应用到 `/opt/jn-production-line`
 - ✅ 创建命令行快捷方式 `jn-production-line`
@@ -29,9 +31,14 @@ sudo ./install-linux.sh
 sudo apt-get update
 sudo apt-get install -y libgtk-3-0 libblkid1 liblzma5 bluez bluez-tools socat
 
-# 2. 解压到系统目录
+# 2. 解压到系统目录（根据你的架构选择对应的文件）
 sudo mkdir -p /opt/jn-production-line
+
+# x86_64 系统:
 sudo tar -xzf jn-production-line-linux-x64.tar.gz -C /opt/jn-production-line
+
+# 或 ARM64 系统:
+# sudo tar -xzf jn-production-line-linux-arm64.tar.gz -C /opt/jn-production-line
 
 # 3. 设置执行权限
 sudo chmod +x /opt/jn-production-line/jn_production_line
@@ -60,6 +67,7 @@ jn-production-line
 ## ⚙️ 系统要求
 
 - **操作系统**: Ubuntu 20.04+ / Debian 11+
+- **架构**: x86_64 (Intel/AMD) 或 ARM64 (aarch64)
 - **内存**: 2 GB RAM
 - **存储**: 200 MB 可用空间
 
