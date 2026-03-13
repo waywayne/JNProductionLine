@@ -87,6 +87,10 @@ echo "🔗 创建启动脚本..."
 cat > /usr/local/bin/$APP_NAME <<EOF
 #!/bin/bash
 # JN Production Line 启动脚本
+
+# 抑制非关键的 GLib 警告
+export G_MESSAGES_DEBUG=""
+
 cd "$INSTALL_DIR"
 exec "./$BINARY_NAME" "\$@"
 EOF
