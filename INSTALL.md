@@ -28,7 +28,7 @@
    
    解压后得到：
    - `jn-production-line-linux-x64.tar.gz` - 主程序包
-   - `install-linux.sh` - 安装脚本（如果包含）
+   - `install-linux.sh` - 一键安装脚本
 
 ### 方法 2: 使用 GitHub CLI
 
@@ -51,14 +51,10 @@ cd linux-build
 ### 一键安装（推荐）
 
 ```bash
-# 1. 确保已下载并解压 linux-build.zip
+# 1. 下载并解压 linux-build.zip
 unzip linux-build.zip
-cd linux-build
 
-# 2. 下载安装脚本（如果压缩包中没有）
-wget https://raw.githubusercontent.com/waywayne/JNProductionLine/main/scripts/install-linux.sh
-
-# 3. 运行安装脚本
+# 2. 运行安装脚本
 chmod +x install-linux.sh
 sudo ./install-linux.sh
 ```

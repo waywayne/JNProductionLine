@@ -73,34 +73,9 @@ jobs:
         tar -czf ../../../../../jn-production-line-linux-x64.tar.gz .
         cd ../../../../../
         
-    - name: Create AppImage (optional)
-      continue-on-error: true
+    - name: Copy install script to artifacts
       run: |
-        # Install AppImage tools
-        wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-        chmod +x linuxdeploy-x86_64.AppImage
-        
-        # Create AppDir structure
-        mkdir -p AppDir/usr/bin
-        mkdir -p AppDir/usr/lib
-        mkdir -p AppDir/usr/share/applications
-        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-        
-        # Copy application files
-        cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
-        
-        # Create desktop entry
-        cat > AppDir/usr/share/applications/jn-production-line.desktop << EOF
-        [Desktop Entry]
-        Name=JN Production Line
-        Exec=jn_production_line
-        Icon=jn-production-line
-        Type=Application
-        Categories=Utility;Development;
-        EOF
-        
-        # Create AppImage
-        ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
+        cp scripts/install-linux.sh .
         
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -108,7 +83,7 @@ jobs:
         name: linux-build
         path: |
           jn-production-line-linux-x64.tar.gz
-          *.AppImage
+          install-linux.sh
         retention-days: 30
         
     - name: Display build info

@@ -37,7 +37,7 @@
 4. 下载 `linux-build` 压缩包
 5. 解压后得到：
    - `jn-production-line-linux-x64.tar.gz` - 主程序包
-   - `*.AppImage` - AppImage 格式（如果构建成功）
+   - `install-linux.sh` - 一键安装脚本
 
 #### 方法 2: 使用 GitHub CLI
 
@@ -82,16 +82,16 @@ curl -L -H "Authorization: token YOUR_GITHUB_TOKEN" \
   - `lib/` - 共享库文件
   - `data/` - 资源文件（图标、字体等）
 
-#### *.AppImage（可选）
-- **格式**: AppImage 自包含格式
-- **优点**: 
-  - 无需安装，直接运行
-  - 包含所有依赖
-  - 适合便携使用
+#### install-linux.sh
+- **格式**: Bash 脚本
+- **功能**: 
+  - 自动安装系统依赖
+  - 解压并安装应用
+  - 配置权限和快捷方式
 - **使用**:
   ```bash
-  chmod +x *.AppImage
-  ./*.AppImage
+  chmod +x install-linux.sh
+  sudo ./install-linux.sh
   ```
 
 ## 本地构建
