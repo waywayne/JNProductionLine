@@ -5,6 +5,10 @@
 ### 配置文件
 - `.github/workflows/build-linux.yml`: Linux 自动构建配置
 
+### 支持的架构
+- **x64 (AMD64)**: 使用 `ubuntu-latest` runner
+- **ARM64**: 使用 `ubuntu-24.04-arm` runner（GitHub 原生 ARM64 hosted runner）
+
 ### 自动触发
 - Push 到 main/master/develop 分支
 - 创建 Pull Request
@@ -34,9 +38,11 @@
 1. 进入 Actions 页面
 2. 点击最新的成功构建（绿色 ✓）
 3. 滚动到页面底部 "Artifacts" 部分
-4. 下载 `linux-build` 压缩包
+4. 下载构建产物：
+   - `linux-build-x64` - x64 架构构建
+   - `linux-build-arm64` - ARM64 架构构建
 5. 解压后得到：
-   - `jn-production-line-linux-x64.tar.gz` - 主程序包
+   - `jn-production-line-linux-x64.tar.gz` 或 `jn-production-line-linux-arm64.tar.gz` - 主程序包
    - `install-linux.sh` - 一键安装脚本
 
 #### 方法 2: 使用 GitHub CLI
