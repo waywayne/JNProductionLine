@@ -115,75 +115,21 @@ if command -v update-desktop-database &> /dev/null; then
     update-desktop-database /usr/share/applications 2>/dev/null || true
 fi
 
-# 配置蓝牙权限
-echo "🔧 配置蓝牙权限..."
-if [ -n "$SUDO_USER" ]; then
-    # 添加用户到 bluetooth 组
-    usermod -a -G bluetooth "$SUDO_USER" 2>/dev/null || true
-    echo "   已将用户 $SUDO_USER 添加到 bluetooth 组"
-fi
-
-# 配置 PolicyKit 规则，允许 bluetooth 组用户无需 sudo 使用蓝牙
-echo "🔧 配置 PolicyKit 蓝牙规则..."
-mkdir -p /etc/polkit-1/rules.d
-cat > /etc/polkit-1/rules.d/50-bluetooth.rules <<'EOF'
-/* Allow users in bluetooth group to use bluetoothctl without password */
-polkit.addRule(function(action, subject) {
-    if ((action.id == "org.bluez.hci0.Adapter1.StartDiscovery" ||
-         action.id == "org.bluez.hci0.Adapter1.StopDiscovery" ||
-         action.id == "org.bluez.hci0.Device1.Connect" ||
-         action.id == "org.bluez.hci0.Device1.Disconnect" ||
-         action.id == "org.bluez.hci0.Device1.Pair" ||
-         action.id == "org.bluez") &&
-        subject.isInGroup("bluetooth")) {
-        return polkit.Result.YES;
-    }
-});
-EOF
-
-# 配置 D-Bus 规则，允许 bluetooth 组访问 BlueZ
-echo "🔧 配置 D-Bus 蓝牙规则..."
-cat > /etc/dbus-1/system.d/bluetooth-group.conf <<'EOF'
-<!DOCTYPE busconfig PUBLIC
- "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
- "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
-<busconfig>
-  <policy group="bluetooth">
-    <allow send_destination="org.bluez"/>
-    <allow send_interface="org.bluez.Manager"/>
-    <allow send_interface="org.bluez.Adapter"/>
-    <allow send_interface="org.bluez.Device"/>
-    <allow send_interface="org.bluez.Service"/>
-    <allow send_interface="org.bluez.Agent"/>
-    <allow send_interface="org.bluez.ProfileManager1"/>
-    <allow send_interface="org.bluez.AgentManager1"/>
-    <allow send_interface="org.freedesktop.DBus.Properties"/>
-    <allow send_interface="org.freedesktop.DBus.ObjectManager"/>
-  </policy>
-</busconfig>
-EOF
-
-# 配置 udev 规则
-echo "🔧 配置串口和 RFCOMM 权限..."
+# 配置串口权限
+echo "🔧 配置串口权限..."
 cat > /etc/udev/rules.d/99-jn-production.rules <<EOF
 # Serial ports
 KERNEL=="ttyUSB[0-9]*", MODE="0666"
 KERNEL=="ttyACM[0-9]*", MODE="0666"
 
 # Bluetooth RFCOMM devices
-KERNEL=="rfcomm[0-9]*", GROUP="bluetooth", MODE="0660"
-
-# Bluetooth HCI devices
-KERNEL=="hci[0-9]*", GROUP="bluetooth", MODE="0660"
+KERNEL=="rfcomm[0-9]*", MODE="0666"
 EOF
 
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger 2>/dev/null || true
 
-# 重启 D-Bus 和蓝牙服务以应用新规则
-echo "🔄 重启蓝牙服务..."
-systemctl restart dbus 2>/dev/null || true
-systemctl restart bluetooth 2>/dev/null || true
+echo "   ✅ 串口和 RFCOMM 权限已配置"
 
 # 显示安装信息
 echo ""
@@ -203,20 +149,10 @@ echo "  方法 3: 直接运行"
 echo "    $ $INSTALL_DIR/$BINARY_NAME"
 echo ""
 
-if [ -n "$SUDO_USER" ]; then
-    echo "⚠️  重要提示:"
-    echo "   蓝牙权限已配置，需要重新登录以使权限生效"
-    echo ""
-    echo "   快速生效方法（当前终端）："
-    echo "     $ newgrp bluetooth"
-    echo ""
-    echo "   或者注销并重新登录系统"
-    echo ""
-    echo "   验证权限："
-    echo "     $ groups | grep bluetooth"
-    echo "     $ bluetoothctl scan on  # 应该无需 sudo"
-    echo ""
-fi
+echo "⚠️  重要提示:"
+echo "   Linux 蓝牙功能需要使用 sudo 运行应用"
+echo "   或者手动配置蓝牙权限（详见文档）"
+echo ""
 
 echo "📚 更多信息请查看:"
 echo "   - 文档: docs/CI_BUILD_GUIDE.md"

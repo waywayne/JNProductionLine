@@ -64,44 +64,41 @@ class LinuxBluetoothSppService {
       _logState?.info('🔍 开始扫描蓝牙设备 (Linux)');
       _logState?.info('   超时时间: ${timeout.inSeconds}秒');
       
-      // 使用 bluetoothctl 扫描设备
-      final result = await Process.run('bluetoothctl', ['scan', 'on']);
+      // 使用 bash 脚本执行 bluetoothctl 命令
+      // bluetoothctl 是交互式工具，需要通过管道输入命令
+      final scanScript = '''
+timeout ${timeout.inSeconds} bash -c '
+  echo "scan on" | bluetoothctl &
+  sleep ${timeout.inSeconds}
+  echo "scan off" | bluetoothctl
+' 2>/dev/null || true
+echo "devices" | bluetoothctl 2>/dev/null
+''';
       
-      if (result.exitCode != 0) {
-        _logState?.error('❌ 启动蓝牙扫描失败: ${result.stderr}');
-        return [];
-      }
+      final result = await Process.run('bash', ['-c', scanScript]);
       
-      _logState?.info('⏳ 扫描中...');
-      await Future.delayed(timeout);
-      
-      // 停止扫描
-      await Process.run('bluetoothctl', ['scan', 'off']);
-      
-      // 获取已发现的设备列表
-      final devicesResult = await Process.run('bluetoothctl', ['devices']);
-      
-      if (devicesResult.exitCode != 0) {
-        _logState?.error('❌ 获取设备列表失败: ${devicesResult.stderr}');
-        return [];
-      }
+      _logState?.info('⏳ 扫描完成，解析设备列表...');
       
       final devices = <Map<String, String>>[];
-      final lines = devicesResult.stdout.toString().split('\n');
+      final lines = result.stdout.toString().split('\n');
       
       for (final line in lines) {
         if (line.trim().isEmpty) continue;
         
         // 格式: Device AA:BB:CC:DD:EE:FF Device Name
-        final match = RegExp(r'Device\s+([0-9A-F:]+)\s+(.+)').firstMatch(line);
+        final match = RegExp(r'Device\s+([0-9A-Fa-f:]+)\s+(.+)', caseSensitive: false).firstMatch(line);
         if (match != null) {
-          final address = match.group(1)!;
+          final address = match.group(1)!.toUpperCase();
           final name = match.group(2)!.trim();
-          devices.add({
-            'address': address,
-            'name': name,
-          });
-          _logState?.info('  📱 $name ($address)');
+          
+          // 避免重复添加
+          if (!devices.any((d) => d['address'] == address)) {
+            devices.add({
+              'address': address,
+              'name': name,
+            });
+            _logState?.info('  📱 $name ($address)');
+          }
         }
       }
       
