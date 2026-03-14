@@ -159,13 +159,36 @@ EOF
     }
   }
   
+  /// 将短 UUID 转换为完整的 128-bit UUID
+  String _expandUuid(String uuid) {
+    // 移除可能的前缀
+    uuid = uuid.replaceAll('0x', '').replaceAll('0X', '');
+    
+    // 如果是 4 位短 UUID (如 7033)
+    if (uuid.length == 4) {
+      return '0000$uuid-0000-1000-8000-00805F9B34FB'.toUpperCase();
+    }
+    
+    // 如果是 8 位 UUID
+    if (uuid.length == 8) {
+      return '$uuid-0000-1000-8000-00805F9B34FB'.toUpperCase();
+    }
+    
+    // 已经是完整 UUID
+    return uuid.toUpperCase();
+  }
+  
   /// 通过 SDP 查询设备的服务和 RFCOMM 通道
   Future<int?> discoverServiceChannel(String deviceAddress, {String? uuid}) async {
     try {
-      final targetUuid = uuid ?? _serviceUuid;
+      final inputUuid = uuid ?? _serviceUuid;
+      final fullUuid = _expandUuid(inputUuid);
+      final shortUuid = inputUuid.replaceAll('0x', '').replaceAll('0X', '');
+      
       _logState?.info('🔍 查询设备服务 (SDP)');
       _logState?.info('   设备地址: $deviceAddress');
-      _logState?.info('   服务 UUID: $targetUuid');
+      _logState?.info('   输入 UUID: $inputUuid');
+      _logState?.info('   完整 UUID: $fullUuid');
       
       // 使用 sdptool 查询服务
       final result = await Process.run('sdptool', ['browse', deviceAddress]);
@@ -176,45 +199,97 @@ EOF
       }
       
       final output = result.stdout.toString();
-      _logState?.debug('SDP 查询结果:\n$output');
+      _logState?.info('📋 SDP 查询结果:');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info(output);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // 解析 RFCOMM 通道号
-      // 查找包含目标 UUID 的服务记录
-      final lines = output.split('\n');
-      int? channel;
-      bool foundService = false;
+      // 将输出按服务记录分组
+      final serviceRecords = <Map<String, dynamic>>[];
+      Map<String, dynamic>? currentService;
       
-      for (int i = 0; i < lines.length; i++) {
-        final line = lines[i];
-        
-        // 查找 UUID 匹配
-        if (line.contains(targetUuid.toUpperCase()) || 
-            line.contains(targetUuid.toLowerCase())) {
-          foundService = true;
-          _logState?.info('✅ 找到匹配的服务 UUID');
+      for (final line in lines) {
+        // 检测新的服务记录开始
+        if (line.contains('Service RecHandle:')) {
+          if (currentService != null) {
+            serviceRecords.add(currentService);
+          }
+          currentService = {
+            'lines': <String>[],
+            'channel': null,
+            'uuids': <String>[],
+          };
         }
         
-        // 在找到服务后，查找 RFCOMM 通道号
-        if (foundService && line.contains('Channel:')) {
-          final channelMatch = RegExp(r'Channel:\s*(\d+)').firstMatch(line);
-          if (channelMatch != null) {
-            channel = int.parse(channelMatch.group(1)!);
-            _logState?.success('✅ 发现 RFCOMM 通道: $channel');
-            break;
+        if (currentService != null) {
+          currentService['lines'].add(line);
+          
+          // 提取通道号
+          if (line.contains('Channel:')) {
+            final channelMatch = RegExp(r'Channel:\s*(\d+)').firstMatch(line);
+            if (channelMatch != null) {
+              currentService['channel'] = int.parse(channelMatch.group(1)!);
+            }
+          }
+          
+          // 提取所有 UUID
+          final uuidMatch = RegExp(r'0x([0-9a-fA-F]{4})').allMatches(line);
+          for (final match in uuidMatch) {
+            currentService['uuids'].add(match.group(1)!.toUpperCase());
+          }
+          
+          // 也匹配完整 UUID
+          final fullUuidMatch = RegExp(r'([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})').allMatches(line);
+          for (final match in fullUuidMatch) {
+            currentService['uuids'].add(match.group(1)!.toUpperCase());
           }
         }
       }
       
+      if (currentService != null) {
+        serviceRecords.add(currentService);
+      }
+      
+      _logState?.info('📋 找到 ${serviceRecords.length} 个服务记录');
+      
+      // 查找匹配的服务
+      int? channel;
+      for (int i = 0; i < serviceRecords.length; i++) {
+        final service = serviceRecords[i];
+        final serviceChannel = service['channel'];
+        final serviceUuids = service['uuids'] as List<String>;
+        
+        _logState?.debug('服务 #${i + 1}: 通道=$serviceChannel, UUIDs=$serviceUuids');
+        
+        // 检查是否包含目标 UUID
+        bool matched = false;
+        for (final uuid in serviceUuids) {
+          if (uuid == shortUuid.toUpperCase() || uuid == fullUuid) {
+            matched = true;
+            _logState?.info('✅ 服务 #${i + 1} 匹配 UUID: $uuid');
+            break;
+          }
+        }
+        
+        if (matched && serviceChannel != null) {
+          channel = serviceChannel;
+          _logState?.success('✅ 找到匹配的 RFCOMM 通道: $channel');
+          _logState?.info('   服务 UUIDs: $serviceUuids');
+          break;
+        }
+      }
+      
       if (channel == null) {
-        _logState?.warning('⚠️ 未找到 RFCOMM 通道，使用默认通道 1');
-        channel = 1;
+        _logState?.warning('⚠️ 未找到匹配 UUID 的 RFCOMM 通道');
+        _logState?.info('   提示: 可以在连接时手动指定通道号 (例如: channel: 4)');
+        return null;
       }
       
       return channel;
     } catch (e) {
       _logState?.error('❌ 服务发现异常: $e');
-      _logState?.warning('⚠️ 使用默认通道 1');
-      return 1;
+      return null;
     }
   }
   
@@ -377,7 +452,14 @@ EOF
       _bluetoothProcess!.stdin.add(data);
       await _bluetoothProcess!.stdin.flush();
       
-      _logState?.debug('📤 发送: ${data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+      // 详细的发送日志
+      final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      final asciiStr = String.fromCharCodes(
+        data.map((b) => (b >= 32 && b <= 126) ? b : 46), // 46 = '.'
+      );
+      _logState?.debug('📤 发送 [${data.length} 字节]: $hexStr');
+      _logState?.info('📤 发送: $hexStr (ASCII: $asciiStr)');
+      
       return true;
     } catch (e) {
       _logState?.error('❌ 发送数据失败: $e');
@@ -402,12 +484,14 @@ EOF
       final completer = Completer<Map<String, dynamic>?>();
       _pendingResponses[seqNum] = completer;
       
-      _logState?.debug('🔄 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒)');
+      _logState?.info('🔄 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒)');
+      _logState?.debug('   命令长度: ${command.length} 字节');
       
       // 发送命令
       final success = await sendData(command);
       if (!success) {
         _pendingResponses.remove(seqNum);
+        _logState?.error('❌ 命令发送失败');
         return {'error': 'Failed to send command'};
       }
       
@@ -432,7 +516,13 @@ EOF
   /// 处理接收到的数据
   void _onDataReceived(Uint8List data) {
     try {
-      _logState?.debug('📥 接收: ${data.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+      // 详细的接收日志
+      final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      final asciiStr = String.fromCharCodes(
+        data.map((b) => (b >= 32 && b <= 126) ? b : 46), // 46 = '.'
+      );
+      _logState?.debug('📥 接收 [${data.length} 字节]: $hexStr');
+      _logState?.info('📥 接收: $hexStr (ASCII: $asciiStr)');
       
       // 添加到缓冲区
       final newBuffer = Uint8List(_buffer.length + data.length);
@@ -452,6 +542,8 @@ EOF
   
   /// 处理缓冲区中的数据包
   void _processBuffer() {
+    _logState?.debug('🔍 处理缓冲区，当前长度: ${_buffer.length} 字节');
+    
     while (_buffer.length >= 4) {
       // 查找数据包起始标志 (0xAA 0x55)
       int startIndex = -1;
@@ -463,15 +555,27 @@ EOF
       }
       
       if (startIndex == -1) {
-        _buffer = Uint8List(0);
+        // 没有找到起始标志，记录并保留部分数据
+        final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+        _logState?.warning('⚠️ 缓冲区中未找到起始标志 (AA 55)');
+        _logState?.debug('   缓冲区内容: $bufferHex');
+        
+        // 只保留最后一个字节（可能是 0xAA 的开始）
+        if (_buffer.isNotEmpty) {
+          _buffer = _buffer.sublist(_buffer.length - 1);
+        } else {
+          _buffer = Uint8List(0);
+        }
         break;
       }
       
       if (startIndex > 0) {
+        _logState?.debug('   跳过 $startIndex 字节垃圾数据');
         _buffer = _buffer.sublist(startIndex);
       }
       
       if (_buffer.length < 8) {
+        _logState?.debug('   数据不足，等待更多数据 (当前: ${_buffer.length}, 需要: 8)');
         break;
       }
       
@@ -479,7 +583,10 @@ EOF
       final packetLength = (_buffer[2] << 8) | _buffer[3];
       final totalLength = packetLength + 4;
       
+      _logState?.debug('   数据包长度: $packetLength, 总长度: $totalLength');
+      
       if (_buffer.length < totalLength) {
+        _logState?.debug('   数据不完整，等待更多数据 (当前: ${_buffer.length}, 需要: $totalLength)');
         break;
       }
       
@@ -487,6 +594,7 @@ EOF
       final packet = _buffer.sublist(0, totalLength);
       _buffer = _buffer.sublist(totalLength);
       
+      _logState?.debug('   提取完整数据包，剩余缓冲区: ${_buffer.length} 字节');
       _processPacket(packet);
     }
   }
@@ -495,7 +603,35 @@ EOF
   void _processPacket(Uint8List packet) {
     try {
       _packetCount++;
-      _logState?.debug('📦 数据包 #$_packetCount: ${packet.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+      
+      // 详细的数据包日志
+      final hexStr = packet.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      _logState?.debug('📦 数据包 #$_packetCount [${packet.length} 字节]: $hexStr');
+      _logState?.info('📦 完整数据包 #$_packetCount:');
+      _logState?.info('   长度: ${packet.length} 字节');
+      _logState?.info('   HEX: $hexStr');
+      
+      // 解析数据包结构（如果是标准格式）
+      if (packet.length >= 8 && packet[0] == 0xAA && packet[1] == 0x55) {
+        final length = (packet[2] << 8) | packet[3];
+        final moduleId = packet[4];
+        final messageId = packet[5];
+        _logState?.info('   头部: AA 55 (起始标志)');
+        _logState?.info('   长度: $length');
+        _logState?.info('   模块ID: 0x${moduleId.toRadixString(16).padLeft(2, '0').toUpperCase()}');
+        _logState?.info('   消息ID: 0x${messageId.toRadixString(16).padLeft(2, '0').toUpperCase()}');
+        
+        if (packet.length > 8) {
+          final payload = packet.sublist(6, packet.length - 2);
+          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+          _logState?.info('   数据: $payloadHex');
+        }
+        
+        if (packet.length >= 2) {
+          final checksum = (packet[packet.length - 2] << 8) | packet[packet.length - 1];
+          _logState?.info('   校验和: 0x${checksum.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+        }
+      }
       
       final response = {
         'payload': packet,
@@ -506,9 +642,15 @@ EOF
       if (_pendingResponses.isNotEmpty) {
         final firstKey = _pendingResponses.keys.first;
         final completer = _pendingResponses[firstKey];
+        _logState?.info('✅ 响应数据包 #$_packetCount 匹配序列号: $firstKey');
         if (!completer!.isCompleted) {
           completer.complete(response);
+          _logState?.debug('   Completer 已完成');
+        } else {
+          _logState?.warning('   ⚠️ Completer 已经完成');
         }
+      } else {
+        _logState?.warning('⚠️ 收到数据包但没有待处理的响应');
       }
     } catch (e) {
       _logState?.error('❌ 数据包处理异常: $e');
