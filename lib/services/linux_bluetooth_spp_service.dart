@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import '../models/log_state.dart';
 import '../config/test_config.dart';
+import 'gtp_protocol.dart';
 
 /// Linux Bluetooth SPP Service
 /// 基于 Linux 蓝牙栈实现的 SPP 协议通信服务
@@ -486,10 +487,27 @@ EOF
       _pendingResponses[seqNum] = completer;
       
       _logState?.info('🔄 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒)');
-      _logState?.debug('   命令长度: ${command.length} 字节');
+      _logState?.debug('   Payload 长度: ${command.length} 字节');
       
-      // 发送命令
-      final success = await sendData(command);
+      // 构建 GTP 数据包
+      final gtpPacket = GTPProtocol.buildGTPPacket(
+        command,
+        moduleId: moduleId,
+        messageId: messageId,
+        sequenceNumber: seqNum,
+      );
+      
+      // 打印 payload (CMD + OPT + 数据)
+      final cmdHex = command.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      _logState?.info('📤 发送 Payload: [$cmdHex] (${command.length} 字节)');
+      
+      // 打印完整的 GTP 数据包
+      final fullPacketHex = gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      _logState?.info('📦 完整数据包: [$fullPacketHex]');
+      _logState?.info('   总长度: ${gtpPacket.length} 字节');
+      
+      // 发送完整的 GTP 数据包
+      final success = await sendData(gtpPacket);
       if (!success) {
         _pendingResponses.remove(seqNum);
         _logState?.error('❌ 命令发送失败');

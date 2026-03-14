@@ -686,9 +686,21 @@ class SerialService {
   Future<bool> sendGTPCommand(Uint8List cliPayload, {int? moduleId, int? messageId, int? sequenceNumber}) async {
     Uint8List gtpPacket = GTPProtocol.buildGTPPacket(cliPayload, moduleId: moduleId, messageId: messageId, sequenceNumber: sequenceNumber);
     
-    // 只打印命令数据 (CMD + OPT + 数据)
+    // 打印 payload (CMD + OPT + 数据)
     final cmdHex = _formatHexData(cliPayload);
-    _logState?.info('📤 发送: [$cmdHex]', type: LogType.debug);
+    _logState?.info('📤 发送 Payload: [$cmdHex] (${cliPayload.length} 字节)', type: LogType.debug);
+    
+    // 打印完整的 GTP 数据包（包括头部、CRC等）
+    final fullPacketHex = gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+    _logState?.info('📦 完整数据包: [$fullPacketHex]', type: LogType.debug);
+    _logState?.info('   总长度: ${gtpPacket.length} 字节', type: LogType.debug);
+    _logState?.info('   - Preamble (4字节): ${gtpPacket.sublist(0, 4).map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}', type: LogType.debug);
+    _logState?.info('   - Header (7字节): ${gtpPacket.sublist(4, 11).map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}', type: LogType.debug);
+    _logState?.info('   - CRC8 (1字节): ${gtpPacket[11].toRadixString(16).padLeft(2, '0').toUpperCase()}', type: LogType.debug);
+    final payloadStart = 12;
+    final payloadEnd = gtpPacket.length - 4;
+    _logState?.info('   - CLI Payload (${payloadEnd - payloadStart}字节): ${gtpPacket.sublist(payloadStart, payloadEnd).map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}', type: LogType.debug);
+    _logState?.info('   - CRC32 (4字节): ${gtpPacket.sublist(gtpPacket.length - 4).map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}', type: LogType.debug);
     
     debugPrint('Sending GTP packet: ${gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
     
