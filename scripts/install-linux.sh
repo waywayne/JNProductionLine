@@ -62,12 +62,13 @@ apt-get install -y \
     bluez \
     bluez-tools \
     socat \
+    pkg-config \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-wqy-microhei \
     fonts-wqy-zenhei
 
-echo "   ✅ 已安装中文字体支持"
+echo "   ✅ 已安装系统依赖和中文字体"
 
 # 创建安装目录
 echo "📁 创建安装目录..."
@@ -84,9 +85,44 @@ fi
 echo "📦 解压应用..."
 tar -xzf "$ARCHIVE_NAME" -C "$INSTALL_DIR"
 
+# 验证解压
+if [ ! -f "$INSTALL_DIR/$BINARY_NAME" ]; then
+    echo "❌ 解压失败：找不到 $BINARY_NAME"
+    echo "   检查压缩包内容:"
+    tar -tzf "$ARCHIVE_NAME" | head -10
+    exit 1
+fi
+
 # 设置权限
 echo "🔐 设置权限..."
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
+
+# 验证文件
+echo "🔍 验证安装..."
+FILE_TYPE=$(file "$INSTALL_DIR/$BINARY_NAME")
+echo "   文件类型: $FILE_TYPE"
+
+# 检查架构匹配
+case "$ARCH" in
+    x86_64|amd64)
+        if ! echo "$FILE_TYPE" | grep -q "x86-64\|x86_64"; then
+            echo "   ⚠️  警告: 二进制文件架构可能不匹配"
+        fi
+        ;;
+    aarch64|arm64)
+        if ! echo "$FILE_TYPE" | grep -q "ARM aarch64\|ARM64"; then
+            echo "   ⚠️  警告: 二进制文件架构可能不匹配"
+        fi
+        ;;
+esac
+
+# 检查依赖库
+echo "   检查依赖库..."
+MISSING_LIBS=$(ldd "$INSTALL_DIR/$BINARY_NAME" 2>&1 | grep "not found" || true)
+if [ -n "$MISSING_LIBS" ]; then
+    echo "   ⚠️  警告: 缺少以下依赖库:"
+    echo "$MISSING_LIBS" | sed 's/^/      /'
+fi
 
 # 创建启动脚本
 echo "🔗 创建启动脚本..."
@@ -94,9 +130,12 @@ cat > /usr/local/bin/$APP_NAME <<EOF
 #!/bin/bash
 # JN Production Line 启动脚本
 
-# 抑制非关键的 GLib 警告
+# 抑制非关键的 GLib/GTK 警告
 export G_MESSAGES_DEBUG=""
+export G_ENABLE_DIAGNOSTIC=0
+export G_DEBUG=""
 
+# 切换到安装目录并运行
 cd "$INSTALL_DIR"
 exec "./$BINARY_NAME" "\$@"
 EOF
@@ -109,7 +148,7 @@ cat > /usr/share/applications/$APP_NAME.desktop <<EOF
 [Desktop Entry]
 Name=JN Production Line
 Comment=Flutter production line test application
-Exec=$INSTALL_DIR/$BINARY_NAME
+Exec=/usr/local/bin/$APP_NAME
 Terminal=false
 Type=Application
 Categories=Utility;Development;
@@ -169,4 +208,8 @@ echo "   - 构建指南: docs/LINUX_BUILD_GUIDE.md"
 echo "   - 蓝牙权限: docs/BLUETOOTH_PERMISSIONS.md"
 echo "   - 中文字体: docs/CHINESE_FONTS.md"
 echo "   - GitHub: https://github.com/waywayne/JNProductionLine"
+echo ""
+echo "🔧 故障排查:"
+echo "   如果应用无法启动，运行诊断工具:"
+echo "   $ sudo bash scripts/diagnose-linux.sh"
 echo ""

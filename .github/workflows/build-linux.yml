@@ -43,8 +43,7 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.24.0'
-        channel: master
+        channel: stable
         cache: true
         
     - name: Verify Flutter installation
@@ -73,11 +72,31 @@ jobs:
       continue-on-error: true
       
     - name: Build Linux application
-      run: flutter build linux --release
+      run: |
+        echo "🔨 Building for architecture: ${{ matrix.arch }}"
+        flutter build linux --release
+        
+        # 验证构建产物
+        echo "📦 Build output:"
+        ls -la build/linux/
         
     - name: Package application
       run: |
-        cd build/linux/${{ matrix.arch }}/release/bundle
+        # 确定实际的构建目录
+        if [ -d "build/linux/${{ matrix.arch }}/release/bundle" ]; then
+          BUILD_DIR="build/linux/${{ matrix.arch }}/release/bundle"
+        elif [ -d "build/linux/arm64/release/bundle" ]; then
+          BUILD_DIR="build/linux/arm64/release/bundle"
+        elif [ -d "build/linux/x64/release/bundle" ]; then
+          BUILD_DIR="build/linux/x64/release/bundle"
+        else
+          echo "❌ Cannot find build directory"
+          ls -la build/linux/
+          exit 1
+        fi
+        
+        echo "📦 Packaging from: $BUILD_DIR"
+        cd "$BUILD_DIR"
         tar -czf ../../../../../jn-production-line-linux-${{ matrix.arch }}.tar.gz .
         cd ../../../../../
         
