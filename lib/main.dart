@@ -30,6 +30,15 @@ class MyApp extends StatelessWidget {
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
           useMaterial3: true,
+          // 配置字体回退，确保中文显示正常
+          fontFamily: 'Roboto',
+          fontFamilyFallback: const [
+            'Noto Sans CJK SC',
+            'Noto Sans CJK',
+            'WenQuanYi Micro Hei',
+            'WenQuanYi Zen Hei',
+            'Droid Sans Fallback',
+          ],
         ),
         home: const HomeScreen(),
       ),

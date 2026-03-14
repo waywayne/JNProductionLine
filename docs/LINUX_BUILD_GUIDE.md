@@ -148,6 +148,39 @@ flutter build linux --release
 - `Dockerfile.linux` - Docker 构建配置
 - `linux/flutter/generated_plugins.cmake` - 插件配置（自动生成）
 
+## 中文字体支持
+
+Linux 系统默认可能没有中文字体，导致应用中的中文显示为乱码或方块。
+
+### 自动安装（推荐）
+
+运行安装脚本会自动安装中文字体：
+
+```bash
+sudo ./scripts/install-linux.sh
+```
+
+### 手动安装
+
+如果已经安装了应用，可以单独安装中文字体：
+
+```bash
+sudo ./scripts/install-chinese-fonts.sh
+```
+
+或手动执行：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+    fonts-noto-cjk \
+    fonts-noto-cjk-extra \
+    fonts-wqy-microhei \
+    fonts-wqy-zenhei
+```
+
+安装后重启应用即可正常显示中文。
+
 ## 注意事项
 
 ⚠️ **重要**：`linux/flutter/generated_plugins.cmake` 是自动生成的文件，每次运行 `flutter pub get` 后都会被重新生成，因此需要在每次构建前重新应用修复。

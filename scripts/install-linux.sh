@@ -61,7 +61,13 @@ apt-get install -y \
     liblzma5 \
     bluez \
     bluez-tools \
-    socat
+    socat \
+    fonts-noto-cjk \
+    fonts-noto-cjk-extra \
+    fonts-wqy-microhei \
+    fonts-wqy-zenhei
+
+echo "   ✅ 已安装中文字体支持"
 
 # 创建安装目录
 echo "📁 创建安装目录..."
@@ -150,11 +156,17 @@ echo "    $ $INSTALL_DIR/$BINARY_NAME"
 echo ""
 
 echo "⚠️  重要提示:"
-echo "   Linux 蓝牙功能需要使用 sudo 运行应用"
-echo "   或者手动配置蓝牙权限（详见文档）"
+echo "   1. Linux 蓝牙功能需要使用 sudo 运行应用："
+echo "      $ sudo $APP_NAME"
+echo ""
+echo "   2. 已安装中文字体支持，如果中文显示异常："
+echo "      - 重启应用"
+echo "      - 或运行: sudo fc-cache -fv"
 echo ""
 
 echo "📚 更多信息请查看:"
-echo "   - 文档: docs/CI_BUILD_GUIDE.md"
+echo "   - 构建指南: docs/LINUX_BUILD_GUIDE.md"
+echo "   - 蓝牙权限: docs/BLUETOOTH_PERMISSIONS.md"
+echo "   - 中文字体: docs/CHINESE_FONTS.md"
 echo "   - GitHub: https://github.com/waywayne/JNProductionLine"
 echo ""
