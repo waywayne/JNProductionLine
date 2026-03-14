@@ -62,42 +62,89 @@ class LinuxBluetoothSppService {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('🔍 开始扫描蓝牙设备 (Linux)');
-      _logState?.info('   超时时间: ${timeout.inSeconds}秒');
       
-      // 使用 bash 脚本执行 bluetoothctl 命令
-      // bluetoothctl 是交互式工具，需要通过管道输入命令
+      // 改进的扫描策略：
+      // 1. 先清除已配对设备缓存（可选）
+      // 2. 使用 hcitool 进行扫描（更可靠）
+      // 3. 同时使用 bluetoothctl 获取设备名称
+      
+      _logState?.info('   使用 hcitool 扫描附近设备...');
+      
+      // 使用 hcitool scan 扫描附近设备（不依赖缓存）
       final scanScript = '''
-timeout ${timeout.inSeconds} bash -c '
-  echo "scan on" | bluetoothctl &
-  sleep ${timeout.inSeconds}
-  echo "scan off" | bluetoothctl
-' 2>/dev/null || true
-echo "devices" | bluetoothctl 2>/dev/null
+# 确保蓝牙适配器开启
+hciconfig hci0 up 2>/dev/null || true
+
+# 使用 hcitool 扫描（实时扫描，不依赖缓存）
+hcitool scan --flush 2>/dev/null || hcitool scan 2>/dev/null
 ''';
       
-      final result = await Process.run('bash', ['-c', scanScript]);
+      final scanResult = await Process.run('bash', ['-c', scanScript]);
       
-      _logState?.info('⏳ 扫描完成，解析设备列表...');
+      _logState?.info('⏳ 解析扫描结果...');
       
       final devices = <Map<String, String>>[];
-      final lines = result.stdout.toString().split('\n');
+      final lines = scanResult.stdout.toString().split('\n');
       
       for (final line in lines) {
-        if (line.trim().isEmpty) continue;
+        if (line.trim().isEmpty || line.contains('Scanning')) continue;
         
-        // 格式: Device AA:BB:CC:DD:EE:FF Device Name
-        final match = RegExp(r'Device\s+([0-9A-Fa-f:]+)\s+(.+)', caseSensitive: false).firstMatch(line);
-        if (match != null) {
-          final address = match.group(1)!.toUpperCase();
-          final name = match.group(2)!.trim();
+        // hcitool scan 格式: \tAA:BB:CC:DD:EE:FF\tDevice Name
+        final parts = line.trim().split('\t');
+        if (parts.length >= 2) {
+          final address = parts[0].trim().toUpperCase();
+          final name = parts.length > 1 ? parts[1].trim() : 'Unknown Device';
           
-          // 避免重复添加
-          if (!devices.any((d) => d['address'] == address)) {
-            devices.add({
-              'address': address,
-              'name': name,
-            });
-            _logState?.info('  📱 $name ($address)');
+          // 验证 MAC 地址格式
+          if (RegExp(r'^[0-9A-F:]{17}$', caseSensitive: false).hasMatch(address)) {
+            // 避免重复添加
+            if (!devices.any((d) => d['address'] == address)) {
+              devices.add({
+                'address': address,
+                'name': name.isNotEmpty ? name : 'Unknown Device',
+              });
+              _logState?.info('  📱 $name ($address)');
+            }
+          }
+        }
+      }
+      
+      // 如果 hcitool 没有找到设备，尝试使用 bluetoothctl
+      if (devices.isEmpty) {
+        _logState?.info('   hcitool 未找到设备，尝试 bluetoothctl...');
+        
+        final btctlScript = '''
+# 清除设备缓存并重新扫描
+bluetoothctl << EOF
+remove *
+scan on
+EOF
+sleep 3
+bluetoothctl << EOF
+scan off
+devices
+EOF
+''';
+        
+        final btctlResult = await Process.run('bash', ['-c', btctlScript]);
+        final btctlLines = btctlResult.stdout.toString().split('\n');
+        
+        for (final line in btctlLines) {
+          if (line.trim().isEmpty) continue;
+          
+          // 格式: Device AA:BB:CC:DD:EE:FF Device Name
+          final match = RegExp(r'Device\s+([0-9A-Fa-f:]+)\s+(.+)', caseSensitive: false).firstMatch(line);
+          if (match != null) {
+            final address = match.group(1)!.toUpperCase();
+            final name = match.group(2)!.trim();
+            
+            if (!devices.any((d) => d['address'] == address)) {
+              devices.add({
+                'address': address,
+                'name': name,
+              });
+              _logState?.info('  📱 $name ($address)');
+            }
           }
         }
       }
