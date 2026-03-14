@@ -212,8 +212,8 @@ class GTPProtocol {
     
     ByteData buffer = ByteData.sublistView(data);
     
-    // Check preamble
-    int receivedPreamble = buffer.getUint32(0, Endian.big);
+    // Check preamble (little endian, same as build)
+    int receivedPreamble = buffer.getUint32(0, Endian.little);
     if (receivedPreamble != preamble) return null;
     
     int offset = 4;

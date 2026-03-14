@@ -563,25 +563,26 @@ EOF
   void _processBuffer() {
     _logState?.debug('🔍 处理缓冲区，当前长度: ${_buffer.length} 字节');
     
-    while (_buffer.length >= 4) {
-      // 查找数据包起始标志 (0xAA 0x55)
+    while (_buffer.length >= 16) { // GTP 最小长度
+      // 查找 GTP 数据包起始标志 (Preamble: 0xD0 0xD2 0xC5 0xC2)
       int startIndex = -1;
-      for (int i = 0; i < _buffer.length - 1; i++) {
-        if (_buffer[i] == 0xAA && _buffer[i + 1] == 0x55) {
+      for (int i = 0; i <= _buffer.length - 4; i++) {
+        if (_buffer[i] == 0xD0 && _buffer[i + 1] == 0xD2 && 
+            _buffer[i + 2] == 0xC5 && _buffer[i + 3] == 0xC2) {
           startIndex = i;
           break;
         }
       }
       
       if (startIndex == -1) {
-        // 没有找到起始标志，记录并保留部分数据
+        // 没有找到 GTP 起始标志
         final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-        _logState?.warning('⚠️ 缓冲区中未找到起始标志 (AA 55)');
-        _logState?.debug('   缓冲区内容: $bufferHex');
+        _logState?.warning('⚠️ 缓冲区中未找到 GTP 起始标志 (D0 D2 C5 C2)');
+        _logState?.debug('   缓冲区内容 [${_buffer.length} 字节]: $bufferHex');
         
-        // 只保留最后一个字节（可能是 0xAA 的开始）
-        if (_buffer.isNotEmpty) {
-          _buffer = _buffer.sublist(_buffer.length - 1);
+        // 保留最后 3 个字节（可能是 Preamble 的开始）
+        if (_buffer.length > 3) {
+          _buffer = _buffer.sublist(_buffer.length - 3);
         } else {
           _buffer = Uint8List(0);
         }
@@ -593,16 +594,17 @@ EOF
         _buffer = _buffer.sublist(startIndex);
       }
       
-      if (_buffer.length < 8) {
-        _logState?.debug('   数据不足，等待更多数据 (当前: ${_buffer.length}, 需要: 8)');
+      if (_buffer.length < 16) {
+        _logState?.debug('   数据不足，等待更多数据 (当前: ${_buffer.length}, 需要至少: 16)');
         break;
       }
       
-      // 解析数据包长度
-      final packetLength = (_buffer[2] << 8) | _buffer[3];
-      final totalLength = packetLength + 4;
+      // 读取 GTP Length 字段 (offset 5-6, little endian)
+      final gtpLength = (_buffer[5]) | (_buffer[6] << 8);
+      // GTP 总长度 = Preamble(4) + Length字段指示的长度
+      final totalLength = 4 + gtpLength;
       
-      _logState?.debug('   数据包长度: $packetLength, 总长度: $totalLength');
+      _logState?.debug('   GTP Length字段: $gtpLength, 总长度: $totalLength');
       
       if (_buffer.length < totalLength) {
         _logState?.debug('   数据不完整，等待更多数据 (当前: ${_buffer.length}, 需要: $totalLength)');
@@ -625,36 +627,43 @@ EOF
       
       // 详细的数据包日志
       final hexStr = packet.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-      _logState?.debug('📦 数据包 #$_packetCount [${packet.length} 字节]: $hexStr');
-      _logState?.info('📦 完整数据包 #$_packetCount:');
-      _logState?.info('   长度: ${packet.length} 字节');
+      _logState?.debug('📦 GTP 数据包 #$_packetCount [${packet.length} 字节]: $hexStr');
+      _logState?.info('📦 完整 GTP 数据包 #$_packetCount:');
+      _logState?.info('   总长度: ${packet.length} 字节');
       _logState?.info('   HEX: $hexStr');
       
-      // 解析数据包结构（如果是标准格式）
-      if (packet.length >= 8 && packet[0] == 0xAA && packet[1] == 0x55) {
-        final length = (packet[2] << 8) | packet[3];
-        final moduleId = packet[4];
-        final messageId = packet[5];
-        _logState?.info('   头部: AA 55 (起始标志)');
-        _logState?.info('   长度: $length');
-        _logState?.info('   模块ID: 0x${moduleId.toRadixString(16).padLeft(2, '0').toUpperCase()}');
-        _logState?.info('   消息ID: 0x${messageId.toRadixString(16).padLeft(2, '0').toUpperCase()}');
-        
-        if (packet.length > 8) {
-          final payload = packet.sublist(6, packet.length - 2);
-          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-          _logState?.info('   数据: $payloadHex');
-        }
-        
-        if (packet.length >= 2) {
-          final checksum = (packet[packet.length - 2] << 8) | packet[packet.length - 1];
-          _logState?.info('   校验和: 0x${checksum.toRadixString(16).padLeft(4, '0').toUpperCase()}');
-        }
+      // 使用 GTP 协议解析
+      final parsedGTP = GTPProtocol.parseGTPResponse(packet);
+      
+      if (parsedGTP == null) {
+        _logState?.error('❌ GTP 解析失败');
+        return;
+      }
+      
+      if (parsedGTP.containsKey('error')) {
+        _logState?.error('❌ GTP 错误: ${parsedGTP['error']}');
+        return;
+      }
+      
+      _logState?.info('✅ GTP 解析成功:');
+      _logState?.info('   模块ID: 0x${parsedGTP['moduleId']?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? 'N/A'}');
+      _logState?.info('   消息ID: 0x${parsedGTP['messageId']?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? 'N/A'}');
+      _logState?.info('   序列号: ${parsedGTP['sn'] ?? 'N/A'}');
+      _logState?.info('   结果: ${parsedGTP['result'] ?? 'N/A'}');
+      
+      final payload = parsedGTP['payload'] as Uint8List?;
+      if (payload != null && payload.isNotEmpty) {
+        final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+        _logState?.info('   Payload [${payload.length} 字节]: $payloadHex');
       }
       
       final response = {
-        'payload': packet,
+        'payload': payload ?? Uint8List(0),
         'timestamp': DateTime.now(),
+        'moduleId': parsedGTP['moduleId'],
+        'messageId': parsedGTP['messageId'],
+        'sn': parsedGTP['sn'],
+        'result': parsedGTP['result'],
       };
       
       // 完成最早的待处理响应

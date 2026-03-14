@@ -2051,12 +2051,13 @@ class TestState extends ChangeNotifier {
   /// Run manual test for a single command (non-blocking, allows concurrent execution)
   Future<void> runManualTest(String testName, dynamic command,
       {int? moduleId, int? messageId}) async {
-    // 优先使用 Linux 蓝牙 SPP 连接，如果未连接则使用串口
+    // 优先使用蓝牙 SPP 连接（Linux 或 Windows），如果未连接则使用串口
     final useLinuxBluetooth = _linuxBtService.isConnected;
+    final useWindowsSpp = _sppService.isConnected;
     final useSerial = _serialService.isConnected;
     
-    if (!useLinuxBluetooth && !useSerial) {
-      debugPrint('No connection available (Serial or Linux Bluetooth)');
+    if (!useLinuxBluetooth && !useWindowsSpp && !useSerial) {
+      debugPrint('No connection available (Serial or Bluetooth SPP)');
       _logState?.error('[$testName] 未连接（串口或蓝牙）', type: LogType.debug);
       return;
     }
@@ -2067,7 +2068,14 @@ class TestState extends ChangeNotifier {
       debugPrint('Running manual test: $testName');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('🔧 手动测试: $testName', type: LogType.debug);
-      _logState?.info('📡 通信方式: ${useLinuxBluetooth ? "Linux 蓝牙 SPP" : "串口"}', type: LogType.debug);
+      
+      String connectionType = '串口';
+      if (useLinuxBluetooth) {
+        connectionType = 'Linux 蓝牙 SPP';
+      } else if (useWindowsSpp) {
+        connectionType = 'Windows 蓝牙 SPP';
+      }
+      _logState?.info('📡 通信方式: $connectionType', type: LogType.debug);
       _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}',
           type: LogType.debug);
 
@@ -2080,6 +2088,14 @@ class TestState extends ChangeNotifier {
           timeout: TestConfig.defaultTimeout,
           moduleId: moduleId,
           messageId: messageId,
+        );
+      } else if (useWindowsSpp) {
+        // 使用 Windows 蓝牙 SPP
+        response = await _sppService.sendCommandAndWaitResponse(
+          command,
+          timeout: TestConfig.defaultTimeout,
+          moduleId: moduleId ?? ProductionTestCommands.moduleId,
+          messageId: messageId ?? ProductionTestCommands.messageId,
         );
       } else {
         // 使用串口
