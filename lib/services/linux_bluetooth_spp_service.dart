@@ -206,6 +206,7 @@ EOF
       
       // 解析 RFCOMM 通道号
       // 将输出按服务记录分组
+      final lines = output.split('\n');
       final serviceRecords = <Map<String, dynamic>>[];
       Map<String, dynamic>? currentService;
       
