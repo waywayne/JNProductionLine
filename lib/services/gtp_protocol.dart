@@ -302,21 +302,34 @@ class GTPProtocol {
     int result = buffer.getUint8(offset);
     offset += 1;
     
-    // Length (2 bytes)
-    int length = buffer.getUint16(offset, Endian.little);
+    // Length (2 bytes) - 读取但不使用，实际长度由 Tail 位置决定
+    int declaredLength = buffer.getUint16(offset, Endian.little);
     offset += 2;
     
     // SN (2 bytes)
     int sn = buffer.getUint16(offset, Endian.little);
     offset += 2;
     
-    // Payload
-    if (data.length < offset + length + 2) return null; // +2 for Tail
-    Uint8List payload = data.sublist(offset, offset + length);
-    offset += length;
+    // Payload - 查找 Tail (0x4040) 来确定实际长度
+    int payloadStart = offset;
+    int tailIndex = -1;
+    
+    // 从当前位置开始查找 Tail (0x4040)
+    for (int i = payloadStart; i <= data.length - 2; i++) {
+      if (buffer.getUint16(i, Endian.little) == 0x4040) {
+        tailIndex = i;
+        break;
+      }
+    }
+    
+    if (tailIndex == -1) return null; // 没有找到 Tail
+    
+    // 提取实际的 payload（从 SN 后到 Tail 前）
+    int actualLength = tailIndex - payloadStart;
+    Uint8List payload = data.sublist(payloadStart, tailIndex);
     
     // Tail (2 bytes) - 0x4040
-    int tail = buffer.getUint16(offset, Endian.little);
+    int tail = buffer.getUint16(tailIndex, Endian.little);
     if (tail != 0x4040) return null;
     
     return {
@@ -324,7 +337,8 @@ class GTPProtocol {
       'messageId': messageId,
       'flags': flags,
       'result': result,
-      'length': length,
+      'declaredLength': declaredLength,  // 设备声明的长度
+      'actualLength': actualLength,      // 实际解析的长度
       'sn': sn,
       'payload': payload,
     };

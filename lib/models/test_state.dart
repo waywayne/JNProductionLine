@@ -2119,8 +2119,14 @@ class TestState extends ChangeNotifier {
           // 显示响应数据
           if (response.containsKey('payload') && response['payload'] != null) {
             final payload = response['payload'] as Uint8List;
-            _logState?.info('📦 响应数据 (${payload.length} bytes)',
-                type: LogType.debug);
+            if (payload.isNotEmpty) {
+              final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+              _logState?.info('📦 响应数据 (${payload.length} bytes): [$payloadHex]',
+                  type: LogType.debug);
+            } else {
+              _logState?.info('📦 响应数据 (${payload.length} bytes)',
+                  type: LogType.debug);
+            }
           }
         }
       } else {
