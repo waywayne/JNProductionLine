@@ -40,12 +40,19 @@ jobs:
           socat \
           rfkill
         
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.24.3'
-        channel: 'stable'
-        cache: true
+    # - name: Setup Flutter
+    #   uses: subosito/flutter-action@v2
+    #   with:
+    #     flutter-version: '3.24.3'
+    #     channel: 'stable'
+    #     cache: true
+    - name: Clone repository
+    uses: actions/checkout@v4
+    - name: Set up Flutter
+    uses: subosito/flutter-action@v2
+    with:
+      channel: stable
+      flutter-version: 3.24.0
         
     - name: Verify Flutter installation
       run: |
