@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import '../services/production_test_commands.dart';
 import 'led_test_dialog.dart';
+import 'linux_bluetooth_scan_dialog.dart';
 
 /// Manual test section with individual buttons for each test
 class ManualTestSection extends StatelessWidget {
@@ -205,24 +206,7 @@ class ManualTestSection extends StatelessWidget {
                 },
                 color: Colors.deepPurple,
               ),
-              _buildTestButton(
-                context,
-                'Linux蓝牙测试',
-                Icons.bluetooth_connected,
-                () async {
-                  final success = await state.testLinuxBluetooth();
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(success ? '✅ Linux蓝牙测试通过' : '❌ Linux蓝牙测试失败'),
-                        backgroundColor: success ? Colors.green : Colors.red,
-                        duration: const Duration(seconds: 3),
-                      ),
-                    );
-                  }
-                },
-                color: Colors.teal,
-              ),
+              _buildLinuxBluetoothButton(context, state),
               _buildLEDTestButton(context, '外侧', Icons.lightbulb_outline),
               _buildLEDTestButton(context, '内侧', Icons.lightbulb),
               _buildTestButton(
@@ -571,6 +555,118 @@ class ManualTestSection extends StatelessWidget {
                 color: isTesting ? Colors.white70 : Colors.black54,
               ),
               textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLinuxBluetoothButton(BuildContext context, TestState state) {
+    final isConnected = state.isLinuxBluetoothConnected;
+    final deviceName = state.linuxBluetoothDeviceName ?? '未连接';
+    
+    return SizedBox(
+      width: 140,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () async {
+          if (isConnected) {
+            // 已连接，显示断开选项
+            final shouldDisconnect = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Linux 蓝牙连接'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('当前已连接到: $deviceName'),
+                    const SizedBox(height: 8),
+                    Text(
+                      '地址: ${state.linuxBluetoothDeviceAddress ?? "未知"}',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('取消'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('断开连接'),
+                  ),
+                ],
+              ),
+            );
+            
+            if (shouldDisconnect == true) {
+              await state.disconnectLinuxBluetooth();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('🔌 已断开 Linux 蓝牙连接'),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            }
+          } else {
+            // 未连接，显示扫描对话框
+            final result = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => const LinuxBluetoothScanDialog(),
+            );
+            
+            // result 为 true 表示连接成功，已在 dialog 中显示 SnackBar
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isConnected ? Colors.green[400] : Colors.teal[400],
+          foregroundColor: Colors.white,
+          elevation: isConnected ? 4 : 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: isConnected 
+                ? BorderSide(color: Colors.green[700]!, width: 2) 
+                : BorderSide.none,
+          ),
+          padding: const EdgeInsets.all(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isConnected ? Icons.bluetooth_connected : Icons.bluetooth_searching,
+              size: 28,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              isConnected ? 'Linux蓝牙' : 'Linux蓝牙',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isConnected ? '已连接' : '点击连接',
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

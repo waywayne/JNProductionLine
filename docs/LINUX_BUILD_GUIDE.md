@@ -85,7 +85,17 @@ flutter build linux --release
 
 - **Android**: 使用 `flutter_bluetooth_serial` - ✅ 完全支持
 - **Windows**: 使用 `flutter_bluetooth_classic_serial` - ✅ 完全支持
-- **Linux**: 使用 `flutter_libserialport` - ✅ 串口通信支持
+- **Linux**: 使用 `flutter_libserialport` + Linux 蓝牙栈 - ✅ 串口和 SPP 蓝牙支持
+
+### Linux 蓝牙 SPP 支持
+
+Linux 版本支持通过系统蓝牙栈（BlueZ）进行 SPP 通信：
+- ✅ 蓝牙设备扫描
+- ✅ 自定义 UUID 服务发现
+- ✅ RFCOMM 通道绑定
+- ✅ SPP 协议通信
+
+**权限要求**：需要配置蓝牙权限，详见 [LINUX_BLUETOOTH_SPP.md](LINUX_BLUETOOTH_SPP.md)
 
 ### 为什么 Linux 不需要 flutter_bluetooth_classic_serial？
 

@@ -1,5 +1,161 @@
 # Linux 蓝牙 SPP 使用指南
 
+## 权限配置
+
+### 自动配置（推荐）
+
+运行安装脚本会自动配置所有必要的权限：
+
+```bash
+sudo ./scripts/install-linux.sh
+```
+
+安装脚本会自动完成以下配置：
+1. ✅ 将用户添加到 `bluetooth` 组
+2. ✅ 配置 PolicyKit 规则允许蓝牙操作
+3. ✅ 配置 D-Bus 规则允许访问 BlueZ
+4. ✅ 配置 udev 规则设置设备权限
+5. ✅ 重启蓝牙服务应用配置
+
+**重要**：配置完成后需要重新登录或运行 `newgrp bluetooth` 使权限生效。
+
+### 验证权限
+
+```bash
+# 检查是否在 bluetooth 组
+groups | grep bluetooth
+
+# 测试蓝牙扫描（应该无需 sudo）
+bluetoothctl scan on
+bluetoothctl scan off
+
+# 测试 SDP 查询（应该无需 sudo）
+sdptool browse <设备MAC地址>
+```
+
+### 手动配置（如果需要）
+
+如果自动配置失败，可以手动执行以下步骤：
+
+#### 1. 添加用户到 bluetooth 组
+
+```bash
+sudo usermod -a -G bluetooth $USER
+```
+
+#### 2. 配置 PolicyKit 规则
+
+创建 `/etc/polkit-1/rules.d/50-bluetooth.rules`：
+
+```javascript
+/* Allow users in bluetooth group to use bluetoothctl without password */
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.bluez.hci0.Adapter1.StartDiscovery" ||
+         action.id == "org.bluez.hci0.Adapter1.StopDiscovery" ||
+         action.id == "org.bluez.hci0.Device1.Connect" ||
+         action.id == "org.bluez.hci0.Device1.Disconnect" ||
+         action.id == "org.bluez.hci0.Device1.Pair" ||
+         action.id == "org.bluez") &&
+        subject.isInGroup("bluetooth")) {
+        return polkit.Result.YES;
+    }
+});
+```
+
+#### 3. 配置 D-Bus 规则
+
+创建 `/etc/dbus-1/system.d/bluetooth-group.conf`：
+
+```xml
+<!DOCTYPE busconfig PUBLIC
+ "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <policy group="bluetooth">
+    <allow send_destination="org.bluez"/>
+    <allow send_interface="org.bluez.Manager"/>
+    <allow send_interface="org.bluez.Adapter"/>
+    <allow send_interface="org.bluez.Device"/>
+    <allow send_interface="org.bluez.Service"/>
+    <allow send_interface="org.bluez.Agent"/>
+    <allow send_interface="org.bluez.ProfileManager1"/>
+    <allow send_interface="org.bluez.AgentManager1"/>
+    <allow send_interface="org.freedesktop.DBus.Properties"/>
+    <allow send_interface="org.freedesktop.DBus.ObjectManager"/>
+  </policy>
+</busconfig>
+```
+
+#### 4. 配置 udev 规则
+
+创建 `/etc/udev/rules.d/99-bluetooth.rules`：
+
+```
+# Bluetooth RFCOMM devices
+KERNEL=="rfcomm[0-9]*", GROUP="bluetooth", MODE="0660"
+
+# Bluetooth HCI devices
+KERNEL=="hci[0-9]*", GROUP="bluetooth", MODE="0660"
+```
+
+#### 5. 应用配置
+
+```bash
+# 重新加载 udev 规则
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# 重启服务
+sudo systemctl restart dbus
+sudo systemctl restart bluetooth
+
+# 重新登录或刷新组
+newgrp bluetooth
+```
+
+### 故障排除
+
+#### 问题：仍然需要 sudo 才能扫描蓝牙
+
+**可能原因**：
+1. 用户未在 bluetooth 组中
+2. 未重新登录使组权限生效
+3. PolicyKit 或 D-Bus 规则未生效
+
+**解决方案**：
+```bash
+# 1. 确认在 bluetooth 组
+groups | grep bluetooth
+
+# 2. 如果不在，添加并重新登录
+sudo usermod -a -G bluetooth $USER
+# 然后注销重新登录
+
+# 3. 检查服务状态
+systemctl status bluetooth
+systemctl status dbus
+
+# 4. 查看 PolicyKit 日志
+journalctl -u polkit -n 50
+
+# 5. 测试 D-Bus 访问
+dbus-send --system --print-reply --dest=org.bluez / org.freedesktop.DBus.Introspectable.Introspect
+```
+
+#### 问题：rfcomm bind 失败
+
+**解决方案**：
+```bash
+# 检查 rfcomm 模块
+lsmod | grep rfcomm
+
+# 如果未加载，加载模块
+sudo modprobe rfcomm
+
+# 设置开机自动加载
+echo "rfcomm" | sudo tee -a /etc/modules
+```
+
 ## 概述
 
 基于 Linux 蓝牙栈实现的 SPP (Serial Port Profile) 协议通信服务，支持：

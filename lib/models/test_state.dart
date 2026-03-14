@@ -2051,9 +2051,13 @@ class TestState extends ChangeNotifier {
   /// Run manual test for a single command (non-blocking, allows concurrent execution)
   Future<void> runManualTest(String testName, dynamic command,
       {int? moduleId, int? messageId}) async {
-    if (!_serialService.isConnected) {
-      debugPrint('Serial port not connected');
-      _logState?.error('[$testName] 串口未连接', type: LogType.debug);
+    // 优先使用 Linux 蓝牙 SPP 连接，如果未连接则使用串口
+    final useLinuxBluetooth = _linuxBtService.isConnected;
+    final useSerial = _serialService.isConnected;
+    
+    if (!useLinuxBluetooth && !useSerial) {
+      debugPrint('No connection available (Serial or Linux Bluetooth)');
+      _logState?.error('[$testName] 未连接（串口或蓝牙）', type: LogType.debug);
       return;
     }
 
@@ -2063,16 +2067,29 @@ class TestState extends ChangeNotifier {
       debugPrint('Running manual test: $testName');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('🔧 手动测试: $testName', type: LogType.debug);
+      _logState?.info('📡 通信方式: ${useLinuxBluetooth ? "Linux 蓝牙 SPP" : "串口"}', type: LogType.debug);
       _logState?.info('⏱️  发送时间: ${DateTime.now().toString()}',
           type: LogType.debug);
 
       // Send command and wait for response
-      final response = await _serialService.sendCommandAndWaitResponse(
-        command,
-        timeout: TestConfig.defaultTimeout,
-        moduleId: moduleId ?? ProductionTestCommands.moduleId,
-        messageId: messageId ?? ProductionTestCommands.messageId,
-      );
+      Map<String, dynamic>? response;
+      if (useLinuxBluetooth) {
+        // 使用 Linux 蓝牙 SPP
+        response = await _linuxBtService.sendCommandAndWaitResponse(
+          command,
+          timeout: TestConfig.defaultTimeout,
+          moduleId: moduleId,
+          messageId: messageId,
+        );
+      } else {
+        // 使用串口
+        response = await _serialService.sendCommandAndWaitResponse(
+          command,
+          timeout: TestConfig.defaultTimeout,
+          moduleId: moduleId ?? ProductionTestCommands.moduleId,
+          messageId: messageId ?? ProductionTestCommands.messageId,
+        );
+      }
 
       if (response != null) {
         if (response.containsKey('error')) {
@@ -3126,6 +3143,83 @@ class TestState extends ChangeNotifier {
       return false;
     }
   }
+
+  /// 扫描 Linux 蓝牙设备（用于手动连接）
+  Future<List<Map<String, String>>> scanLinuxBluetoothDevices() async {
+    try {
+      _logState?.info('🔍 扫描 Linux 蓝牙设备...', type: LogType.debug);
+      final devices = await _linuxBtService.scanDevices(timeout: const Duration(seconds: 10));
+      _logState?.success('✅ 找到 ${devices.length} 个设备', type: LogType.debug);
+      return devices;
+    } catch (e) {
+      _logState?.error('❌ 扫描设备失败: $e', type: LogType.debug);
+      return [];
+    }
+  }
+
+  /// 连接 Linux 蓝牙设备（用于手动连接）
+  /// 连接成功后保持连接，供后续手动测试使用
+  Future<bool> connectLinuxBluetoothDevice({
+    required String deviceAddress,
+    required String deviceName,
+    String? uuid,
+    int? channel,
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔗 连接 Linux 蓝牙设备', type: LogType.debug);
+      _logState?.info('   地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   名称: $deviceName', type: LogType.debug);
+      
+      // 如果指定了 UUID，设置服务 UUID
+      if (uuid != null && uuid.isNotEmpty) {
+        _linuxBtService.setServiceUuid(uuid);
+        _logState?.info('   UUID: $uuid', type: LogType.debug);
+      }
+      
+      // 连接设备
+      final connected = await _linuxBtService.connect(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+        uuid: uuid,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ Linux 蓝牙连接成功', type: LogType.debug);
+        _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        notifyListeners();
+        return true;
+      } else {
+        _logState?.error('❌ Linux 蓝牙连接失败', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+    } catch (e) {
+      _logState?.error('❌ 连接异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 断开 Linux 蓝牙连接
+  Future<void> disconnectLinuxBluetooth() async {
+    try {
+      await _linuxBtService.disconnect();
+      _logState?.info('🔌 已断开 Linux 蓝牙连接', type: LogType.debug);
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('❌ 断开连接失败: $e', type: LogType.debug);
+    }
+  }
+
+  /// 检查 Linux 蓝牙是否已连接
+  bool get isLinuxBluetoothConnected => _linuxBtService.isConnected;
+
+  /// 获取当前连接的 Linux 蓝牙设备信息
+  String? get linuxBluetoothDeviceName => _linuxBtService.currentDeviceName;
+  String? get linuxBluetoothDeviceAddress => _linuxBtService.currentDeviceAddress;
 
   /// 从设备通过FTP下载Sensor测试图片
   /// 返回true表示下载成功，false表示失败
