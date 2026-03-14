@@ -229,11 +229,18 @@ class GTPProtocol {
     int fc = buffer.getUint8(offset);
     offset += 1;
     
-    // Seq (3 bytes)
-    offset += 3;
+    // Seq (2 bytes)
+    int seq = buffer.getUint16(offset, Endian.little);
+    offset += 2;
+    
+    // CRC8 (1 byte)
+    int crc8 = buffer.getUint8(offset);
+    offset += 1;
     
     // Payload
-    int payloadLength = length - 8; // Subtract Version(1) + Length(2) + Type(1) + FC(1) + Seq(3)
+    // Length = Version(1) + Length(2) + Type(1) + FC(1) + Seq(2) + CRC8(1) + Payload + CRC32(4)
+    // So: Payload = Length - 12
+    int payloadLength = length - 12;
     if (data.length < offset + payloadLength + 4) return null;
     
     Uint8List payload = data.sublist(offset, offset + payloadLength);
@@ -265,61 +272,57 @@ class GTPProtocol {
   
   /// Parse CLI response
   static Map<String, dynamic>? parseCLIResponse(Uint8List data) {
-    if (data.length < 15) return null;
+    if (data.length < 16) return null; // Minimum: Start(2) + ModuleID(2) + CRC(2) + MessageID(2) + Flags(1) + Result(1) + Length(2) + SN(2) + Tail(2) = 16
     
     ByteData buffer = ByteData.sublistView(data);
     int offset = 0;
     
-    // Start
-    int start = buffer.getUint8(offset);
-    if (start != 0x23) return null;
-    offset += 1;
+    // Start (2 bytes) - 0x2323
+    int start = buffer.getUint16(offset, Endian.little);
+    if (start != 0x2323) return null;
+    offset += 2;
     
-    // Module ID (3 bytes)
-    int moduleId = (buffer.getUint8(offset) << 16) | 
-                   (buffer.getUint8(offset + 1) << 8) | 
-                   buffer.getUint8(offset + 2);
-    offset += 3;
+    // Module ID (2 bytes)
+    int moduleId = buffer.getUint16(offset, Endian.little);
+    offset += 2;
     
-    // CRC
-    int crc = buffer.getUint8(offset);
-    offset += 1;
+    // CRC (2 bytes)
+    int crc = buffer.getUint16(offset, Endian.little);
+    offset += 2;
     
     // Message ID (2 bytes)
     int messageId = buffer.getUint16(offset, Endian.little);
     offset += 2;
     
-    // ACK
-    int ack = buffer.getUint8(offset);
+    // Flags (1 byte) - ACK(1bit) + Type(3bit) + Reversed(4bit)
+    int flags = buffer.getUint8(offset);
     offset += 1;
     
-    // Msg Level
-    int msgLevel = buffer.getUint8(offset);
-    offset += 1;
-    
-    // High Freq
-    int highFreq = buffer.getUint8(offset);
-    offset += 1;
-    
-    // Result
+    // Result (1 byte)
     int result = buffer.getUint8(offset);
     offset += 1;
     
-    // Length
+    // Length (2 bytes)
     int length = buffer.getUint16(offset, Endian.little);
     offset += 2;
     
-    // SN
-    int sn = buffer.getUint8(offset);
-    offset += 1;
+    // SN (2 bytes)
+    int sn = buffer.getUint16(offset, Endian.little);
+    offset += 2;
     
     // Payload
+    if (data.length < offset + length + 2) return null; // +2 for Tail
     Uint8List payload = data.sublist(offset, offset + length);
+    offset += length;
+    
+    // Tail (2 bytes) - 0x4040
+    int tail = buffer.getUint16(offset, Endian.little);
+    if (tail != 0x4040) return null;
     
     return {
       'moduleId': moduleId,
       'messageId': messageId,
-      'ack': ack,
+      'flags': flags,
       'result': result,
       'length': length,
       'sn': sn,
