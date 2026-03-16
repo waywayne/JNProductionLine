@@ -651,10 +651,18 @@ EOF
       _logState?.info('   序列号: ${parsedGTP['sn'] ?? 'N/A'}');
       _logState?.info('   结果: ${parsedGTP['result'] ?? 'N/A'}');
       
+      // 显示声明的长度和实际长度（如果有）
+      if (parsedGTP.containsKey('declaredLength') && parsedGTP.containsKey('actualLength')) {
+        _logState?.info('   声明长度: ${parsedGTP['declaredLength']} 字节');
+        _logState?.info('   实际长度: ${parsedGTP['actualLength']} 字节');
+      }
+      
       final payload = parsedGTP['payload'] as Uint8List?;
       if (payload != null && payload.isNotEmpty) {
         final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-        _logState?.info('   Payload [${payload.length} 字节]: $payloadHex');
+        _logState?.info('   实际 Payload [${payload.length} 字节]: $payloadHex');
+      } else {
+        _logState?.info('   实际 Payload: 空 (0 字节)');
       }
       
       final response = {
