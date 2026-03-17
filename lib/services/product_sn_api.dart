@@ -62,6 +62,10 @@ class ProductSNInfo {
 /// 产品SN API服务
 class ProductSNApi {
   static const String baseUrl = 'http://api.jiananai.com/api/v1/product-sn';
+  
+  // API认证信息（与单板产测保持一致）
+  static const String token = '7f0052b35618d1533f1e235b7d1f5928';
+  static const String userAgent = 'com.jnai.glasses/3.0.0(android;12;xiaomimi10@release)';
 
   /// 获取产品SN信息
   static Future<ProductSNInfo?> getProductSNInfo(String snCode) async {
@@ -89,6 +93,10 @@ class ProductSNApi {
       print('📡 API请求信息:');
       print('   方法: POST');
       print('   URL: $url');
+      print('   Headers:');
+      print('     - Content-Type: application/json');
+      print('     - Token: $token');
+      print('     - User-Agent: $userAgent');
       print('   请求体: ${json.encode(requestBody)}');
       print('   参数:');
       print('     - sn_code: $snCode');
@@ -102,6 +110,8 @@ class ProductSNApi {
         url,
         headers: {
           'Content-Type': 'application/json',
+          'Token': token,
+          'User-Agent': userAgent,
         },
         body: json.encode(requestBody),
       ).timeout(
