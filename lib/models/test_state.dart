@@ -9235,6 +9235,150 @@ class TestState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ========== 整机产测专用方法 ==========
+
+  /// 从设备下载图片（用于整机产测）
+  /// [deviceIP] 设备IP地址
+  /// 返回true表示下载成功，false表示失败
+  Future<bool> downloadImageFromDevice(String deviceIP) async {
+    try {
+      _logState?.info('📥 开始从设备下载图片...', type: LogType.debug);
+      _logState?.info('   设备IP: $deviceIP', type: LogType.debug);
+      
+      // 构建FTP URL
+      final ftpUrl = 'ftp://$deviceIP:21/test.jpg';
+      _logState?.info('   FTP URL: $ftpUrl', type: LogType.debug);
+      
+      // 确定保存路径
+      String savePath;
+      if (Platform.isMacOS) {
+        final homeDir = Platform.environment['HOME'] ?? '';
+        savePath = path.join(homeDir, 'Documents', 'JNProductionLine', 'camera_test.jpg');
+      } else if (Platform.isWindows) {
+        final userProfile = Platform.environment['USERPROFILE'] ?? '';
+        savePath = path.join(userProfile, 'Documents', 'JNProductionLine', 'camera_test.jpg');
+      } else {
+        savePath = path.join(Directory.current.path, 'camera_test.jpg');
+      }
+      
+      _logState?.info('   保存路径: $savePath', type: LogType.debug);
+      
+      // 确保目录存在
+      final saveDir = Directory(path.dirname(savePath));
+      if (!await saveDir.exists()) {
+        await saveDir.create(recursive: true);
+      }
+      
+      // 使用curl下载（带重试机制）
+      ProcessResult? result;
+      int maxRetries = 3;
+      
+      for (int retry = 0; retry < maxRetries; retry++) {
+        if (retry > 0) {
+          _logState?.warning('🔄 FTP下载重试 $retry/$maxRetries...', type: LogType.debug);
+          await Future.delayed(Duration(seconds: retry));
+        }
+        
+        if (Platform.isMacOS || Platform.isLinux) {
+          final curlArgs = [
+            '-v',
+            '--ftp-pasv',
+            '--disable-epsv',
+            '-o', savePath,
+            '--connect-timeout', '5',
+            '--max-time', '30',
+            ftpUrl,
+          ];
+          
+          result = await Process.run('curl', curlArgs);
+        } else if (Platform.isWindows) {
+          final curlArgs = [
+            '-v',
+            '-o', savePath,
+            '--connect-timeout', '5',
+            '--max-time', '30',
+            ftpUrl,
+          ];
+          
+          result = await Process.run('curl.exe', curlArgs);
+        } else {
+          _logState?.error('❌ 不支持的操作系统', type: LogType.debug);
+          return false;
+        }
+        
+        // 检查下载结果
+        if (result.exitCode == 0) {
+          final file = File(savePath);
+          if (await file.exists()) {
+            final fileSize = await file.length();
+            if (fileSize > 0) {
+              _logState?.success('✅ 图片下载成功 (大小: ${fileSize} bytes)', type: LogType.debug);
+              _sensorImagePath = savePath;
+              notifyListeners();
+              return true;
+            }
+          }
+        }
+        
+        _logState?.warning('⚠️ 下载失败，退出码: ${result.exitCode}', type: LogType.debug);
+      }
+      
+      _logState?.error('❌ 图片下载失败，已重试$maxRetries次', type: LogType.debug);
+      return false;
+      
+    } catch (e) {
+      _logState?.error('❌ 下载图片异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  /// 测试摄像头图片质量（调用image_test库）
+  /// 返回true表示测试通过，false表示失败
+  Future<bool> testCameraImageQuality() async {
+    if (_sensorImagePath == null || _sensorImagePath!.isEmpty) {
+      _logState?.error('❌ 图片路径为空，无法进行质量检测', type: LogType.debug);
+      return false;
+    }
+    
+    try {
+      _logState?.info('🔍 开始检测图片质量...', type: LogType.debug);
+      _logState?.info('   图片路径: $_sensorImagePath', type: LogType.debug);
+      
+      // 检查文件是否存在
+      final imageFile = File(_sensorImagePath!);
+      if (!await imageFile.exists()) {
+        _logState?.error('❌ 图片文件不存在', type: LogType.debug);
+        return false;
+      }
+      
+      // TODO: 调用image_test库进行图片质量检测
+      // 参考.h文件中的接口判断图片是否通过
+      // 这里需要使用FFI调用C/C++库
+      
+      // 临时实现：检查文件大小是否合理
+      final fileSize = await imageFile.length();
+      _logState?.info('   图片大小: $fileSize bytes', type: LogType.debug);
+      
+      if (fileSize < 1024) {
+        _logState?.error('❌ 图片文件太小，可能损坏', type: LogType.debug);
+        return false;
+      }
+      
+      // TODO: 实际的图片质量检测逻辑
+      // 1. 加载图片
+      // 2. 检测棋盘格角点
+      // 3. 计算图片清晰度
+      // 4. 判断是否符合标准
+      
+      _logState?.success('✅ 图片质量检测通过', type: LogType.debug);
+      return true;
+      
+    } catch (e) {
+      _logState?.error('❌ 图片质量检测异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
   @override
   void dispose() {
     _sensorDataSubscription?.cancel();

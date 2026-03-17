@@ -129,11 +129,12 @@ class _ProductionTestSectionState extends State<ProductionTestSection> {
                       icon: Icons.wifi,
                       color: Colors.blue,
                       tests: [
-                        '物奇/SIGM/WIFI上电',
+                        '输入SN号获取设备信息',
                         '蓝牙连接测试',
-                        'WIFI连接测试',
+                        'WiFi连接热点并获取IP',
                         '光敏传感器测试',
                         'IMU传感器测试',
+                        '摄像头棋盘格测试',
                       ],
                       onTap: () {
                         setState(() {

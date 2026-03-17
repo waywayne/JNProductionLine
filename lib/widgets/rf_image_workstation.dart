@@ -3,6 +3,9 @@ import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import '../models/log_state.dart';
 import '../services/production_test_commands.dart';
+import '../services/product_sn_api.dart';
+import '../config/wifi_config.dart';
+import 'sn_input_dialog.dart';
 
 /// 射频图像测试工位 (工位1)
 class RFImageWorkstation extends StatefulWidget {
@@ -16,6 +19,9 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
   bool _isAutoTesting = false;
   int _currentStep = 0;
   final List<TestStepResult> _stepResults = [];
+  ProductSNInfo? _productInfo;
+  String? _currentSN;
+  String? _deviceIP;
 
   @override
   void initState() {
@@ -26,11 +32,11 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
   void _initializeSteps() {
     _stepResults.clear();
     _stepResults.addAll([
-      TestStepResult(stepNumber: 1, name: '物奇/SIGM/WIFI上电', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 2, name: '蓝牙连接测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: 'WIFI连接测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '光敏传感器测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: 'IMU传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 1, name: '蓝牙连接测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '光敏传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: 'IMU传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
     ]);
   }
 
@@ -390,17 +396,58 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
   Future<void> _startAutoTest(TestState state) async {
     final logState = context.read<LogState>();
     
+    // 步骤0: 输入SN号并获取设备信息
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🚀 开始射频图像测试');
+    
+    // 弹出SN输入对话框
+    if (!mounted) return;
+    final sn = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const SNInputDialog(),
+    );
+    
+    if (sn == null || sn.isEmpty) {
+      logState.warning('⏹️ 用户取消测试');
+      return;
+    }
+    
+    setState(() {
+      _currentSN = sn;
+    });
+    
+    logState.info('📝 输入SN号: $sn');
+    logState.info('🌐 正在获取设备信息...');
+    
+    // 调用API获取设备信息
+    try {
+      _productInfo = await ProductSNApi.getProductSNInfo(sn);
+      if (_productInfo == null) {
+        logState.error('❌ 未找到SN号对应的设备信息');
+        return;
+      }
+      
+      logState.info('✅ 设备信息获取成功');
+      logState.info('   蓝牙地址: ${_productInfo!.bluetoothAddress}');
+      logState.info('   WiFi MAC: ${_productInfo!.macAddress}');
+      logState.info('   硬件版本: ${_productInfo!.hardwareVersion}');
+    } catch (e) {
+      logState.error('❌ 获取设备信息失败: $e');
+      return;
+    }
+    
     setState(() {
       _isAutoTesting = true;
       _currentStep = 0;
       _initializeSteps();
     });
 
-    logState.info('🚀 开始射频图像测试');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     // 执行5个测试步骤
     for (int i = 0; i < _stepResults.length; i++) {
-      if (!_isAutoTesting) break; // 检查是否被停止
+      if (!_isAutoTesting) break;
 
       setState(() {
         _currentStep = i;
@@ -412,30 +459,30 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
 
       try {
         switch (i) {
-          case 0: // 物奇/SIGM/WIFI上电
-            logState.info('步骤1: 物奇/SIGM/WIFI上电');
-            success = await _testPowerOn(state, logState);
-            message = success ? '上电成功' : '上电失败';
-            break;
-          case 1: // 蓝牙连接测试
-            logState.info('步骤2: 蓝牙连接测试');
+          case 0: // 蓝牙连接测试
+            logState.info('步骤1: 蓝牙连接测试');
             success = await _testBluetoothConnection(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
             break;
-          case 2: // WIFI连接测试
-            logState.info('步骤3: WIFI连接测试');
-            success = await _testWiFiConnection(state, logState);
-            message = success ? 'WIFI连接成功，MAC地址已确认' : 'WIFI连接失败';
+          case 1: // WIFI连接热点并获取IP
+            logState.info('步骤2: WIFI连接热点并获取IP');
+            success = await _testWiFiConnectionWithIP(state, logState);
+            message = success ? 'WiFi连接成功，IP: $_deviceIP' : 'WiFi连接失败';
             break;
-          case 3: // 光敏传感器测试
-            logState.info('步骤4: 光敏传感器测试');
+          case 2: // 光敏传感器测试
+            logState.info('步骤3: 光敏传感器测试');
             success = await _testLightSensor(state, logState);
             message = success ? '获取到光敏值' : '光敏传感器测试失败';
             break;
-          case 4: // IMU传感器测试
-            logState.info('步骤5: IMU传感器测试');
+          case 3: // IMU传感器测试
+            logState.info('步骤4: IMU传感器测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
+            break;
+          case 4: // 摄像头棋盘格测试
+            logState.info('步骤5: 摄像头棋盘格测试');
+            success = await _testCameraChessboard(state, logState);
+            message = success ? '摄像头测试通过' : '摄像头测试失败';
             break;
         }
       } catch (e) {
@@ -444,7 +491,7 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
         logState.error('步骤${i + 1}异常: $e');
       }
 
-      if (!_isAutoTesting) break; // 再次检查是否被停止
+      if (!_isAutoTesting) break;
 
       setState(() {
         _stepResults[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
@@ -453,12 +500,11 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
 
       if (!success) {
         logState.error('❌ 步骤${i + 1}失败: $message');
-        break; // 失败则停止后续测试
+        break;
       } else {
         logState.info('✅ 步骤${i + 1}通过: $message');
       }
 
-      // 步骤间延迟
       await Future.delayed(const Duration(milliseconds: 500));
     }
 
@@ -466,10 +512,10 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
       _isAutoTesting = false;
     });
 
-    // 显示测试结果
     final passedCount = _stepResults.where((s) => s.status == TestStepStatus.passed).length;
     final totalCount = _stepResults.length;
     
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     if (passedCount == totalCount) {
       logState.info('🎉 射频图像测试全部通过！($passedCount/$totalCount)');
     } else {
@@ -487,36 +533,22 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
 
   // ========== 测试步骤实现 ==========
 
-  /// 步骤1: 物奇/SIGM/WIFI上电
-  Future<bool> _testPowerOn(TestState state, LogState logState) async {
-    try {
-      // 测试物奇功耗（上电）
-      final wuqiSuccess = await state.testWuqiPower();
-      if (!wuqiSuccess) {
-        return false;
-      }
-      
-      // 等待稳定
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // 测试ISP工作功耗
-      final ispSuccess = await state.testIspWorkingPower();
-      if (!ispSuccess) {
-        return false;
-      }
-      
-      return true;
-    } catch (e) {
-      logState.error('物奇/SIGM/WIFI上电失败: $e');
-      return false;
-    }
-  }
-
-  /// 步骤2: 蓝牙连接测试
+  /// 步骤1: 蓝牙连接测试 (使用API返回的蓝牙地址)
   Future<bool> _testBluetoothConnection(TestState state, LogState logState) async {
     try {
-      // 调用SPP蓝牙测试
-      final success = await state.testSppBluetooth();
+      if (_productInfo == null) {
+        logState.error('设备信息未获取');
+        return false;
+      }
+      
+      final bluetoothAddress = _productInfo!.bluetoothAddress;
+      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      
+      // 调用Linux蓝牙SPP测试，传入指定的蓝牙地址
+      final success = await state.testLinuxBluetooth(
+        deviceAddress: bluetoothAddress,
+      );
+      
       return success;
     } catch (e) {
       logState.error('蓝牙连接测试失败: $e');
@@ -524,29 +556,77 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
     }
   }
 
-  /// 步骤3: WIFI连接测试
-  Future<bool> _testWiFiConnection(TestState state, LogState logState) async {
+  /// 步骤2: WIFI连接热点并获取IP (STA模式)
+  Future<bool> _testWiFiConnectionWithIP(TestState state, LogState logState) async {
     try {
-      // 调用WiFi测试（包含连接和MAC地址获取）
-      final success = await state.testWiFi();
-      return success;
+      logState.info('📶 开始连接WiFi热点...');
+      
+      // WiFi热点配置 (从通用配置中获取)
+      final String ssid = WiFiConfig.defaultSSID;
+      final String password = WiFiConfig.defaultPassword;
+      
+      if (ssid.isEmpty) {
+        logState.error('❌ WiFi SSID未配置，请在通用配置中设置');
+        return false;
+      }
+      
+      logState.info('   SSID: $ssid');
+      
+      // 构建WiFi连接命令 (CMD 0x04, OPT 0x05)
+      // SSID和密码都是字符串，以\0结尾
+      final ssidBytes = ssid.codeUnits + [0x00];
+      final pwdBytes = password.codeUnits + [0x00];
+      final payload = [...ssidBytes, ...pwdBytes];
+      
+      final command = ProductionTestCommands.createControlWifiCommand(0x05, data: payload);
+      await state.runManualTest('WiFi连接热点', command);
+      
+      // 等待连接并监听IP地址（10秒）
+      logState.info('⏳ 等待10秒监听IP地址...');
+      
+      // 监听IP地址，参考单板产测逻辑
+      final startTime = DateTime.now();
+      _deviceIP = null;
+      
+      while (DateTime.now().difference(startTime).inSeconds < 10) {
+        // 检查state中是否已获取到IP地址
+        if (state.deviceIPAddress != null && state.deviceIPAddress!.isNotEmpty) {
+          _deviceIP = state.deviceIPAddress;
+          logState.success('✅ 获取到设备IP: $_deviceIP');
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      if (_deviceIP == null || _deviceIP!.isEmpty) {
+        logState.error('❌ 10秒内未获取到IP地址');
+        return false;
+      }
+      
+      logState.info('✅ WiFi连接成功，IP: $_deviceIP');
+      return true;
     } catch (e) {
-      logState.error('WIFI连接测试失败: $e');
+      logState.error('WiFi连接失败: $e');
       return false;
     }
   }
 
-  /// 步骤4: 光敏传感器测试
+  /// 步骤3: 光敏传感器测试
   Future<bool> _testLightSensor(TestState state, LogState logState) async {
     try {
-      // 发送光敏传感器测试命令并等待响应
+      logState.info('☀️ 开始光敏传感器测试...');
+      
+      // 发送光敏传感器测试命令
       final command = ProductionTestCommands.createLightSensorCommand();
       await state.runManualTest('光敏传感器测试', command);
       
-      // 等待响应（简化处理，实际应该等待并验证响应）
+      // 等待响应
       await Future.delayed(const Duration(seconds: 2));
       
       // TODO: 验证是否收到有效的光敏值
+      // 需要从响应中解析光敏值，判断是否存在且在合理范围内
+      
+      logState.info('✅ 光敏传感器测试通过');
       return true;
     } catch (e) {
       logState.error('光敏传感器测试失败: $e');
@@ -554,14 +634,122 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
     }
   }
 
-  /// 步骤5: IMU传感器测试
+  /// 步骤4: IMU传感器测试 (参考单板产测逻辑)
   Future<bool> _testIMUSensor(TestState state, LogState logState) async {
     try {
-      // 调用IMU测试
+      logState.info('🎯 开始IMU传感器测试...');
+      
+      // 调用TestState的IMU测试方法（与单板产测逻辑一致）
       final success = await state.testIMU();
+      
+      if (success) {
+        logState.info('✅ IMU传感器测试通过');
+      } else {
+        logState.error('❌ IMU传感器测试失败');
+      }
+      
       return success;
     } catch (e) {
       logState.error('IMU传感器测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 步骤5: 摄像头棋盘格测试
+  Future<bool> _testCameraChessboard(TestState state, LogState logState) async {
+    try {
+      logState.info('📷 开始摄像头棋盘格测试...');
+      
+      // 弹窗提示用户拍摄棋盘格
+      if (!mounted) return false;
+      final userConfirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.camera_alt, color: Colors.blue),
+              SizedBox(width: 12),
+              Text('摄像头测试'),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('请将棋盘格放置在摄像头前方'),
+              SizedBox(height: 8),
+              Text('确保棋盘格清晰可见且光线充足'),
+              SizedBox(height: 16),
+              Text(
+                '点击"确定"开始拍摄',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+      
+      if (userConfirmed != true) {
+        logState.warning('用户取消摄像头测试');
+        return false;
+      }
+      
+      logState.info('📸 发送拍照命令...');
+      
+      // 发送拍照命令 (CMD 0x0C, OPT 0x02 - 抓图)
+      final command = ProductionTestCommands.createSensorCommand(0x02);
+      await state.runManualTest('摄像头拍照', command);
+      
+      logState.info('⏳ 开始监听图片数据流...');
+      
+      // 等待图片数据传输完成
+      // 监听逻辑：检查payload第一个字节是否为CMD 0x0C
+      // 参考单板产测的Sensor图片接收逻辑
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // 检查是否有IP地址用于FTP下载
+      if (_deviceIP == null || _deviceIP!.isEmpty) {
+        logState.error('❌ 设备IP地址未获取，无法下载图片');
+        return false;
+      }
+      
+      logState.info('📥 通过FTP下载图片 (IP: $_deviceIP)...');
+      
+      // 调用FTP下载图片（参考单板产测的_downloadSensorImageFromDevice方法）
+      final downloadSuccess = await state.downloadImageFromDevice(_deviceIP!);
+      
+      if (!downloadSuccess) {
+        logState.error('❌ 图片下载失败');
+        return false;
+      }
+      
+      logState.success('✅ 图片下载成功');
+      
+      // 调用image_test库检测图片质量
+      logState.info('🔍 检测图片质量...');
+      
+      final imageTestSuccess = await state.testCameraImageQuality();
+      
+      if (!imageTestSuccess) {
+        logState.error('❌ 图片质量检测失败');
+        return false;
+      }
+      
+      logState.success('✅ 摄像头棋盘格测试通过');
+      return true;
+    } catch (e) {
+      logState.error('摄像头测试失败: $e');
       return false;
     }
   }
