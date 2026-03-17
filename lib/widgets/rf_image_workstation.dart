@@ -400,42 +400,30 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.info('🚀 开始射频图像测试');
     
-    // 弹出SN输入对话框
+    // 弹出SN输入对话框（对话框内部会调用API）
     if (!mounted) return;
-    final sn = await showDialog<String>(
+    final productInfo = await showDialog<ProductSNInfo>(
       context: context,
       barrierDismissible: false,
       builder: (context) => const SNInputDialog(),
     );
     
-    if (sn == null || sn.isEmpty) {
-      logState.warning('⏹️ 用户取消测试');
+    if (productInfo == null) {
+      logState.warning('⏹️ 用户取消测试或获取信息失败');
       return;
     }
+    
+    _productInfo = productInfo;
     
     setState(() {
-      _currentSN = sn;
+      _currentSN = productInfo.snCode;
     });
     
-    logState.info('📝 输入SN号: $sn');
-    logState.info('🌐 正在获取设备信息...');
-    
-    // 调用API获取设备信息
-    try {
-      _productInfo = await ProductSNApi.getProductSNInfo(sn);
-      if (_productInfo == null) {
-        logState.error('❌ 未找到SN号对应的设备信息');
-        return;
-      }
-      
-      logState.info('✅ 设备信息获取成功');
-      logState.info('   蓝牙地址: ${_productInfo!.bluetoothAddress}');
-      logState.info('   WiFi MAC: ${_productInfo!.macAddress}');
-      logState.info('   硬件版本: ${_productInfo!.hardwareVersion}');
-    } catch (e) {
-      logState.error('❌ 获取设备信息失败: $e');
-      return;
-    }
+    logState.info('✅ 设备信息获取成功');
+    logState.info('   SN号: ${_productInfo!.snCode}');
+    logState.info('   蓝牙地址: ${_productInfo!.bluetoothAddress}');
+    logState.info('   WiFi MAC: ${_productInfo!.macAddress}');
+    logState.info('   硬件版本: ${_productInfo!.hardwareVersion}');
     
     setState(() {
       _isAutoTesting = true;

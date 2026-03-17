@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/product_sn_api.dart';
 
 /// SN号输入对话框
 class SNInputDialog extends StatefulWidget {
@@ -117,8 +118,10 @@ class _SNInputDialogState extends State<SNInputDialog> {
     );
   }
 
-  void _handleConfirm() {
+  Future<void> _handleConfirm() async {
     final sn = _snController.text.trim();
+    
+    print('🔍 用户输入SN: $sn');
     
     if (sn.isEmpty) {
       setState(() {
@@ -127,7 +130,44 @@ class _SNInputDialogState extends State<SNInputDialog> {
       return;
     }
     
-    // 返回SN号
-    Navigator.of(context).pop(sn);
+    // 开始加载
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    
+    try {
+      print('🚀 开始调用API获取产品信息...');
+      
+      // 调用API获取产品信息
+      final productInfo = await ProductSNApi.getProductSNInfo(sn);
+      
+      if (productInfo == null) {
+        print('❌ API返回null');
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = 'API返回数据为空';
+          });
+        }
+        return;
+      }
+      
+      print('✅ 成功获取产品信息: ${productInfo.snCode}');
+      
+      // 返回产品信息
+      if (mounted) {
+        Navigator.of(context).pop(productInfo);
+      }
+    } catch (e) {
+      print('❌ 获取产品信息失败: $e');
+      
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = '获取产品信息失败: ${e.toString()}';
+        });
+      }
+    }
   }
 }
