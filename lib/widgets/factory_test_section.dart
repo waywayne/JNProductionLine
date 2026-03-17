@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
+import '../models/test_mode.dart';
 import 'manual_test_section.dart';
 import 'skip_settings_panel.dart';
-import 'production_test_section.dart';
+import 'pre_ultrasound_auto_test.dart';
 
 /// Show error dialog
 void _showErrorDialog(BuildContext context, String testName, String errorMessage) {
@@ -37,7 +38,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
   
   @override
@@ -62,7 +63,6 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
           tabs: const [
             Tab(text: '自动测试'),
             Tab(text: '手动测试'),
-            Tab(text: '整机产测'),
           ],
         ),
         const SizedBox(height: 8),
@@ -78,8 +78,6 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
               ),
               // Tab 2: 手动测试
               const ManualTestSection(),
-              // Tab 3: 整机产测
-              const ProductionTestSection(),
             ],
           ),
         ),
@@ -87,7 +85,57 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
     );
   }
 
+  /// 占位符组件 - 用于未实现的测试模式
+  Widget _buildPlaceholder(BuildContext context, String title, IconData icon, Color color) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 80, color: color),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '功能开发中，敬请期待',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey[600],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAutoTestTab(BuildContext context, TestState state) {
+    // 根据测试模式显示不同内容
+    switch (state.testMode) {
+      case TestMode.singleBoard:
+        return _buildSingleBoardAutoTest(context, state);
+      case TestMode.preUltrasoundComplete:
+        return const PreUltrasoundAutoTest();
+      case TestMode.transitionComplete:
+        return _buildPlaceholder(context, '过渡整机产测', Icons.sync_alt, Colors.purple);
+      case TestMode.formalComplete:
+        return _buildPlaceholder(context, '正式整机产测', Icons.verified, Colors.green);
+    }
+  }
+
+  Widget _buildSingleBoardAutoTest(BuildContext context, TestState state) {
     if (!state.isConnected) {
       return Center(
         child: Column(

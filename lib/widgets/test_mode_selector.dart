@@ -50,8 +50,28 @@ class TestModeSelector extends StatelessWidget {
                 child: _buildModeCard(
                   context,
                   state,
-                  TestMode.completeDevice,
-                  Icons.devices,
+                  TestMode.preUltrasoundComplete,
+                  Icons.devices_other,
+                  Colors.orange,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildModeCard(
+                  context,
+                  state,
+                  TestMode.transitionComplete,
+                  Icons.sync_alt,
+                  Colors.purple,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildModeCard(
+                  context,
+                  state,
+                  TestMode.formalComplete,
+                  Icons.verified,
                   Colors.green,
                 ),
               ),
