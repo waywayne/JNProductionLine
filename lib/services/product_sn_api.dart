@@ -72,26 +72,74 @@ class ProductSNApi {
       final lineCode = TestConfig.lineCode;
       final hardwareVersion = TestConfig.hardwareVersion;
       
-      // 构建带参数的URL
-      final url = Uri.parse(
-        '$baseUrl/fetch-sn?sn_code=$snCode'
-        '&product_line=$productLine'
-        '&factory_code=$factoryCode'
-        '&line_code=$lineCode'
-        '&hardware_version=$hardwareVersion'
-      );
+      // 构建URL（POST方法不带查询参数）
+      final url = Uri.parse('$baseUrl/fetch-sn');
       
-      final response = await http.get(url).timeout(
+      // 构建请求体
+      final requestBody = {
+        'sn_code': snCode,
+        'product_line': productLine,
+        'factory_code': factoryCode,
+        'line_code': lineCode,
+        'hardware_version': hardwareVersion,
+      };
+      
+      // 打印请求信息
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      print('📡 API请求信息:');
+      print('   方法: POST');
+      print('   URL: $url');
+      print('   请求体: ${json.encode(requestBody)}');
+      print('   参数:');
+      print('     - sn_code: $snCode');
+      print('     - product_line: $productLine');
+      print('     - factory_code: $factoryCode');
+      print('     - line_code: $lineCode');
+      print('     - hardware_version: $hardwareVersion');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: json.encode(requestBody),
+      ).timeout(
         const Duration(seconds: 10),
       );
+
+      // 打印响应信息
+      print('📥 API响应信息:');
+      print('   状态码: ${response.statusCode}');
+      print('   响应体: ${response.body}');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       if (response.statusCode == 200) {
         final jsonData = json.decode(response.body) as Map<String, dynamic>;
         
+        print('📦 解析后的JSON:');
+        print('   error_code: ${jsonData['error_code']}');
+        print('   msg: ${jsonData['msg']}');
+        print('   data类型: ${jsonData['data'].runtimeType}');
+        print('   data内容: ${jsonData['data']}');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
         final errorCode = jsonData['error_code'] as int;
         if (errorCode == 0) {
-          final data = jsonData['data'] as Map<String, dynamic>;
-          return ProductSNInfo.fromJson(data);
+          final data = jsonData['data'];
+          
+          // 检查data是否为String类型
+          if (data is String) {
+            print('⚠️  警告: data字段是String类型，尝试解析...');
+            final dataMap = json.decode(data) as Map<String, dynamic>;
+            print('   解析后的data: $dataMap');
+            return ProductSNInfo.fromJson(dataMap);
+          } else if (data is Map<String, dynamic>) {
+            print('✅ data字段是Map类型，直接解析');
+            return ProductSNInfo.fromJson(data);
+          } else {
+            throw Exception('未知的data类型: ${data.runtimeType}');
+          }
         } else {
           throw Exception('API错误: ${jsonData['msg']}');
         }
@@ -99,6 +147,8 @@ class ProductSNApi {
         throw Exception('HTTP错误: ${response.statusCode}');
       }
     } catch (e) {
+      print('❌ API调用异常: $e');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       rethrow;
     }
   }
