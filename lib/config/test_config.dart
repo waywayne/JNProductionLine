@@ -100,4 +100,15 @@ class TestConfig {
   
   /// WiFi 密码
   static String get wifiPassword => _prodConfig.wifiPassword;
+  
+  // ==================== 产品信息配置 ====================
+  
+  /// 产品线代码
+  static String get productLine => _prodConfig.productLine;
+  
+  /// 工厂代码
+  static String get factoryCode => _prodConfig.factory;
+  
+  /// 产线代码
+  static String get lineCode => _prodConfig.productionLine;
 }

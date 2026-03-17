@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../config/test_config.dart';
 
 /// 产品SN API响应数据模型
 class ProductSNInfo {
@@ -65,7 +66,20 @@ class ProductSNApi {
   /// 获取产品SN信息
   static Future<ProductSNInfo?> getProductSNInfo(String snCode) async {
     try {
-      final url = Uri.parse('$baseUrl/product-sn-info?sn_code=$snCode');
+      // 从通用配置中获取参数
+      final productLine = TestConfig.productLine;
+      final factoryCode = TestConfig.factoryCode;
+      final lineCode = TestConfig.lineCode;
+      final hardwareVersion = TestConfig.hardwareVersion;
+      
+      // 构建带参数的URL
+      final url = Uri.parse(
+        '$baseUrl/fetch-sn?sn_code=$snCode'
+        '&product_line=$productLine'
+        '&factory_code=$factoryCode'
+        '&line_code=$lineCode'
+        '&hardware_version=$hardwareVersion'
+      );
       
       final response = await http.get(url).timeout(
         const Duration(seconds: 10),
