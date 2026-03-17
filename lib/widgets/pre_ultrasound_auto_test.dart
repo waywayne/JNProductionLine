@@ -122,7 +122,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
                 children: [
                   if (!_isAutoTesting)
                     ElevatedButton.icon(
-                      onPressed: state.isConnected ? () => _startAutoTest(state) : null,
+                      onPressed: () => _startAutoTest(state),
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('开始自动测试'),
                       style: ElevatedButton.styleFrom(
