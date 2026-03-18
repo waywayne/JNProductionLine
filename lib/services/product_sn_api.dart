@@ -4,57 +4,57 @@ import '../config/test_config.dart';
 
 /// 产品SN API响应数据模型
 class ProductSNInfo {
-  final int id;
+  final int? id;
   final String snCode;
-  final String productLine;
-  final String factoryCode;
-  final String productionDate;
-  final String lineCode;
-  final String orderCode;
-  final String checkCode;
+  final String? productLine;
+  final String? factoryCode;
+  final String? productionDate;
+  final String? lineCode;
+  final String? orderCode;
+  final String? checkCode;
   final String bluetoothAddress;
   final String macAddress;
-  final String hardwareVersion;
-  final int activated;
-  final int status;
-  final int createTime;
-  final int updateTime;
+  final String? hardwareVersion;
+  final int? activated;
+  final int? status;
+  final int? createTime;
+  final int? updateTime;
 
   ProductSNInfo({
-    required this.id,
+    this.id,
     required this.snCode,
-    required this.productLine,
-    required this.factoryCode,
-    required this.productionDate,
-    required this.lineCode,
-    required this.orderCode,
-    required this.checkCode,
+    this.productLine,
+    this.factoryCode,
+    this.productionDate,
+    this.lineCode,
+    this.orderCode,
+    this.checkCode,
     required this.bluetoothAddress,
     required this.macAddress,
-    required this.hardwareVersion,
-    required this.activated,
-    required this.status,
-    required this.createTime,
-    required this.updateTime,
+    this.hardwareVersion,
+    this.activated,
+    this.status,
+    this.createTime,
+    this.updateTime,
   });
 
   factory ProductSNInfo.fromJson(Map<String, dynamic> json) {
     return ProductSNInfo(
-      id: json['id'] as int,
-      snCode: json['sn_code'] as String,
-      productLine: json['product_line'] as String,
-      factoryCode: json['factory_code'] as String,
-      productionDate: json['production_date'] as String,
-      lineCode: json['line_code'] as String,
-      orderCode: json['order_code'] as String,
-      checkCode: json['check_code'] as String,
-      bluetoothAddress: json['bluetooth_address'] as String,
-      macAddress: json['mac_address'] as String,
-      hardwareVersion: json['hardware_version'] as String,
-      activated: json['activated'] as int,
-      status: json['status'] as int,
-      createTime: json['create_time'] as int,
-      updateTime: json['update_time'] as int,
+      id: json['id'] as int?,
+      snCode: (json['sn_code'] ?? '').toString(),
+      productLine: json['product_line']?.toString(),
+      factoryCode: json['factory_code']?.toString(),
+      productionDate: json['production_date']?.toString(),
+      lineCode: json['line_code']?.toString(),
+      orderCode: json['order_code']?.toString(),
+      checkCode: json['check_code']?.toString(),
+      bluetoothAddress: (json['bluetooth_address'] ?? '').toString(),
+      macAddress: (json['mac_address'] ?? '').toString(),
+      hardwareVersion: json['hardware_version']?.toString(),
+      activated: json['activated'] as int?,
+      status: json['status'] as int?,
+      createTime: json['create_time'] as int?,
+      updateTime: json['update_time'] as int?,
     );
   }
 }

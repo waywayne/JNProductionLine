@@ -423,7 +423,7 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
     logState.info('   SN号: ${_productInfo!.snCode}');
     logState.info('   蓝牙地址: ${_productInfo!.bluetoothAddress}');
     logState.info('   WiFi MAC: ${_productInfo!.macAddress}');
-    logState.info('   硬件版本: ${_productInfo!.hardwareVersion}');
+    logState.info('   硬件版本: ${_productInfo!.hardwareVersion ?? "未知"}');
     
     setState(() {
       _isAutoTesting = true;
