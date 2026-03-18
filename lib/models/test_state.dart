@@ -3090,18 +3090,62 @@ class TestState extends ChangeNotifier {
       String? targetAddress = deviceAddress;
       String? targetName = deviceName;
       
-      // 如果未指定设备地址，扫描设备
-      if (targetAddress == null || targetAddress.isEmpty) {
-        _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
-        final devices = await _linuxBtService.scanDevices(timeout: const Duration(seconds: 10));
+      // 始终先扫描设备，确保设备可见（增强健壮性）
+      _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
+      
+      // 重试扫描机制：最多尝试3次
+      List<Map<String, String>> devices = [];
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          _logState?.info('   重试扫描 ($retry/3)...', type: LogType.debug);
+          await Future.delayed(const Duration(seconds: 2));
+        }
         
-        if (devices.isEmpty) {
-          _logState?.error('❌ 未找到蓝牙设备', type: LogType.debug);
+        devices = await _linuxBtService.scanDevices(timeout: const Duration(seconds: 10));
+        
+        if (devices.isNotEmpty) {
+          _logState?.info('   扫描到 ${devices.length} 个设备', type: LogType.debug);
+          break;
+        }
+      }
+      
+      if (devices.isEmpty) {
+        _logState?.error('❌ 未找到任何蓝牙设备（已重试3次）', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      // 如果指定了目标地址，过滤匹配的设备
+      if (targetAddress != null && targetAddress.isNotEmpty) {
+        _logState?.info('   查找目标设备: $targetAddress', type: LogType.debug);
+        
+        // 格式化目标地址（统一为大写，冒号分隔）
+        final normalizedTarget = targetAddress.toUpperCase().replaceAll('-', ':');
+        
+        // 在扫描结果中查找匹配的设备
+        final matchedDevice = devices.firstWhere(
+          (device) {
+            final addr = device['address']?.toUpperCase().replaceAll('-', ':') ?? '';
+            return addr == normalizedTarget;
+          },
+          orElse: () => {},
+        );
+        
+        if (matchedDevice.isEmpty) {
+          _logState?.error('❌ 未找到目标设备: $targetAddress', type: LogType.debug);
+          _logState?.info('   扫描到的设备:', type: LogType.debug);
+          for (final dev in devices) {
+            _logState?.info('     - ${dev['name']} (${dev['address']})', type: LogType.debug);
+          }
           _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
           return false;
         }
         
-        // 使用第一个设备
+        targetAddress = matchedDevice['address'];
+        targetName = matchedDevice['name'];
+        _logState?.success('✅ 找到目标设备: $targetName ($targetAddress)', type: LogType.debug);
+      } else {
+        // 未指定地址，使用第一个设备
         targetAddress = devices.first['address'];
         targetName = devices.first['name'];
         _logState?.info('   选择设备: $targetName ($targetAddress)', type: LogType.debug);
