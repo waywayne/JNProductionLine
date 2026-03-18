@@ -346,9 +346,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       
       final bluetoothAddress = _productInfo!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      logState.info('🔍 使用 UUID: 7033 查找 RFCOMM 通道');
       
       final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
+        uuid: '7033',  // 使用UUID 7033查找RFCOMM通道
       );
       
       return success;

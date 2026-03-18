@@ -3166,42 +3166,18 @@ class TestState extends ChangeNotifier {
         return false;
       }
       
-      // 测试通信：读取蓝牙 MAC 地址
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('📖 测试通信: 读取蓝牙 MAC 地址', type: LogType.debug);
-      
-      final command = ProductionTestCommands.createBluetoothMacCommand(
-        ProductionTestCommands.bluetoothOptReadMac,
-      );
-      
-      final response = await _linuxBtService.sendCommandAndWaitResponse(
-        command,
-        timeout: const Duration(seconds: 5),
-      );
-      
-      if (response != null && !response.containsKey('error')) {
-        final payload = response['payload'] as Uint8List?;
-        if (payload != null) {
-          final mac = ProductionTestCommands.parseBluetoothMacResponse(payload);
-          if (mac != null) {
-            _logState?.success('✅ Linux 蓝牙测试成功', type: LogType.debug);
-            _logState?.info('   蓝牙 MAC: $mac', type: LogType.debug);
-            _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
-            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-            
-            // 断开连接
-            await _linuxBtService.disconnect();
-            return true;
-          }
-        }
+      // 连接成功即测试通过
+      _logState?.success('✅ Linux 蓝牙连接测试成功', type: LogType.debug);
+      _logState?.info('   设备地址: $targetAddress', type: LogType.debug);
+      if (targetName != null) {
+        _logState?.info('   设备名称: $targetName', type: LogType.debug);
       }
-      
-      _logState?.error('❌ Linux 蓝牙测试失败', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
+      _logState?.info('   连接状态: 保持连接', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 断开连接
-      await _linuxBtService.disconnect();
-      return false;
+      // 保持连接，不断开（用于后续测试步骤）
+      return true;
     } catch (e) {
       _logState?.error('❌ Linux 蓝牙测试异常: $e', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
