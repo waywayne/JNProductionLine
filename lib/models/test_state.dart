@@ -3081,14 +3081,36 @@ class TestState extends ChangeNotifier {
       _logState?.info('🐧 开始 Linux 蓝牙 SPP 测试', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
+      String? targetAddress = deviceAddress;
+      String? targetName = deviceName;
+      
+      // 检查是否已经连接到目标设备
+      if (_linuxBtService.isConnected && targetAddress != null && targetAddress.isNotEmpty) {
+        final currentAddress = _linuxBtService.currentDeviceAddress;
+        if (currentAddress != null) {
+          // 格式化地址进行比较（统一为大写，冒号分隔）
+          final normalizedCurrent = currentAddress.toUpperCase().replaceAll('-', ':');
+          final normalizedTarget = targetAddress.toUpperCase().replaceAll('-', ':');
+          
+          if (normalizedCurrent == normalizedTarget) {
+            _logState?.success('✅ 已连接到目标设备，跳过连接步骤', type: LogType.debug);
+            _logState?.info('   设备地址: $currentAddress', type: LogType.debug);
+            if (_linuxBtService.currentDeviceName != null) {
+              _logState?.info('   设备名称: ${_linuxBtService.currentDeviceName}', type: LogType.debug);
+            }
+            _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
+            _logState?.info('   连接状态: 保持连接', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return true;
+          }
+        }
+      }
+      
       // 如果指定了 UUID，设置服务 UUID
       if (uuid != null && uuid.isNotEmpty) {
         _linuxBtService.setServiceUuid(uuid);
         _logState?.info('   自定义 UUID: $uuid', type: LogType.debug);
       }
-      
-      String? targetAddress = deviceAddress;
-      String? targetName = deviceName;
       
       // 始终先扫描设备，确保设备可见（增强健壮性）
       _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
