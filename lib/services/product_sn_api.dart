@@ -61,7 +61,7 @@ class ProductSNInfo {
 
 /// 产品SN API服务
 class ProductSNApi {
-  static const String baseUrl = 'http://api.jiananai.com/api/v1/product-sn';
+  static const String baseUrl = 'http://test.jiananai.com/api/v1/product-sn';
   
   // API认证信息（与单板产测保持一致）
   static const String token = '7f0052b35618d1533f1e235b7d1f5928';
