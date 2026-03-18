@@ -81,7 +81,7 @@ class ProductSNApi {
       
       // 构建请求体
       final requestBody = {
-        'sn_code': snCode,
+        'sn': snCode,
         'product_line': productLine,
         'factory_code': factoryCode,
         'line_code': lineCode,
