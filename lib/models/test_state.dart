@@ -3640,14 +3640,19 @@ class TestState extends ChangeNotifier {
   /// IMU数据获取测试
   /// 开始获取数据 -> 持续接收5秒 -> 询问是否结束 -> 停止获取数据
   Future<bool> testIMU() async {
-    if (!_serialService.isConnected) {
-      _logState?.error('[IMU] 串口未连接', type: LogType.debug);
+    // 检查连接状态：串口或Linux蓝牙
+    final bool isConnected = _serialService.isConnected || _linuxBtService.isConnected;
+    final bool useLinuxBluetooth = _linuxBtService.isConnected;
+    
+    if (!isConnected) {
+      _logState?.error('[IMU] 未连接到设备（串口或蓝牙）', type: LogType.debug);
       return false;
     }
 
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📊 开始IMU数据获取测试', type: LogType.debug);
+      _logState?.info('🔌 通信方式: ${useLinuxBluetooth ? "Linux蓝牙SPP" : "串口"}', type: LogType.debug);
       _logState?.info('⏱️  开始时间: ${DateTime.now().toString()}', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
 
@@ -3658,13 +3663,20 @@ class TestState extends ChangeNotifier {
       final startCommandHex = startCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📤 发送: [$startCommandHex] (${startCommand.length} bytes)', type: LogType.debug);
 
-      // 发送开始命令，但不等待特定响应，因为设备会持续发送数据
-      final startResponse = await _serialService.sendCommandAndWaitResponse(
-        startCommand,
-        timeout: TestConfig.defaultTimeout,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
+      // 发送开始命令，根据连接方式选择服务
+      final startResponse = useLinuxBluetooth
+          ? await _linuxBtService.sendCommandAndWaitResponse(
+              startCommand,
+              timeout: TestConfig.defaultTimeout,
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            )
+          : await _serialService.sendCommandAndWaitResponse(
+              startCommand,
+              timeout: TestConfig.defaultTimeout,
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            );
 
       if (startResponse == null || startResponse.containsKey('error')) {
         _logState?.error('❌ 开始获取IMU数据失败: ${startResponse?['error'] ?? '无响应'}', type: LogType.debug);
@@ -3683,7 +3695,10 @@ class TestState extends ChangeNotifier {
       StreamSubscription? dataSubscription;
       bool receivedData = false;
       
-      dataSubscription = _serialService.dataStream.listen((data) {
+      // 根据连接方式选择数据流
+      final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+      
+      dataSubscription = dataStream.listen((data) {
         try {
           // 解析GTP响应
           final gtpResponse = GTPProtocol.parseGTPResponse(data);
@@ -3729,19 +3744,27 @@ class TestState extends ChangeNotifier {
         _logState?.warning('⚠️  未收到IMU数据，可能设备未正确响应', type: LogType.debug);
       }
 
-      // 步骤3: 发送停止获取IMU数据命令 (0x01)
+      // 步骤3: 发送停止获取IMU数据命令 (0xFF)
       _logState?.info('🛑 发送停止获取IMU数据命令', type: LogType.debug);
       
       final stopCommand = ProductionTestCommands.createIMUCommand(ProductionTestCommands.imuOptStopData);
       final stopCommandHex = stopCommand.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📤 发送: [$stopCommandHex] (${stopCommand.length} bytes)', type: LogType.debug);
 
-      final stopResponse = await _serialService.sendCommandAndWaitResponse(
-        stopCommand,
-        timeout: TestConfig.defaultTimeout,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
+      // 根据连接方式选择服务
+      final stopResponse = useLinuxBluetooth
+          ? await _linuxBtService.sendCommandAndWaitResponse(
+              stopCommand,
+              timeout: TestConfig.defaultTimeout,
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            )
+          : await _serialService.sendCommandAndWaitResponse(
+              stopCommand,
+              timeout: TestConfig.defaultTimeout,
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            );
 
       if (stopResponse != null && !stopResponse.containsKey('error')) {
         // 显示停止响应
