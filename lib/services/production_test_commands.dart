@@ -583,10 +583,11 @@ class ProductionTestCommands {
         break;
         
       case 0x01: // 连接热点 - 返回IP地址
+      case 0x05: // WiFi连接命令 - 返回IP地址
         if (payload.length >= 2) { // CMD + IP数据
           // IP地址以ASCII字符串形式返回，格式如 "192.168.1.100"
           // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
-          List<int> ipBytes = payload.sublist(2);
+          List<int> ipBytes = payload.sublist(1);
           
           // 找到\0的位置
           int nullIndex = ipBytes.indexOf(0);
