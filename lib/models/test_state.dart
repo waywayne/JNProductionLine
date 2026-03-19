@@ -3285,6 +3285,26 @@ class TestState extends ChangeNotifier {
   String? get linuxBluetoothDeviceName => _linuxBtService.currentDeviceName;
   String? get linuxBluetoothDeviceAddress => _linuxBtService.currentDeviceAddress;
 
+  /// 通过 Linux 蓝牙发送命令并等待响应
+  Future<Map<String, dynamic>?> sendCommandViaLinuxBluetooth(
+    dynamic command, {
+    Duration timeout = const Duration(seconds: 5),
+    int? moduleId,
+    int? messageId,
+  }) async {
+    if (!_linuxBtService.isConnected) {
+      _logState?.error('❌ Linux 蓝牙未连接', type: LogType.debug);
+      return {'error': 'Linux 蓝牙未连接'};
+    }
+    
+    return await _linuxBtService.sendCommandAndWaitResponse(
+      command,
+      timeout: timeout,
+      moduleId: moduleId,
+      messageId: messageId,
+    );
+  }
+
   /// 从设备通过FTP下载Sensor测试图片
   /// 返回true表示下载成功，false表示失败
   Future<bool> _downloadSensorImageFromDevice() async {
