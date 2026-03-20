@@ -326,39 +326,35 @@ EOF
       
       _currentChannel = targetChannel;
       
-      // 使用 rfcomm connect 主动建立连接（后台进程）
-      _logState?.info('⏳ 连接 RFCOMM 通道...');
+      // 简化连接流程，避免干扰
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('⏳ 连接 RFCOMM 通道 $targetChannel...');
+      _logState?.info('   设备地址: $deviceAddress');
       
       // 先尝试释放可能存在的旧连接
+      _logState?.debug('   释放旧的 rfcomm0 连接...');
       await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 300));
       
-      // 启动 rfcomm connect 作为后台进程
-      final rfcommProcess = await Process.start('rfcomm', [
-        'connect',
+      // 使用 rfcomm bind（类似三方工具的方式）
+      _logState?.info('⏳ 绑定 RFCOMM 设备...');
+      final bindResult = await Process.run('rfcomm', [
+        'bind',
         '0',
         deviceAddress,
         targetChannel.toString(),
       ]);
       
-      // 监听 rfcomm 进程输出
-      rfcommProcess.stdout.listen((data) {
-        final msg = String.fromCharCodes(data).trim();
-        if (msg.isNotEmpty) {
-          _logState?.debug('[rfcomm] $msg');
-        }
-      });
+      if (bindResult.exitCode != 0) {
+        _logState?.error('❌ RFCOMM 绑定失败: ${bindResult.stderr}');
+        return false;
+      }
       
-      rfcommProcess.stderr.listen((data) {
-        final msg = String.fromCharCodes(data).trim();
-        if (msg.isNotEmpty) {
-          _logState?.debug('[rfcomm] $msg');
-        }
-      });
+      _logState?.success('✅ RFCOMM 设备已绑定');
       
-      // 等待设备文件创建和连接建立
-      _logState?.info('⏳ 等待连接建立...');
-      await Future.delayed(const Duration(milliseconds: 1500));
+      // 等待设备文件创建
+      _logState?.info('⏳ 等待设备文件创建...');
+      await Future.delayed(const Duration(milliseconds: 800));
       
       // 连接到 RFCOMM 设备
       final devicePath = '/dev/rfcomm0';
@@ -393,13 +389,17 @@ EOF
       
       _logState?.success('✅ 设备文件已创建: $devicePath');
       
-      // 直接打开设备文件进行读写
+      // 直接打开设备文件进行读写（使用 writeOnly 模式，读取用 cat）
       try {
-        _deviceFile = await file.open(mode: FileMode.append);
-        _logState?.success('✅ 设备文件已打开');
+        // 使用 writeOnly 模式打开，避免阻塞
+        _deviceFile = await file.open(mode: FileMode.writeOnly);
+        _logState?.success('✅ 设备文件已打开（写入）');
         
-        // 启动读取线程
+        // 启动读取线程（使用 cat 命令）
         _startReadLoop(devicePath);
+        
+        // 等待读取循环启动
+        await Future.delayed(const Duration(milliseconds: 300));
       } catch (e) {
         _logState?.error('❌ 打开设备文件失败: $e');
         _logState?.error('   错误详情: ${e.toString()}');
