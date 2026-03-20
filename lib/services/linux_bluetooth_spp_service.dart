@@ -326,24 +326,39 @@ EOF
       
       _currentChannel = targetChannel;
       
-      // 使用 rfcomm 绑定通道
-      _logState?.info('⏳ 绑定 RFCOMM 通道...');
-      final bindResult = await Process.run('rfcomm', [
-        'bind',
+      // 使用 rfcomm connect 主动建立连接（后台进程）
+      _logState?.info('⏳ 连接 RFCOMM 通道...');
+      
+      // 先尝试释放可能存在的旧连接
+      await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
+      await Future.delayed(const Duration(milliseconds: 200));
+      
+      // 启动 rfcomm connect 作为后台进程
+      final rfcommProcess = await Process.start('rfcomm', [
+        'connect',
         '0',
         deviceAddress,
         targetChannel.toString(),
       ]);
       
-      if (bindResult.exitCode != 0) {
-        _logState?.error('❌ RFCOMM 绑定失败: ${bindResult.stderr}');
-        return false;
-      }
+      // 监听 rfcomm 进程输出
+      rfcommProcess.stdout.listen((data) {
+        final msg = String.fromCharCodes(data).trim();
+        if (msg.isNotEmpty) {
+          _logState?.debug('[rfcomm] $msg');
+        }
+      });
       
-      _logState?.success('✅ RFCOMM 通道绑定成功');
+      rfcommProcess.stderr.listen((data) {
+        final msg = String.fromCharCodes(data).trim();
+        if (msg.isNotEmpty) {
+          _logState?.debug('[rfcomm] $msg');
+        }
+      });
       
-      // 等待设备文件创建
-      await Future.delayed(const Duration(milliseconds: 500));
+      // 等待设备文件创建和连接建立
+      _logState?.info('⏳ 等待连接建立...');
+      await Future.delayed(const Duration(milliseconds: 1500));
       
       // 连接到 RFCOMM 设备
       final devicePath = '/dev/rfcomm0';
@@ -367,9 +382,19 @@ EOF
         _logState?.success('✅ 串口参数配置成功');
       }
       
+      // 检查设备文件是否存在
+      final file = File(devicePath);
+      if (!await file.exists()) {
+        _logState?.error('❌ 设备文件不存在: $devicePath');
+        _logState?.error('   rfcomm connect 可能失败，请检查设备是否在线');
+        await _unbindRfcomm();
+        return false;
+      }
+      
+      _logState?.success('✅ 设备文件已创建: $devicePath');
+      
       // 直接打开设备文件进行读写
       try {
-        final file = File(devicePath);
         _deviceFile = await file.open(mode: FileMode.append);
         _logState?.success('✅ 设备文件已打开');
         
@@ -377,6 +402,7 @@ EOF
         _startReadLoop(devicePath);
       } catch (e) {
         _logState?.error('❌ 打开设备文件失败: $e');
+        _logState?.error('   错误详情: ${e.toString()}');
         await _unbindRfcomm();
         return false;
       }
