@@ -336,25 +336,25 @@ EOF
       await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 使用 rfcomm bind（类似三方工具的方式）
-      _logState?.info('⏳ 绑定 RFCOMM 设备...');
-      final bindResult = await Process.run('rfcomm', [
-        'bind',
-        '0',
-        deviceAddress,
-        targetChannel.toString(),
-      ]);
+      // 使用 rfcomm connect 主动建立连接（后台进程）
+      _logState?.info('⏳ 主动建立 RFCOMM 连接...');
       
-      if (bindResult.exitCode != 0) {
-        _logState?.error('❌ RFCOMM 绑定失败: ${bindResult.stderr}');
-        return false;
+      // 在后台启动 rfcomm connect，不等待它完成
+      final connectScript = '''
+        rfcomm connect 0 $deviceAddress $targetChannel </dev/null >/dev/null 2>&1 &
+        echo \$!
+      ''';
+      
+      final connectResult = await Process.run('bash', ['-c', connectScript]);
+      final rfcommPid = connectResult.stdout.toString().trim();
+      
+      if (rfcommPid.isNotEmpty) {
+        _logState?.debug('   rfcomm 进程 PID: $rfcommPid');
       }
       
-      _logState?.success('✅ RFCOMM 设备已绑定');
-      
-      // 等待设备文件创建
-      _logState?.info('⏳ 等待设备文件创建...');
-      await Future.delayed(const Duration(milliseconds: 800));
+      // 等待连接建立和设备文件创建
+      _logState?.info('⏳ 等待连接建立...');
+      await Future.delayed(const Duration(milliseconds: 1500));
       
       // 连接到 RFCOMM 设备
       final devicePath = '/dev/rfcomm0';
@@ -389,9 +389,9 @@ EOF
       
       _logState?.success('✅ 设备文件已创建: $devicePath');
       
-      // 直接打开设备文件进行读写（使用 writeOnly 模式，读取用 cat）
+      // rfcomm connect 已在后台运行，直接打开设备文件
       try {
-        // 使用 writeOnly 模式打开，避免阻塞
+        // 打开设备文件用于写入
         _deviceFile = await file.open(mode: FileMode.writeOnly);
         _logState?.success('✅ 设备文件已打开（写入）');
         
