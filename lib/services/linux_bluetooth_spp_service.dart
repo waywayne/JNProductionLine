@@ -325,64 +325,89 @@ EOF
       }
       
       _currentChannel = targetChannel;
+      final devicePath = '/dev/rfcomm0';
       
-      // 简化连接流程，避免干扰
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      _logState?.info('⏳ 连接 RFCOMM 通道 $targetChannel...');
-      _logState?.info('   设备地址: $deviceAddress');
+      _logState?.info('⏳ 连接到 $deviceAddress 通道 $targetChannel...');
       
       // 清理旧连接
+      await Process.run('pkill', ['-f', 'rfcomm']).catchError((_) => null);
       await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 300));
       
-      // 主动建立 RFCOMM 连接（后台进程）
-      _logState?.info('⏳ 主动建立 RFCOMM 连接...');
+      // 直接使用 rfcomm connect（前台，等待连接建立）
+      _logState?.info('⏳ 建立 RFCOMM 连接...');
       
-      final connectScript = '''
-        rfcomm connect 0 $deviceAddress $targetChannel </dev/null >/dev/null 2>&1 &
-      ''';
+      // 使用 timeout 命令限制连接时间
+      final connectProcess = await Process.start('timeout', [
+        '5',  // 5秒超时
+        'rfcomm',
+        'connect',
+        '0',
+        deviceAddress,
+        targetChannel.toString(),
+      ]);
       
-      await Process.run('bash', ['-c', connectScript]);
+      // 监听输出判断连接状态
+      bool connected = false;
+      final outputCompleter = Completer<bool>();
       
-      // 轮询等待设备文件创建（最多 5 秒）
-      final devicePath = '/dev/rfcomm0';
-      final file = File(devicePath);
-      bool deviceReady = false;
-      
-      _logState?.info('⏳ 等待设备文件创建...');
-      for (int i = 0; i < 50; i++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (await file.exists()) {
-          deviceReady = true;
-          _logState?.success('✅ 设备文件已创建: $devicePath');
-          break;
+      connectProcess.stdout.listen((data) {
+        final msg = String.fromCharCodes(data);
+        _logState?.debug('[rfcomm] $msg');
+        if (msg.contains('Connected') || msg.contains('Press CTRL-C')) {
+          connected = true;
+          if (!outputCompleter.isCompleted) {
+            outputCompleter.complete(true);
+          }
         }
-      }
+      });
       
-      if (!deviceReady) {
-        _logState?.error('❌ 设备文件创建超时（5秒）');
-        _logState?.error('   可能原因: 设备未响应或通道号不正确');
+      connectProcess.stderr.listen((data) {
+        final msg = String.fromCharCodes(data);
+        if (msg.trim().isNotEmpty) {
+          _logState?.warning('[rfcomm] $msg');
+        }
+      });
+      
+      // 等待连接成功或超时
+      try {
+        await outputCompleter.future.timeout(const Duration(seconds: 6));
+      } catch (e) {
+        _logState?.error('❌ 连接超时或失败');
+        connectProcess.kill();
         await _unbindRfcomm();
         return false;
       }
       
-      // 配置串口参数
-      await Process.run('stty', [
-        '-F', devicePath,
-        '115200', 'raw', '-echo', '-echoe', '-echok',
-      ]).catchError((_) => null);
+      if (!connected) {
+        _logState?.error('❌ 连接失败');
+        connectProcess.kill();
+        await _unbindRfcomm();
+        return false;
+      }
       
-      // 打开设备文件用于写入
+      // 保存进程引用
+      _bluetoothProcess = connectProcess;
+      
+      // 等待设备文件稳定
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 打开设备文件
+      final file = File(devicePath);
+      if (!await file.exists()) {
+        _logState?.error('❌ 设备文件不存在');
+        return false;
+      }
+      
       try {
         _deviceFile = await file.open(mode: FileMode.writeOnly);
-        _logState?.success('✅ 设备文件已打开');
+        _logState?.success('✅ 设备已连接');
         
-        // 启动读取线程
         _startReadLoop(devicePath);
         await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
-        _logState?.error('❌ 打开设备文件失败: $e');
-        await _unbindRfcomm();
+        _logState?.error('❌ 打开设备失败: $e');
         return false;
       }
       
