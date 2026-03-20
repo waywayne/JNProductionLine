@@ -822,16 +822,23 @@ hciconfig hci0 up 2>/dev/null || true
       }
       
       if (startIndex == -1) {
-        // 没有找到 GTP 起始标志
+        // 没有找到 GTP 起始标志，可能是设备返回的原始数据（无 GTP 封装）
         final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
         _logState?.warning('⚠️ 缓冲区中未找到 GTP 起始标志 (D0 D2 C5 C2)');
         _logState?.debug('   缓冲区内容 [${_buffer.length} 字节]: $bufferHex');
         
-        // 保留最后 3 个字节（可能是 Preamble 的开始）
-        if (_buffer.length > 3) {
-          _buffer = _buffer.sublist(_buffer.length - 3);
-        } else {
+        // 尝试作为原始响应处理（设备可能不返回 GTP 封装）
+        if (_buffer.length >= 10) {
+          _logState?.info('🔄 尝试解析为原始响应数据（无 GTP 封装）');
+          _processRawResponse(_buffer);
           _buffer = Uint8List(0);
+        } else {
+          // 保留最后 3 个字节（可能是 Preamble 的开始）
+          if (_buffer.length > 3) {
+            _buffer = _buffer.sublist(_buffer.length - 3);
+          } else {
+            _buffer = Uint8List(0);
+          }
         }
         break;
       }
@@ -947,6 +954,57 @@ hciconfig hci0 up 2>/dev/null || true
       }
     } catch (e) {
       _logState?.error('❌ 数据包处理异常: $e');
+    }
+  }
+  
+  /// 处理原始响应数据（无 GTP 封装）
+  void _processRawResponse(Uint8List rawData) {
+    try {
+      _packetCount++;
+      
+      final hexStr = rawData.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+      _logState?.info('📦 原始响应数据 #$_packetCount [${rawData.length} 字节]: $hexStr');
+      
+      // 尝试提取序列号（假设在固定位置，根据实际协议调整）
+      // 从接收到的数据看：04 00 00 9A 23 23 06 00 DE 36 01 FF 02 00 02 00 00 00 00 01 40 40...
+      // 可能格式：[CMD(1)] [SN(2)] [其他数据...]
+      int? responseSN;
+      if (rawData.length >= 3) {
+        // 尝试从第1-2字节读取序列号（小端）
+        responseSN = rawData[1] | (rawData[2] << 8);
+        _logState?.info('   提取序列号: $responseSN (从字节 1-2)');
+      }
+      
+      // 构造响应对象
+      final response = {
+        'payload': rawData,
+        'timestamp': DateTime.now(),
+        'raw': true,  // 标记为原始数据
+        'sn': responseSN,
+      };
+      
+      // 匹配待处理的请求
+      if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
+        final completer = _pendingResponses[responseSN];
+        _logState?.success('✅ 原始响应匹配序列号: $responseSN');
+        if (!completer!.isCompleted) {
+          completer.complete(response);
+          _pendingResponses.remove(responseSN);
+        }
+      } else if (_pendingResponses.isNotEmpty) {
+        // 如果序列号不匹配，使用第一个待处理请求
+        final firstKey = _pendingResponses.keys.first;
+        final completer = _pendingResponses[firstKey];
+        _logState?.warning('⚠️ 原始响应 SN ($responseSN) 不匹配，使用第一个待处理请求: $firstKey');
+        if (!completer!.isCompleted) {
+          completer.complete(response);
+          _pendingResponses.remove(firstKey);
+        }
+      } else {
+        _logState?.warning('⚠️ 收到原始响应但没有待处理的请求');
+      }
+    } catch (e) {
+      _logState?.error('❌ 原始响应处理异常: $e');
     }
   }
   
