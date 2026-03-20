@@ -349,9 +349,19 @@ EOF
       _logState?.info('⏳ 连接到设备: $devicePath');
       
       // 使用 socat 建立连接
+      // 参数说明:
+      // - : stdin/stdout
+      // FILE:$devicePath : 设备文件
+      // b115200 : 波特率 115200
+      // raw : 原始模式，不处理特殊字符
+      // echo=0 : 禁用回显
+      // nonblock=1 : 非阻塞模式
+      // sync : 同步写入，确保数据立即发送
       _bluetoothProcess = await Process.start('socat', [
+        '-d',  // 调试信息
+        '-d',  // 更多调试信息
         '-',
-        'FILE:$devicePath,b115200,raw,echo=0',
+        'FILE:$devicePath,b115200,raw,echo=0,nonblock=1',
       ]);
       
       if (_bluetoothProcess == null) {
@@ -386,6 +396,19 @@ EOF
         onDone: () {
           _logState?.warning('⚠️ 连接已断开');
           disconnect();
+        },
+      );
+      
+      // 监听 socat 的调试输出（stderr）
+      _bluetoothProcess!.stderr.listen(
+        (data) {
+          final debugMsg = String.fromCharCodes(data).trim();
+          if (debugMsg.isNotEmpty) {
+            _logState?.debug('[socat] $debugMsg');
+          }
+        },
+        onError: (error) {
+          _logState?.debug('[socat] stderr error: $error');
         },
       );
       
@@ -451,20 +474,29 @@ EOF
     }
     
     try {
-      _bluetoothProcess!.stdin.add(data);
-      await _bluetoothProcess!.stdin.flush();
-      
       // 详细的发送日志
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       final asciiStr = String.fromCharCodes(
         data.map((b) => (b >= 32 && b <= 126) ? b : 46), // 46 = '.'
       );
-      _logState?.debug('📤 发送 [${data.length} 字节]: $hexStr');
-      _logState?.info('📤 发送: $hexStr (ASCII: $asciiStr)');
+      _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
+      _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
+      
+      // 发送数据
+      _bluetoothProcess!.stdin.add(data);
+      
+      // 强制刷新缓冲区，确保数据真正发送
+      await _bluetoothProcess!.stdin.flush();
+      
+      // 添加短暂延迟，确保数据完全发送到设备
+      await Future.delayed(const Duration(milliseconds: 50));
+      
+      _logState?.success('✅ 数据已发送到 stdin');
       
       return true;
     } catch (e) {
       _logState?.error('❌ 发送数据失败: $e');
+      _logState?.error('   错误详情: ${e.toString()}');
       return false;
     }
   }
