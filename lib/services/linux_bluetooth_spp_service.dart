@@ -346,6 +346,7 @@ EOF
       
       // 连接到 RFCOMM 设备
       final devicePath = '/dev/rfcomm0';
+      
       _logState?.info('⏳ 连接到设备: $devicePath');
       
       // 使用 socat 建立连接
