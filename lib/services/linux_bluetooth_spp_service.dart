@@ -65,20 +65,23 @@ class LinuxBluetoothSppService {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('🔍 开始扫描蓝牙设备 (Linux)');
       
-      // 改进的扫描策略：
-      // 1. 先清除已配对设备缓存（可选）
-      // 2. 使用 hcitool 进行扫描（更可靠）
-      // 3. 同时使用 bluetoothctl 获取设备名称
+      // 改进的扫描策略：使用 bluetoothctl（支持 BLE + 经典蓝牙）
+      _logState?.info('   使用 bluetoothctl 扫描设备（包括 BLE）...');
       
-      _logState?.info('   使用 hcitool 扫描附近设备...');
-      
-      // 使用 hcitool scan 扫描附近设备（不依赖缓存）
+      // 使用 bluetoothctl 扫描（支持 BLE 和经典蓝牙）
       final scanScript = '''
 # 确保蓝牙适配器开启
 hciconfig hci0 up 2>/dev/null || true
 
-# 使用 hcitool 扫描（实时扫描，不依赖缓存）
-hcitool scan --flush 2>/dev/null || hcitool scan 2>/dev/null
+# 使用 bluetoothctl 扫描
+(
+  echo "power on"
+  sleep 1
+  echo "scan on"
+  sleep ${timeout.inSeconds}
+  echo "scan off"
+  echo "devices"
+) | bluetoothctl 2>&1
 ''';
       
       final scanResult = await Process.run('bash', ['-c', scanScript]);
@@ -89,64 +92,21 @@ hcitool scan --flush 2>/dev/null || hcitool scan 2>/dev/null
       final lines = scanResult.stdout.toString().split('\n');
       
       for (final line in lines) {
-        if (line.trim().isEmpty || line.contains('Scanning')) continue;
+        if (line.trim().isEmpty) continue;
         
-        // hcitool scan 格式: \tAA:BB:CC:DD:EE:FF\tDevice Name
-        final parts = line.trim().split('\t');
-        if (parts.length >= 2) {
-          final address = parts[0].trim().toUpperCase();
-          final name = parts.length > 1 ? parts[1].trim() : 'Unknown Device';
+        // 格式: Device AA:BB:CC:DD:EE:FF Device Name
+        final match = RegExp(r'Device\s+([0-9A-Fa-f:]{2}:[0-9A-Fa-f:]{2}:[0-9A-Fa-f:]{2}:[0-9A-Fa-f:]{2}:[0-9A-Fa-f:]{2}:[0-9A-Fa-f:]{2})\s+(.+)', caseSensitive: false).firstMatch(line);
+        if (match != null) {
+          final address = match.group(1)!.toUpperCase();
+          final name = match.group(2)!.trim();
           
-          // 验证 MAC 地址格式
-          if (RegExp(r'^[0-9A-F:]{17}$', caseSensitive: false).hasMatch(address)) {
-            // 避免重复添加
-            if (!devices.any((d) => d['address'] == address)) {
-              devices.add({
-                'address': address,
-                'name': name.isNotEmpty ? name : 'Unknown Device',
-              });
-              _logState?.info('  📱 $name ($address)');
-            }
-          }
-        }
-      }
-      
-      // 如果 hcitool 没有找到设备，尝试使用 bluetoothctl
-      if (devices.isEmpty) {
-        _logState?.info('   hcitool 未找到设备，尝试 bluetoothctl...');
-        
-        final btctlScript = '''
-# 清除设备缓存并重新扫描
-bluetoothctl << EOF
-remove *
-scan on
-EOF
-sleep 3
-bluetoothctl << EOF
-scan off
-devices
-EOF
-''';
-        
-        final btctlResult = await Process.run('bash', ['-c', btctlScript]);
-        final btctlLines = btctlResult.stdout.toString().split('\n');
-        
-        for (final line in btctlLines) {
-          if (line.trim().isEmpty) continue;
-          
-          // 格式: Device AA:BB:CC:DD:EE:FF Device Name
-          final match = RegExp(r'Device\s+([0-9A-Fa-f:]+)\s+(.+)', caseSensitive: false).firstMatch(line);
-          if (match != null) {
-            final address = match.group(1)!.toUpperCase();
-            final name = match.group(2)!.trim();
-            
-            if (!devices.any((d) => d['address'] == address)) {
-              devices.add({
-                'address': address,
-                'name': name,
-              });
-              _logState?.info('  📱 $name ($address)');
-            }
+          // 避免重复添加
+          if (!devices.any((d) => d['address'] == address)) {
+            devices.add({
+              'address': address,
+              'name': name.isNotEmpty ? name : 'Unknown Device',
+            });
+            _logState?.info('  📱 $name ($address)');
           }
         }
       }
@@ -180,102 +140,96 @@ EOF
     return uuid.toUpperCase();
   }
   
-  /// 配对蓝牙设备
-  Future<bool> pairDevice(String deviceAddress) async {
+  /// 确保蓝牙适配器已开启
+  Future<bool> ensureBluetoothPower() async {
     try {
-      _logState?.info('🔐 检查设备配对状态...');
-      
-      // 检查是否已配对
-      final checkPaired = await Process.run('bash', ['-c', 'bluetoothctl paired-devices | grep -i $deviceAddress']);
-      if (checkPaired.exitCode == 0) {
-        _logState?.success('✅ 设备已配对');
-        return true;
-      }
-      
-      _logState?.info('⏳ 开始配对设备...');
-      
-      // 使用 bluetoothctl 配对设备
-      final pairScript = '''
-bluetoothctl << EOF
-power on
-agent NoInputNoOutput
-default-agent
-pair $deviceAddress
-yes
-EOF
-''';
-      
-      final pairResult = await Process.run('bash', ['-c', pairScript]);
-      
-      // 等待配对完成
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // 再次检查配对状态
-      final checkAgain = await Process.run('bash', ['-c', 'bluetoothctl paired-devices | grep -i $deviceAddress']);
-      if (checkAgain.exitCode == 0) {
-        _logState?.success('✅ 设备配对成功');
-        return true;
-      }
-      
-      _logState?.warning('⚠️ 配对可能失败，尝试继续连接...');
-      return true; // 即使配对失败也尝试继续
+      _logState?.debug('� 确保蓝牙适配器已开启...');
+      await Process.run('bash', ['-c', 'echo "power on" | bluetoothctl']);
+      await Future.delayed(const Duration(milliseconds: 500));
+      return true;
     } catch (e) {
-      _logState?.error('❌ 配对异常: $e');
+      _logState?.error('❌ 开启蓝牙失败: $e');
       return false;
     }
   }
   
-  /// 信任蓝牙设备
-  Future<bool> trustDevice(String deviceAddress) async {
+  /// 配对并连接蓝牙设备
+  Future<bool> pairAndConnectDevice(String deviceAddress) async {
     try {
-      _logState?.info('🔓 设置设备为信任...');
+      _logState?.info('🔗 配对并连接蓝牙设备...');
       
-      final trustScript = '''
-bluetoothctl << EOF
-trust $deviceAddress
-EOF
+      // 1. 检查是否已配对
+      final checkPaired = await Process.run('bash', ['-c', 'echo "paired-devices" | bluetoothctl | grep -i $deviceAddress']);
+      final alreadyPaired = checkPaired.exitCode == 0;
+      
+      if (alreadyPaired) {
+        _logState?.info('   设备已配对');
+      } else {
+        _logState?.info('   开始配对设备...');
+        
+        // 配对设备（使用管道方式，一次性发送所有命令）
+        final pairScript = '''
+(
+  echo "power on"
+  sleep 1
+  echo "agent on"
+  sleep 1
+  echo "default-agent"
+  sleep 1
+  echo "pair $deviceAddress"
+  sleep 5
+  echo "trust $deviceAddress"
+  sleep 1
+) | bluetoothctl
 ''';
-      
-      final trustResult = await Process.run('bash', ['-c', trustScript]);
-      
-      if (trustResult.exitCode == 0 || trustResult.stdout.toString().contains('trust succeeded')) {
-        _logState?.success('✅ 设备已设为信任');
-        return true;
+        
+        final pairResult = await Process.run('bash', ['-c', pairScript]);
+        _logState?.debug('   配对输出: ${pairResult.stdout}');
+        
+        // 等待配对完成
+        await Future.delayed(const Duration(seconds: 2));
+        
+        // 验证配对
+        final checkAgain = await Process.run('bash', ['-c', 'echo "paired-devices" | bluetoothctl | grep -i $deviceAddress']);
+        if (checkAgain.exitCode == 0) {
+          _logState?.success('✅ 设备配对成功');
+        } else {
+          _logState?.warning('⚠️ 配对可能失败，继续尝试连接...');
+        }
       }
       
-      _logState?.warning('⚠️ 设置信任可能失败，尝试继续连接...');
-      return true; // 即使失败也尝试继续
-    } catch (e) {
-      _logState?.error('❌ 设置信任异常: $e');
-      return false;
-    }
-  }
-  
-  /// 连接蓝牙设备（基础连接）
-  Future<bool> connectBluetoothDevice(String deviceAddress) async {
-    try {
-      _logState?.info('🔗 建立蓝牙基础连接...');
+      // 2. 检查设备状态
+      _logState?.info('   检查设备状态...');
+      final infoResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
+      final infoOutput = infoResult.stdout.toString();
       
-      final connectScript = '''
-bluetoothctl << EOF
-connect $deviceAddress
-EOF
-''';
+      // 检查是否已配对和信任
+      final isPaired = infoOutput.contains('Paired: yes');
+      final isTrusted = infoOutput.contains('Trusted: yes');
+      final isBonded = infoOutput.contains('Bonded: yes');
       
-      final connectResult = await Process.run('bash', ['-c', connectScript]);
-      
-      // 等待连接建立
-      await Future.delayed(const Duration(seconds: 2));
-      
-      // 检查连接状态
-      final infoResult = await Process.run('bash', ['-c', 'bluetoothctl info $deviceAddress']);
-      if (infoResult.stdout.toString().contains('Connected: yes')) {
-        _logState?.success('✅ 蓝牙基础连接成功');
+      if (isPaired && isTrusted) {
+        _logState?.success('✅ 设备已配对和信任');
+        _logState?.info('   Paired: yes');
+        _logState?.info('   Trusted: yes');
+        if (isBonded) {
+          _logState?.info('   Bonded: yes');
+        }
+        
+        // 对于已配对的设备，不需要 bluetoothctl connect
+        // 直接使用 RFCOMM 连接即可
+        _logState?.info('   设备已准备，可以直接使用 RFCOMM');
+        
+        // 等待设备准备好
+        await Future.delayed(const Duration(seconds: 2));
+        
         return true;
+      } else {
+        _logState?.error('❌ 设备配对或信任失败');
+        _logState?.error('   Paired: ${isPaired ? "yes" : "no"}');
+        _logState?.error('   Trusted: ${isTrusted ? "yes" : "no"}');
+        return false;
       }
-      
-      _logState?.warning('⚠️ 蓝牙连接状态未知，尝试继续...');
-      return true; // 即使状态未知也尝试继续
     } catch (e) {
       _logState?.error('❌ 蓝牙连接异常: $e');
       return false;
@@ -411,31 +365,16 @@ EOF
       // 断开现有连接
       await disconnect();
       
-      // ========== 关键步骤：配对和信任设备 ==========
+      // 确保蓝牙适配器已开启
+      await ensureBluetoothPower();
+      
+      // ========== 步骤 1: 配对并连接蓝牙设备 ==========
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      _logState?.info('📱 准备设备连接前置步骤...');
-      
-      // 1. 配对设备
-      final paired = await pairDevice(deviceAddress);
-      if (!paired) {
-        _logState?.error('❌ 设备配对失败');
-        // 不直接返回，尝试继续
-      }
-      
-      // 2. 信任设备
-      final trusted = await trustDevice(deviceAddress);
-      if (!trusted) {
-        _logState?.error('❌ 设置信任失败');
-        // 不直接返回，尝试继续
-      }
-      
-      // 3. 建立蓝牙基础连接
-      final btConnected = await connectBluetoothDevice(deviceAddress);
+      final btConnected = await pairAndConnectDevice(deviceAddress);
       if (!btConnected) {
-        _logState?.error('❌ 蓝牙基础连接失败');
-        // 不直接返回，尝试继续
+        _logState?.error('❌ 蓝牙连接失败，无法继续');
+        return false;
       }
-      
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // 如果未指定通道，则通过 SDP 查询
@@ -464,8 +403,80 @@ EOF
       await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 直接使用 rfcomm connect（前台，等待连接建立）
+      // 建立 RFCOMM 连接
       _logState?.info('⏳ 建立 RFCOMM 连接...');
+      _logState?.info('   方法: rfcomm bind + 后台连接');
+      
+      // 方法1: 先尝试 bind 方式（更稳定）
+      final bindResult = await Process.run('rfcomm', [
+        'bind',
+        '0',
+        deviceAddress,
+        targetChannel.toString(),
+      ]);
+      
+      if (bindResult.exitCode == 0) {
+        _logState?.info('   ✅ RFCOMM 绑定成功');
+        
+        // 等待设备文件创建
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        // 检查设备文件是否存在
+        final deviceFile = File(devicePath);
+        if (await deviceFile.exists()) {
+          _logState?.success('   ✅ 设备文件已创建: $devicePath');
+          
+          // 不需要启动 connect 进程，直接使用设备文件
+          _bluetoothProcess = null;  // bind 模式不需要进程
+          
+          // 跳过后续的 connect 流程
+          try {
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnly);
+            _logState?.success('✅ 设备已连接 (bind 模式)');
+            
+            _startReadLoop(devicePath);
+            await Future.delayed(const Duration(milliseconds: 200));
+            
+            _currentDeviceAddress = deviceAddress;
+            _currentDeviceName = deviceName;
+            _isConnected = true;
+            
+            // 重置序列号和缓冲区
+            _sequenceNumber = 0;
+            _buffer = Uint8List(0);
+            _packetCount = 0;
+            _pendingResponses.clear();
+            
+            _logState?.success('✅ SPP 连接成功 (RFCOMM bind 模式)');
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            _logState?.info('📋 连接信息:');
+            _logState?.info('   设备地址: $deviceAddress');
+            if (deviceName != null) {
+              _logState?.info('   设备名称: $deviceName');
+            }
+            _logState?.info('   RFCOMM 通道: $targetChannel');
+            _logState?.info('   服务 UUID: ${uuid ?? _serviceUuid}');
+            _logState?.info('   设备路径: $devicePath');
+            _logState?.info('   连接模式: RFCOMM bind');
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+            
+            return true;
+          } catch (e) {
+            _logState?.error('❌ 打开设备失败: $e');
+            await _unbindRfcomm();
+            // 继续尝试 connect 模式
+          }
+        } else {
+          _logState?.warning('   ⚠️ bind 成功但设备文件未创建，尝试 connect 模式...');
+          await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
+        }
+      } else {
+        _logState?.warning('   ⚠️ RFCOMM bind 失败，尝试 connect 模式...');
+        _logState?.debug('   bind 错误: ${bindResult.stderr}');
+      }
+      
+      // 方法2: 使用 rfcomm connect（前台模式）
+      _logState?.info('   方法: rfcomm connect (前台)');
       
       // 使用 timeout 命令限制连接时间
       final connectProcess = await Process.start('timeout', [
