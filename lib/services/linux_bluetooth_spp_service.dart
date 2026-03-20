@@ -431,14 +431,16 @@ hciconfig hci0 up 2>/dev/null || true
           
           // bind 后直接打开设备文件（打开操作会触发 RFCOMM 连接）
           try {
-            // 打开设备文件用于读写（这会触发实际的 RFCOMM 连接）
-            _deviceFile = await deviceFile.open(mode: FileMode.write);
+            // 先启动读取循环（cat 会触发 RFCOMM 连接并读取所有数据）
+            _startReadLoop(devicePath);
+            
+            // 等待连接建立和读取循环启动
+            await Future.delayed(const Duration(milliseconds: 1000));
+            
+            // 然后打开设备文件用于写入（使用 writeOnlyAppend 避免干扰读取）
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
             _logState?.success('✅ 设备文件已打开，RFCOMM 连接已建立 (bind 模式)');
             
-            // 等待连接稳定
-            await Future.delayed(const Duration(milliseconds: 800));
-            
-            _startReadLoop(devicePath);
             await Future.delayed(const Duration(milliseconds: 200));
             
             _currentDeviceAddress = deviceAddress;
