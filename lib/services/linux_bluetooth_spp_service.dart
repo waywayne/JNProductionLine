@@ -331,78 +331,57 @@ EOF
       _logState?.info('⏳ 连接 RFCOMM 通道 $targetChannel...');
       _logState?.info('   设备地址: $deviceAddress');
       
-      // 先尝试释放可能存在的旧连接
-      _logState?.debug('   释放旧的 rfcomm0 连接...');
+      // 清理旧连接
       await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
-      await Future.delayed(const Duration(milliseconds: 300));
+      await Future.delayed(const Duration(milliseconds: 200));
       
-      // 使用 rfcomm connect 主动建立连接（后台进程）
+      // 主动建立 RFCOMM 连接（后台进程）
       _logState?.info('⏳ 主动建立 RFCOMM 连接...');
       
-      // 在后台启动 rfcomm connect，不等待它完成
       final connectScript = '''
         rfcomm connect 0 $deviceAddress $targetChannel </dev/null >/dev/null 2>&1 &
-        echo \$!
       ''';
       
-      final connectResult = await Process.run('bash', ['-c', connectScript]);
-      final rfcommPid = connectResult.stdout.toString().trim();
+      await Process.run('bash', ['-c', connectScript]);
       
-      if (rfcommPid.isNotEmpty) {
-        _logState?.debug('   rfcomm 进程 PID: $rfcommPid');
-      }
-      
-      // 等待连接建立和设备文件创建
-      _logState?.info('⏳ 等待连接建立...');
-      await Future.delayed(const Duration(milliseconds: 1500));
-      
-      // 连接到 RFCOMM 设备
+      // 轮询等待设备文件创建（最多 5 秒）
       final devicePath = '/dev/rfcomm0';
+      final file = File(devicePath);
+      bool deviceReady = false;
       
-      _logState?.info('⏳ 连接到设备: $devicePath');
-      
-      // 配置串口参数
-      _logState?.info('⏳ 配置串口参数...');
-      final sttyResult = await Process.run('stty', [
-        '-F', devicePath,
-        '115200',
-        'raw',
-        '-echo',
-        '-echoe',
-        '-echok',
-      ]);
-      
-      if (sttyResult.exitCode != 0) {
-        _logState?.warning('⚠️ stty 配置警告: ${sttyResult.stderr}');
-      } else {
-        _logState?.success('✅ 串口参数配置成功');
+      _logState?.info('⏳ 等待设备文件创建...');
+      for (int i = 0; i < 50; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (await file.exists()) {
+          deviceReady = true;
+          _logState?.success('✅ 设备文件已创建: $devicePath');
+          break;
+        }
       }
       
-      // 检查设备文件是否存在
-      final file = File(devicePath);
-      if (!await file.exists()) {
-        _logState?.error('❌ 设备文件不存在: $devicePath');
-        _logState?.error('   rfcomm connect 可能失败，请检查设备是否在线');
+      if (!deviceReady) {
+        _logState?.error('❌ 设备文件创建超时（5秒）');
+        _logState?.error('   可能原因: 设备未响应或通道号不正确');
         await _unbindRfcomm();
         return false;
       }
       
-      _logState?.success('✅ 设备文件已创建: $devicePath');
+      // 配置串口参数
+      await Process.run('stty', [
+        '-F', devicePath,
+        '115200', 'raw', '-echo', '-echoe', '-echok',
+      ]).catchError((_) => null);
       
-      // rfcomm connect 已在后台运行，直接打开设备文件
+      // 打开设备文件用于写入
       try {
-        // 打开设备文件用于写入
         _deviceFile = await file.open(mode: FileMode.writeOnly);
-        _logState?.success('✅ 设备文件已打开（写入）');
+        _logState?.success('✅ 设备文件已打开');
         
-        // 启动读取线程（使用 cat 命令）
+        // 启动读取线程
         _startReadLoop(devicePath);
-        
-        // 等待读取循环启动
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
         _logState?.error('❌ 打开设备文件失败: $e');
-        _logState?.error('   错误详情: ${e.toString()}');
         await _unbindRfcomm();
         return false;
       }
@@ -410,6 +389,12 @@ EOF
       _currentDeviceAddress = deviceAddress;
       _currentDeviceName = deviceName;
       _isConnected = true;
+      
+      // 重置序列号和缓冲区
+      _sequenceNumber = 0;
+      _buffer = Uint8List(0);
+      _packetCount = 0;
+      _pendingResponses.clear();
       
       _logState?.success('✅ SPP 连接成功');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -464,6 +449,11 @@ EOF
   /// 解除 RFCOMM 绑定
   Future<void> _unbindRfcomm() async {
     try {
+      // 杀掉所有 rfcomm 进程
+      await Process.run('pkill', ['-f', 'rfcomm connect']).catchError((_) => null);
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // 释放设备
       await Process.run('rfcomm', ['release', '0']);
     } catch (e) {
       _logState?.debug('解除 RFCOMM 绑定时出错: $e');
@@ -764,19 +754,29 @@ EOF
         'result': parsedGTP['result'],
       };
       
-      // 完成最早的待处理响应
-      if (_pendingResponses.isNotEmpty) {
-        final firstKey = _pendingResponses.keys.first;
-        final completer = _pendingResponses[firstKey];
-        _logState?.info('✅ 响应数据包 #$_packetCount 匹配序列号: $firstKey');
+      // 根据响应的 SN 匹配对应的请求
+      final responseSN = parsedGTP['sn'] as int?;
+      if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
+        final completer = _pendingResponses[responseSN];
+        _logState?.info('✅ 响应数据包 #$_packetCount 匹配序列号: $responseSN');
         if (!completer!.isCompleted) {
           completer.complete(response);
-          _logState?.debug('   Completer 已完成');
+          _pendingResponses.remove(responseSN);
+          _logState?.debug('   Completer 已完成并移除');
         } else {
           _logState?.warning('   ⚠️ Completer 已经完成');
         }
+      } else if (_pendingResponses.isNotEmpty) {
+        // 如果 SN 不匹配，尝试匹配第一个（兼容旧逻辑）
+        final firstKey = _pendingResponses.keys.first;
+        final completer = _pendingResponses[firstKey];
+        _logState?.warning('⚠️ 响应 SN ($responseSN) 不匹配，使用第一个待处理请求: $firstKey');
+        if (!completer!.isCompleted) {
+          completer.complete(response);
+          _pendingResponses.remove(firstKey);
+        }
       } else {
-        _logState?.warning('⚠️ 收到数据包但没有待处理的响应');
+        _logState?.warning('⚠️ 收到数据包但没有待处理的响应 (SN: $responseSN)');
       }
     } catch (e) {
       _logState?.error('❌ 数据包处理异常: $e');
