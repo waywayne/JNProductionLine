@@ -33,10 +33,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     _stepResults.clear();
     _stepResults.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 2, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '光敏传感器测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: 'IMU传感器测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '光敏传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: 'IMU传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -268,25 +270,35 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
             success = await _testBluetoothConnection(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
             break;
-          case 1: // WIFI连接热点并获取IP
-            logState.info('步骤2: WIFI连接热点并获取IP');
+          case 1: // 产测开始
+            logState.info('步骤2: 产测开始');
+            success = await _testProductionStart(state, logState);
+            message = success ? '产测开始命令发送成功' : '产测开始命令失败';
+            break;
+          case 2: // WIFI连接热点并获取IP
+            logState.info('步骤3: WIFI连接热点并获取IP');
             success = await _testWiFiConnectionWithIP(state, logState);
             message = success ? 'WiFi连接成功，IP: $_deviceIP' : 'WiFi连接失败';
             break;
-          case 2: // 光敏传感器测试
-            logState.info('步骤3: 光敏传感器测试');
+          case 3: // 光敏传感器测试
+            logState.info('步骤4: 光敏传感器测试');
             success = await _testLightSensor(state, logState);
             message = success ? '获取到光敏值' : '光敏传感器测试失败';
             break;
-          case 3: // IMU传感器测试
-            logState.info('步骤4: IMU传感器测试');
+          case 4: // IMU传感器测试
+            logState.info('步骤5: IMU传感器测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
             break;
-          case 4: // 摄像头棋盘格测试
-            logState.info('步骤5: 摄像头棋盘格测试');
+          case 5: // 摄像头棋盘格测试
+            logState.info('步骤6: 摄像头棋盘格测试');
             success = await _testCameraChessboard(state, logState);
             message = success ? '摄像头测试通过' : '摄像头测试失败';
+            break;
+          case 6: // 产测结束
+            logState.info('步骤7: 产测结束');
+            success = await _testProductionEnd(state, logState);
+            message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
         }
       } catch (e) {
@@ -361,7 +373,52 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     }
   }
 
-  /// 步骤2: WIFI连接热点并获取IP
+  /// 步骤2: 产测开始
+  Future<bool> _testProductionStart(TestState state, LogState logState) async {
+    try {
+      logState.info('🚀 发送产测开始命令...');
+      
+      final command = ProductionTestCommands.createStartTestCommand();
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      logState.info('📤 发送: [$commandHex] (${command.length} bytes)');
+      
+      // 重试机制：最多尝试3次
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+          
+          if (response != null && !response.containsKey('error')) {
+            logState.success('✅ 产测开始命令发送成功');
+            return true;
+          } else {
+            final errorMsg = response?['error'] ?? '未知错误';
+            logState.warning('⚠️ 产测开始命令失败: $errorMsg');
+          }
+        } catch (e) {
+          logState.warning('⚠️ 发送命令异常: $e');
+        }
+      }
+      
+      // 3次重试后仍失败
+      logState.error('❌ 3次重试后产测开始命令仍失败');
+      return false;
+    } catch (e) {
+      logState.error('产测开始异常: $e');
+      return false;
+    }
+  }
+
+  /// 步骤3: WIFI连接热点并获取IP
   Future<bool> _testWiFiConnectionWithIP(TestState state, LogState logState) async {
     try {
       logState.info('📶 开始连接WiFi热点...');
@@ -447,18 +504,56 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     }
   }
 
-  /// 步骤3: 光敏传感器测试
+  /// 步骤4: 光敏传感器测试
   Future<bool> _testLightSensor(TestState state, LogState logState) async {
     try {
       logState.info('☀️ 开始光敏传感器测试...');
       
       final command = ProductionTestCommands.createLightSensorCommand();
-      await state.runManualTest('光敏传感器测试', command);
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      logState.info('📤 发送: [$commandHex] (${command.length} bytes)');
       
-      await Future.delayed(const Duration(seconds: 2));
+      // 重试机制：最多尝试3次
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+          
+          if (response != null && !response.containsKey('error')) {
+            if (response.containsKey('payload') && response['payload'] != null) {
+              final payload = response['payload'] as Uint8List;
+              final lightValue = ProductionTestCommands.parseLightSensorResponse(payload);
+              
+              if (lightValue != null) {
+                logState.success('✅ 光敏传感器测试通过，光敏值: $lightValue');
+                return true;
+              } else {
+                logState.warning('⚠️ 光敏值解析失败');
+              }
+            } else {
+              logState.warning('⚠️ 响应中无payload数据');
+            }
+          } else {
+            final errorMsg = response?['error'] ?? '未知错误';
+            logState.warning('⚠️ 命令响应失败: $errorMsg');
+          }
+        } catch (e) {
+          logState.warning('⚠️ 发送命令异常: $e');
+        }
+      }
       
-      logState.info('✅ 光敏传感器测试通过');
-      return true;
+      // 3次重试后仍失败
+      logState.error('❌ 3次重试后光敏传感器测试仍失败');
+      return false;
     } catch (e) {
       logState.error('光敏传感器测试失败: $e');
       return false;
@@ -567,6 +662,60 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       return true;
     } catch (e) {
       logState.error('摄像头测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 步骤7: 产测结束
+  Future<bool> _testProductionEnd(TestState state, LogState logState) async {
+    try {
+      logState.info('🏁 发送产测结束命令...');
+      
+      // 判断所有测试是否通过（除了最后一步产测结束）
+      final passedCount = _stepResults.take(_stepResults.length - 1)
+          .where((s) => s.status == TestStepStatus.passed).length;
+      final totalCount = _stepResults.length - 1;
+      final allPassed = passedCount == totalCount;
+      
+      // 0x00=产测通过, 0x01=产测失败
+      final opt = allPassed ? 0x00 : 0x01;
+      final command = ProductionTestCommands.createEndTestCommand(opt: opt);
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      logState.info('📤 发送: [$commandHex] (${command.length} bytes)');
+      logState.info('   测试结果: ${allPassed ? "通过" : "失败"} ($passedCount/$totalCount)');
+      
+      // 重试机制：最多尝试3次
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+          
+          if (response != null && !response.containsKey('error')) {
+            logState.success('✅ 产测结束命令发送成功');
+            return true;
+          } else {
+            final errorMsg = response?['error'] ?? '未知错误';
+            logState.warning('⚠️ 产测结束命令失败: $errorMsg');
+          }
+        } catch (e) {
+          logState.warning('⚠️ 发送命令异常: $e');
+        }
+      }
+      
+      // 3次重试后仍失败
+      logState.error('❌ 3次重试后产测结束命令仍失败');
+      return false;
+    } catch (e) {
+      logState.error('产测结束异常: $e');
       return false;
     }
   }

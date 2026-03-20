@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import '../services/production_test_commands.dart';
+import '../services/product_sn_api.dart';
 import 'led_test_dialog.dart';
 import 'linux_bluetooth_scan_dialog.dart';
+import 'sn_input_dialog.dart';
 
 /// Manual test section with individual buttons for each test
 class ManualTestSection extends StatelessWidget {
@@ -284,33 +286,129 @@ class ManualTestSection extends StatelessWidget {
     return SizedBox(
       width: 140,
       height: 80,
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: buttonColor,
-          foregroundColor: textColor,
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+      child: Consumer<TestState>(
+        builder: (context, state, _) {
+          return ElevatedButton(
+            onPressed: () => _handleTestButtonPress(context, state, label, onPressed),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: buttonColor,
+              foregroundColor: textColor,
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(12),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 28),
+                const SizedBox(height: 8),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 11),
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// 处理测试按钮点击，先检查SPP连接
+  Future<void> _handleTestButtonPress(
+    BuildContext context,
+    TestState state,
+    String testName,
+    VoidCallback onPressed,
+  ) async {
+    // 检查是否已连接Linux蓝牙SPP
+    if (!state.isLinuxBluetoothConnected) {
+      // 未连接，弹窗提示并输入SN
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.bluetooth_disabled, color: Colors.orange),
+              SizedBox(width: 12),
+              Text('蓝牙未连接'),
+            ],
           ),
-          padding: const EdgeInsets.all(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 28),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 11),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+          content: const Text('执行手动测试前需要先连接蓝牙SPP。\n\n请输入SN码以获取设备信息并连接蓝牙。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('输入SN'),
             ),
           ],
         ),
-      ),
-    );
+      );
+
+      if (confirmed != true) return;
+
+      // 显示SN输入对话框
+      final productInfo = await showDialog<ProductSNInfo>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const SNInputDialog(),
+      );
+
+      if (productInfo == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ 未获取到设备信息，无法执行测试'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // 连接蓝牙SPP
+      final bluetoothAddress = productInfo.bluetoothAddress;
+      if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ 设备信息中无蓝牙地址'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      final connected = await state.testLinuxBluetooth(
+        deviceAddress: bluetoothAddress,
+        uuid: '7033',
+      );
+
+      if (!connected) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ 蓝牙连接失败'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    // SPP已连接，执行测试
+    onPressed();
   }
 
   Widget _buildLEDTestButton(
