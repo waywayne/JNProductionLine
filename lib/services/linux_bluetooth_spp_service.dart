@@ -429,10 +429,14 @@ hciconfig hci0 up 2>/dev/null || true
           // 不需要启动 connect 进程，直接使用设备文件
           _bluetoothProcess = null;  // bind 模式不需要进程
           
-          // 跳过后续的 connect 流程
+          // bind 后直接打开设备文件（打开操作会触发 RFCOMM 连接）
           try {
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnly);
-            _logState?.success('✅ 设备已连接 (bind 模式)');
+            // 打开设备文件用于读写（这会触发实际的 RFCOMM 连接）
+            _deviceFile = await deviceFile.open(mode: FileMode.write);
+            _logState?.success('✅ 设备文件已打开，RFCOMM 连接已建立 (bind 模式)');
+            
+            // 等待连接稳定
+            await Future.delayed(const Duration(milliseconds: 800));
             
             _startReadLoop(devicePath);
             await Future.delayed(const Duration(milliseconds: 200));
@@ -690,9 +694,7 @@ hciconfig hci0 up 2>/dev/null || true
       // 直接写入设备文件
       await _deviceFile!.writeFrom(data);
       
-      // 强制刷新到磁盘，确保数据真正发送
-      await _deviceFile!.flush();
-      
+      // RFCOMM 设备不支持 flush()，数据会自动发送
       // 添加短暂延迟，确保数据完全发送到设备
       await Future.delayed(const Duration(milliseconds: 50));
       
