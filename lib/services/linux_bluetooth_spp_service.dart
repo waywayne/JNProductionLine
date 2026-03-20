@@ -13,6 +13,7 @@ class LinuxBluetoothSppService {
   Process? _bluetoothProcess;
   Socket? _socket;
   StreamSubscription? _subscription;
+  RandomAccessFile? _deviceFile;
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   
   String? _currentDeviceAddress;
@@ -349,24 +350,33 @@ EOF
       
       _logState?.info('⏳ 连接到设备: $devicePath');
       
-      // 使用 socat 建立连接
-      // 参数说明:
-      // - : stdin/stdout
-      // FILE:$devicePath : 设备文件
-      // b115200 : 波特率 115200
-      // raw : 原始模式，不处理特殊字符
-      // echo=0 : 禁用回显
-      // nonblock=1 : 非阻塞模式
-      // sync : 同步写入，确保数据立即发送
-      _bluetoothProcess = await Process.start('socat', [
-        '-d',  // 调试信息
-        '-d',  // 更多调试信息
-        '-',
-        'FILE:$devicePath,b115200,raw,echo=0,nonblock=1',
+      // 配置串口参数
+      _logState?.info('⏳ 配置串口参数...');
+      final sttyResult = await Process.run('stty', [
+        '-F', devicePath,
+        '115200',
+        'raw',
+        '-echo',
+        '-echoe',
+        '-echok',
       ]);
       
-      if (_bluetoothProcess == null) {
-        _logState?.error('❌ 启动连接进程失败');
+      if (sttyResult.exitCode != 0) {
+        _logState?.warning('⚠️ stty 配置警告: ${sttyResult.stderr}');
+      } else {
+        _logState?.success('✅ 串口参数配置成功');
+      }
+      
+      // 直接打开设备文件进行读写
+      try {
+        final file = File(devicePath);
+        _deviceFile = await file.open(mode: FileMode.append);
+        _logState?.success('✅ 设备文件已打开');
+        
+        // 启动读取线程
+        _startReadLoop(devicePath);
+      } catch (e) {
+        _logState?.error('❌ 打开设备文件失败: $e');
         await _unbindRfcomm();
         return false;
       }
@@ -387,38 +397,42 @@ EOF
       _logState?.info('   设备路径: $devicePath');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // 监听数据
-      _subscription = _bluetoothProcess!.stdout.listen(
-        (data) => _onDataReceived(Uint8List.fromList(data)),
-        onError: (error) {
-          _logState?.error('❌ 数据接收错误: $error');
-          disconnect();
-        },
-        onDone: () {
-          _logState?.warning('⚠️ 连接已断开');
-          disconnect();
-        },
-      );
-      
-      // 监听 socat 的调试输出（stderr）
-      _bluetoothProcess!.stderr.listen(
-        (data) {
-          final debugMsg = String.fromCharCodes(data).trim();
-          if (debugMsg.isNotEmpty) {
-            _logState?.debug('[socat] $debugMsg');
-          }
-        },
-        onError: (error) {
-          _logState?.debug('[socat] stderr error: $error');
-        },
-      );
-      
       return true;
     } catch (e) {
       _logState?.error('❌ 连接失败: $e');
       await _unbindRfcomm();
       return false;
     }
+  }
+  
+  /// 启动读取循环
+  void _startReadLoop(String devicePath) {
+    _logState?.info('🔄 启动数据读取循环...');
+    
+    // 使用 cat 命令持续读取数据
+    Process.start('cat', [devicePath]).then((process) {
+      _bluetoothProcess = process;
+      
+      _subscription = process.stdout.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            _onDataReceived(Uint8List.fromList(data));
+          }
+        },
+        onError: (error) {
+          _logState?.error('❌ 数据接收错误: $error');
+          disconnect();
+        },
+        onDone: () {
+          _logState?.warning('⚠️ 读取循环结束');
+          disconnect();
+        },
+      );
+      
+      _logState?.success('✅ 数据读取循环已启动');
+    }).catchError((e) {
+      _logState?.error('❌ 启动读取循环失败: $e');
+    });
   }
   
   /// 解除 RFCOMM 绑定
@@ -433,7 +447,7 @@ EOF
   /// 断开连接
   Future<void> disconnect() async {
     try {
-      if (_isConnected || _bluetoothProcess != null) {
+      if (_isConnected || _bluetoothProcess != null || _deviceFile != null) {
         _logState?.info('🔌 断开 SPP 连接...');
         
         await _subscription?.cancel();
@@ -441,6 +455,15 @@ EOF
         
         _bluetoothProcess?.kill();
         _bluetoothProcess = null;
+        
+        // 关闭设备文件
+        try {
+          await _deviceFile?.close();
+          _deviceFile = null;
+          _logState?.debug('   设备文件已关闭');
+        } catch (e) {
+          _logState?.debug('   关闭设备文件时出错: $e');
+        }
         
         await _unbindRfcomm();
         
@@ -469,7 +492,7 @@ EOF
   
   /// 发送数据
   Future<bool> sendData(Uint8List data) async {
-    if (!_isConnected || _bluetoothProcess == null) {
+    if (!_isConnected || _deviceFile == null) {
       _logState?.error('❌ 未连接，无法发送数据');
       return false;
     }
@@ -483,21 +506,29 @@ EOF
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 发送数据
-      _bluetoothProcess!.stdin.add(data);
+      // 直接写入设备文件
+      await _deviceFile!.writeFrom(data);
       
-      // 强制刷新缓冲区，确保数据真正发送
-      await _bluetoothProcess!.stdin.flush();
+      // 强制刷新到磁盘，确保数据真正发送
+      await _deviceFile!.flush();
       
       // 添加短暂延迟，确保数据完全发送到设备
       await Future.delayed(const Duration(milliseconds: 50));
       
-      _logState?.success('✅ 数据已发送到 stdin');
+      _logState?.success('✅ 数据已写入设备文件');
       
       return true;
     } catch (e) {
       _logState?.error('❌ 发送数据失败: $e');
       _logState?.error('   错误详情: ${e.toString()}');
+      
+      // 如果写入失败，可能是连接已断开
+      if (e.toString().contains('Bad file descriptor') || 
+          e.toString().contains('Input/output error')) {
+        _logState?.error('   设备连接可能已断开，尝试重新连接');
+        await disconnect();
+      }
+      
       return false;
     }
   }
