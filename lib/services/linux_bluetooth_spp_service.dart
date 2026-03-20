@@ -180,6 +180,108 @@ EOF
     return uuid.toUpperCase();
   }
   
+  /// 配对蓝牙设备
+  Future<bool> pairDevice(String deviceAddress) async {
+    try {
+      _logState?.info('🔐 检查设备配对状态...');
+      
+      // 检查是否已配对
+      final checkPaired = await Process.run('bash', ['-c', 'bluetoothctl paired-devices | grep -i $deviceAddress']);
+      if (checkPaired.exitCode == 0) {
+        _logState?.success('✅ 设备已配对');
+        return true;
+      }
+      
+      _logState?.info('⏳ 开始配对设备...');
+      
+      // 使用 bluetoothctl 配对设备
+      final pairScript = '''
+bluetoothctl << EOF
+power on
+agent NoInputNoOutput
+default-agent
+pair $deviceAddress
+yes
+EOF
+''';
+      
+      final pairResult = await Process.run('bash', ['-c', pairScript]);
+      
+      // 等待配对完成
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // 再次检查配对状态
+      final checkAgain = await Process.run('bash', ['-c', 'bluetoothctl paired-devices | grep -i $deviceAddress']);
+      if (checkAgain.exitCode == 0) {
+        _logState?.success('✅ 设备配对成功');
+        return true;
+      }
+      
+      _logState?.warning('⚠️ 配对可能失败，尝试继续连接...');
+      return true; // 即使配对失败也尝试继续
+    } catch (e) {
+      _logState?.error('❌ 配对异常: $e');
+      return false;
+    }
+  }
+  
+  /// 信任蓝牙设备
+  Future<bool> trustDevice(String deviceAddress) async {
+    try {
+      _logState?.info('🔓 设置设备为信任...');
+      
+      final trustScript = '''
+bluetoothctl << EOF
+trust $deviceAddress
+EOF
+''';
+      
+      final trustResult = await Process.run('bash', ['-c', trustScript]);
+      
+      if (trustResult.exitCode == 0 || trustResult.stdout.toString().contains('trust succeeded')) {
+        _logState?.success('✅ 设备已设为信任');
+        return true;
+      }
+      
+      _logState?.warning('⚠️ 设置信任可能失败，尝试继续连接...');
+      return true; // 即使失败也尝试继续
+    } catch (e) {
+      _logState?.error('❌ 设置信任异常: $e');
+      return false;
+    }
+  }
+  
+  /// 连接蓝牙设备（基础连接）
+  Future<bool> connectBluetoothDevice(String deviceAddress) async {
+    try {
+      _logState?.info('🔗 建立蓝牙基础连接...');
+      
+      final connectScript = '''
+bluetoothctl << EOF
+connect $deviceAddress
+EOF
+''';
+      
+      final connectResult = await Process.run('bash', ['-c', connectScript]);
+      
+      // 等待连接建立
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // 检查连接状态
+      final infoResult = await Process.run('bash', ['-c', 'bluetoothctl info $deviceAddress']);
+      if (infoResult.stdout.toString().contains('Connected: yes')) {
+        _logState?.success('✅ 蓝牙基础连接成功');
+        return true;
+      }
+      
+      _logState?.warning('⚠️ 蓝牙连接状态未知，尝试继续...');
+      return true; // 即使状态未知也尝试继续
+    } catch (e) {
+      _logState?.error('❌ 蓝牙连接异常: $e');
+      return false;
+    }
+  }
+  
   /// 通过 SDP 查询设备的服务和 RFCOMM 通道
   Future<int?> discoverServiceChannel(String deviceAddress, {String? uuid}) async {
     try {
@@ -308,6 +410,33 @@ EOF
       
       // 断开现有连接
       await disconnect();
+      
+      // ========== 关键步骤：配对和信任设备 ==========
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('📱 准备设备连接前置步骤...');
+      
+      // 1. 配对设备
+      final paired = await pairDevice(deviceAddress);
+      if (!paired) {
+        _logState?.error('❌ 设备配对失败');
+        // 不直接返回，尝试继续
+      }
+      
+      // 2. 信任设备
+      final trusted = await trustDevice(deviceAddress);
+      if (!trusted) {
+        _logState?.error('❌ 设置信任失败');
+        // 不直接返回，尝试继续
+      }
+      
+      // 3. 建立蓝牙基础连接
+      final btConnected = await connectBluetoothDevice(deviceAddress);
+      if (!btConnected) {
+        _logState?.error('❌ 蓝牙基础连接失败');
+        // 不直接返回，尝试继续
+      }
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // 如果未指定通道，则通过 SDP 查询
       int targetChannel;
