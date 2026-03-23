@@ -494,7 +494,6 @@ hciconfig hci0 up 2>/dev/null || true
         
         // 打开写入句柄
         _logState?.info('   打开写入句柄...');
-        final deviceFile = File(devicePath);
         _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
             .timeout(const Duration(seconds: 5), onTimeout: () {
           throw TimeoutException('打开写入句柄超时');
