@@ -431,16 +431,19 @@ hciconfig hci0 up 2>/dev/null || true
           
           // bind 后直接打开设备文件（打开操作会触发 RFCOMM 连接）
           try {
-            // 1. 先打开写入句柄（触发 RFCOMM 连接）
-            final deviceFile = File(devicePath);
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
-            _logState?.success('✅ 写入句柄已打开');
-            
-            // 2. 然后启动读取循环（cat 只读取，不会冲突）
+            // 1. 先启动 cat 读取循环（cat 会触发 RFCOMM 连接）
             await _startReadLoop(devicePath);
             
-            // 3. 等待连接稳定
-            await Future.delayed(const Duration(milliseconds: 500));
+            // 2. 等待连接建立
+            await Future.delayed(const Duration(milliseconds: 1000));
+            
+            // 3. 打开写入句柄（连接已建立，不会阻塞）
+            final deviceFile = File(devicePath);
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+                .timeout(const Duration(seconds: 3), onTimeout: () {
+              throw TimeoutException('打开写入句柄超时');
+            });
+            _logState?.success('✅ 写入句柄已打开');
             
             _logState?.success('✅ RFCOMM 连接已建立 (bind 模式)');
             
