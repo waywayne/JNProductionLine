@@ -693,18 +693,23 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 根据连接模式选择写入方式
-      if (_deviceFile != null) {
-        // connect 模式：使用文件句柄写入
-        await _deviceFile!.writeFrom(data);
-      } else {
-        // bind 模式：使用 shell 命令写入（避免与 cat 冲突）
-        final devicePath = '/dev/rfcomm0';
-        final hexData = data.map((b) => '\\x${b.toRadixString(16).padLeft(2, '0')}').join('');
-        final result = await Process.run('sh', ['-c', 'printf "$hexData" > $devicePath']);
-        if (result.exitCode != 0) {
-          throw Exception('Shell write failed: ${result.stderr}');
+      // bind 模式：临时打开设备文件写入（不保持句柄）
+      final devicePath = '/dev/rfcomm0';
+      final deviceFile = File(devicePath);
+      
+      // 临时打开文件写入
+      RandomAccessFile? tempFile;
+      try {
+        tempFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
+        await tempFile.writeFrom(data);
+        await tempFile.close();
+      } catch (e) {
+        if (tempFile != null) {
+          try {
+            await tempFile.close();
+          } catch (_) {}
         }
+        throw e;
       }
       
       // 添加短暂延迟，确保数据完全发送到设备
