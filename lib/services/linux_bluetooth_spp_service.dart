@@ -728,10 +728,11 @@ hciconfig hci0 up 2>/dev/null || true
     }
   }
   
-  /// 发送命令并等待响应
+  /// 发送命令并等待响应（带重试机制）
   Future<Map<String, dynamic>?> sendCommandAndWaitResponse(
     Uint8List command, {
-    Duration timeout = TestConfig.defaultTimeout,
+    Duration timeout = const Duration(seconds: 10),  // 增加默认超时到10秒
+    int maxRetries = 3,  // 最多重试3次
     int? moduleId,
     int? messageId,
   }) async {
@@ -740,55 +741,82 @@ hciconfig hci0 up 2>/dev/null || true
       return {'error': 'Not connected'};
     }
     
-    try {
-      final seqNum = _sequenceNumber++;
-      final completer = Completer<Map<String, dynamic>?>();
-      _pendingResponses[seqNum] = completer;
-      
-      _logState?.info('🔄 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒)');
-      _logState?.debug('   Payload 长度: ${command.length} 字节');
-      
-      // 构建 GTP 数据包
-      final gtpPacket = GTPProtocol.buildGTPPacket(
-        command,
-        moduleId: moduleId,
-        messageId: messageId,
-        sequenceNumber: seqNum,
-      );
-      
-      // 打印 payload (CMD + OPT + 数据)
-      final cmdHex = command.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-      _logState?.info('📤 发送 Payload: [$cmdHex] (${command.length} 字节)');
-      
-      // 打印完整的 GTP 数据包
-      final fullPacketHex = gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-      _logState?.info('📦 完整数据包: [$fullPacketHex]');
-      _logState?.info('   总长度: ${gtpPacket.length} 字节');
-      
-      // 发送完整的 GTP 数据包
-      final success = await sendData(gtpPacket);
-      if (!success) {
-        _pendingResponses.remove(seqNum);
-        _logState?.error('❌ 命令发送失败');
-        return {'error': 'Failed to send command'};
+    // 重试逻辑
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        _logState?.warning('⚠️ 第 $attempt 次重试...');
+        await Future.delayed(const Duration(milliseconds: 500));
       }
       
-      // 等待响应
-      final response = await completer.future.timeout(
-        timeout,
-        onTimeout: () {
+      try {
+        final seqNum = _sequenceNumber++;
+        final completer = Completer<Map<String, dynamic>?>();
+        _pendingResponses[seqNum] = completer;
+        
+        _logState?.info('🔄 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒, 尝试: ${attempt + 1}/${maxRetries + 1})');
+        _logState?.debug('   Payload 长度: ${command.length} 字节');
+        
+        // 构建 GTP 数据包
+        final gtpPacket = GTPProtocol.buildGTPPacket(
+          command,
+          moduleId: moduleId,
+          messageId: messageId,
+          sequenceNumber: seqNum,
+        );
+        
+        // 打印 payload (CMD + OPT + 数据)
+        final cmdHex = command.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+        _logState?.info('📤 发送 Payload: [$cmdHex] (${command.length} 字节)');
+        
+        // 打印完整的 GTP 数据包
+        final fullPacketHex = gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+        _logState?.info('📦 完整数据包: [$fullPacketHex]');
+        _logState?.info('   总长度: ${gtpPacket.length} 字节');
+        
+        // 发送完整的 GTP 数据包
+        final success = await sendData(gtpPacket);
+        if (!success) {
           _pendingResponses.remove(seqNum);
-          _logState?.warning('⚠️ 命令超时 (${timeout.inSeconds}秒)');
-          return {'error': 'Timeout'};
-        },
-      );
-      
-      _pendingResponses.remove(seqNum);
-      return response;
-    } catch (e) {
-      _logState?.error('❌ 命令执行异常: $e');
-      return {'error': e.toString()};
+          _logState?.error('❌ 命令发送失败');
+          continue;  // 重试
+        }
+        
+        // 等待响应
+        final response = await completer.future.timeout(
+          timeout,
+          onTimeout: () {
+            _pendingResponses.remove(seqNum);
+            _logState?.warning('⚠️ 命令超时 (${timeout.inSeconds}秒)');
+            return {'error': 'Timeout'};
+          },
+        );
+        
+        _pendingResponses.remove(seqNum);
+        
+        // 如果响应成功（不是超时或错误），返回结果
+        if (response != null && !response.containsKey('error')) {
+          _logState?.success('✅ 命令响应成功 (尝试: ${attempt + 1})');
+          return response;
+        }
+        
+        // 如果是最后一次尝试，返回错误
+        if (attempt == maxRetries) {
+          _logState?.error('❌ 所有重试均失败');
+          return response;
+        }
+        
+        // 否则继续重试
+        _logState?.warning('⚠️ 响应失败，准备重试...');
+        
+      } catch (e) {
+        _logState?.error('❌ 命令执行异常: $e');
+        if (attempt == maxRetries) {
+          return {'error': e.toString()};
+        }
+      }
     }
+    
+    return {'error': 'Max retries exceeded'};
   }
   
   /// 处理接收到的数据
