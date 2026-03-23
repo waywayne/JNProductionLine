@@ -463,31 +463,8 @@ hciconfig hci0 up 2>/dev/null || true
         if (await deviceFile.exists()) {
           _logState?.success('   ✅ 设备文件已创建: $devicePath');
           
-          // 主动建立蓝牙连接
-          _logState?.info('   主动建立蓝牙连接...');
-          final connectScript = '''
-(
-  echo "connect $deviceAddress"
-  sleep 2
-) | bluetoothctl
-''';
-          
-          final connectResult = await Process.run('bash', ['-c', connectScript]);
-          _logState?.debug('   连接输出: ${connectResult.stdout}');
-          
-          // 验证连接状态
-          await Future.delayed(const Duration(milliseconds: 500));
-          final statusResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
-          final statusOutput = statusResult.stdout.toString();
-          
-          if (statusOutput.contains('Connected: yes')) {
-            _logState?.success('   ✅ 蓝牙连接已建立');
-          } else {
-            _logState?.warning('   ⚠️ 蓝牙连接状态未确认，继续尝试');
-          }
-          
-          // 启动 cat 读取循环
-          _logState?.info('   启动读取进程...');
+          // 启动 cat 读取循环（触发 RFCOMM 连接）
+          _logState?.info('   启动读取进程（触发 RFCOMM 连接）...');
           await _startReadLoop(devicePath);
           
           // 连接成功（不打开写入句柄，等发送数据时再打开）
@@ -684,6 +661,7 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('   准备写入 ${data.length} 字节...');
       await _deviceFile!.writeFrom(data);
       _logState?.debug('   数据已写入');
+      
       
       // 添加短暂延迟，确保数据完全发送到设备
       await Future.delayed(const Duration(milliseconds: 50));
