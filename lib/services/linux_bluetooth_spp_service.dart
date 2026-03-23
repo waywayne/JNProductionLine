@@ -432,10 +432,10 @@ hciconfig hci0 up 2>/dev/null || true
           // bind 后直接打开设备文件（打开操作会触发 RFCOMM 连接）
           try {
             // 先启动读取循环（cat 会触发 RFCOMM 连接并读取所有数据）
-            _startReadLoop(devicePath);
+            await _startReadLoop(devicePath);
             
-            // 等待连接建立和读取循环启动
-            await Future.delayed(const Duration(milliseconds: 1000));
+            // 等待连接稳定
+            await Future.delayed(const Duration(milliseconds: 500));
             
             // 不打开设备文件，使用 shell 命令写入（避免与 cat 冲突）
             _deviceFile = null;  // bind 模式使用 shell 写入
@@ -588,12 +588,20 @@ hciconfig hci0 up 2>/dev/null || true
   }
   
   /// 启动读取循环
-  void _startReadLoop(String devicePath) {
+  Future<void> _startReadLoop(String devicePath) async {
     _logState?.info('🔄 启动数据读取循环...');
     
-    // 使用 cat 命令持续读取数据
-    Process.start('cat', [devicePath]).then((process) {
+    try {
+      // 使用 cat 命令持续读取数据
+      final process = await Process.start('cat', [devicePath]);
       _bluetoothProcess = process;
+      
+      _logState?.debug('   cat 进程已启动 (PID: ${process.pid})');
+      
+      // 监听进程退出
+      process.exitCode.then((code) {
+        _logState?.warning('⚠️ cat 进程已退出 (退出码: $code)');
+      });
       
       _subscription = process.stdout.listen(
         (data) {
@@ -611,10 +619,19 @@ hciconfig hci0 up 2>/dev/null || true
         },
       );
       
+      // 监听 stderr
+      process.stderr.listen((data) {
+        final msg = String.fromCharCodes(data);
+        if (msg.trim().isNotEmpty) {
+          _logState?.error('❌ cat 错误: $msg');
+        }
+      });
+      
       _logState?.success('✅ 数据读取循环已启动');
-    }).catchError((e) {
+    } catch (e) {
       _logState?.error('❌ 启动读取循环失败: $e');
-    });
+      rethrow;
+    }
   }
   
   /// 解除 RFCOMM 绑定
@@ -697,13 +714,28 @@ hciconfig hci0 up 2>/dev/null || true
       final devicePath = '/dev/rfcomm0';
       final deviceFile = File(devicePath);
       
-      // 临时打开文件写入
+      _logState?.debug('   准备打开设备文件: $devicePath');
+      
+      // 临时打开文件写入（添加超时）
       RandomAccessFile? tempFile;
       try {
-        tempFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
-        await tempFile.writeFrom(data);
+        _logState?.debug('   正在打开文件...');
+        tempFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+            .timeout(const Duration(seconds: 2), onTimeout: () {
+          throw TimeoutException('打开设备文件超时');
+        });
+        
+        _logState?.debug('   文件已打开，准备写入 ${data.length} 字节...');
+        await tempFile.writeFrom(data)
+            .timeout(const Duration(seconds: 2), onTimeout: () {
+          throw TimeoutException('写入数据超时');
+        });
+        
+        _logState?.debug('   数据已写入，关闭文件...');
         await tempFile.close();
+        _logState?.debug('   文件已关闭');
       } catch (e) {
+        _logState?.error('   写入过程出错: $e');
         if (tempFile != null) {
           try {
             await tempFile.close();
