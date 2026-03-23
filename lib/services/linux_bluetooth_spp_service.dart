@@ -393,14 +393,31 @@ hciconfig hci0 up 2>/dev/null || true
       }
       
       _currentChannel = targetChannel;
-      final devicePath = '/dev/rfcomm0';
+      const devicePath = '/dev/rfcomm0';
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('⏳ 连接到 $deviceAddress 通道 $targetChannel...');
       
       // 清理旧连接
-      await Process.run('pkill', ['-f', 'rfcomm']).catchError((_) => null);
+      _logState?.debug('🧹 清理旧的 RFCOMM 连接...');
+      await Process.run('pkill', ['-9', 'cat']).catchError((_) => null);
+      await Process.run('pkill', ['-9', 'rfcomm']).catchError((_) => null);
+      await Future.delayed(const Duration(milliseconds: 200));
+      
       await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
+      await Future.delayed(const Duration(milliseconds: 200));
+      
+      // 删除可能存在的设备文件
+      final deviceFile = File(devicePath);
+      if (await deviceFile.exists()) {
+        try {
+          await deviceFile.delete();
+          _logState?.debug('   已删除旧设备文件');
+        } catch (e) {
+          _logState?.debug('   删除设备文件失败: $e');
+        }
+      }
+      
       await Future.delayed(const Duration(milliseconds: 300));
       
       // 建立 RFCOMM 连接
@@ -438,12 +455,33 @@ hciconfig hci0 up 2>/dev/null || true
             await Future.delayed(const Duration(milliseconds: 1000));
             
             // 3. 打开写入句柄（连接已建立，不会阻塞）
+            _logState?.debug('   准备打开写入句柄...');
             final deviceFile = File(devicePath);
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
-                .timeout(const Duration(seconds: 3), onTimeout: () {
-              throw TimeoutException('打开写入句柄超时');
-            });
-            _logState?.success('✅ 写入句柄已打开');
+            
+            // 检查设备文件状态
+            final stat = await Process.run('stat', [devicePath]);
+            _logState?.debug('   设备文件状态:\n${stat.stdout}');
+            
+            try {
+              _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+                  .timeout(const Duration(seconds: 3), onTimeout: () {
+                throw TimeoutException('打开写入句柄超时');
+              });
+              _logState?.success('✅ 写入句柄已打开');
+            } catch (e) {
+              _logState?.error('   打开写入句柄失败: $e');
+              
+              // 检查 cat 进程状态
+              if (_bluetoothProcess != null) {
+                final exitCode = await _bluetoothProcess!.exitCode
+                    .timeout(const Duration(milliseconds: 100), onTimeout: () => -1);
+                if (exitCode != -1) {
+                  _logState?.error('   cat 进程已退出，退出码: $exitCode');
+                }
+              }
+              
+              rethrow;
+            }
             
             _logState?.success('✅ RFCOMM 连接已建立 (bind 模式)');
             
