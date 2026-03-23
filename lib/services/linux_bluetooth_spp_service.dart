@@ -463,53 +463,59 @@ hciconfig hci0 up 2>/dev/null || true
         if (await deviceFile.exists()) {
           _logState?.success('   ✅ 设备文件已创建: $devicePath');
           
-          // 先启动 cat 读取循环（触发 RFCOMM 连接）
-          _logState?.info('   启动读取进程（触发连接）...');
+          // 主动建立蓝牙连接
+          _logState?.info('   主动建立蓝牙连接...');
+          final connectScript = '''
+(
+  echo "connect $deviceAddress"
+  sleep 2
+) | bluetoothctl
+''';
+          
+          final connectResult = await Process.run('bash', ['-c', connectScript]);
+          _logState?.debug('   连接输出: ${connectResult.stdout}');
+          
+          // 验证连接状态
+          await Future.delayed(const Duration(milliseconds: 500));
+          final statusResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
+          final statusOutput = statusResult.stdout.toString();
+          
+          if (statusOutput.contains('Connected: yes')) {
+            _logState?.success('   ✅ 蓝牙连接已建立');
+          } else {
+            _logState?.warning('   ⚠️ 蓝牙连接状态未确认，继续尝试');
+          }
+          
+          // 启动 cat 读取循环
+          _logState?.info('   启动读取进程...');
           await _startReadLoop(devicePath);
           
-          // 等待连接建立
-          _logState?.info('   等待 RFCOMM 连接建立...');
-          await Future.delayed(const Duration(milliseconds: 1500));
+          // 连接成功（不打开写入句柄，等发送数据时再打开）
+          _currentDeviceAddress = deviceAddress;
+          _currentDeviceName = deviceName;
+          _isConnected = true;
           
-          // 打开写入句柄
-          try {
-            _logState?.info('   打开写入句柄...');
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
-                .timeout(const Duration(seconds: 5), onTimeout: () {
-              throw TimeoutException('打开写入句柄超时');
-            });
-            _logState?.success('✅ 设备文件已打开，RFCOMM 连接已建立 (bind 模式)');
-            
-            // 连接成功
-            _currentDeviceAddress = deviceAddress;
-            _currentDeviceName = deviceName;
-            _isConnected = true;
-            
-            // 重置序列号和缓冲区
-            _sequenceNumber = 0;
-            _buffer = Uint8List(0);
-            _packetCount = 0;
-            _pendingResponses.clear();
-            
-            _logState?.success('✅ SPP 连接成功 (RFCOMM bind 模式)');
-            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            _logState?.info('📋 连接信息:');
-            _logState?.info('   设备地址: $deviceAddress');
-            if (deviceName != null) {
-              _logState?.info('   设备名称: $deviceName');
-            }
-            _logState?.info('   RFCOMM 通道: $targetChannel');
-            _logState?.info('   服务 UUID: ${uuid ?? _serviceUuid}');
-            _logState?.info('   设备路径: $devicePath');
-            _logState?.info('   连接模式: RFCOMM bind');
-            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            
-            return true;
-          } catch (e) {
-            _logState?.error('❌ 打开设备失败: $e');
-            await _unbindRfcomm();
-            return false;
+          // 重置序列号和缓冲区
+          _sequenceNumber = 0;
+          _buffer = Uint8List(0);
+          _packetCount = 0;
+          _pendingResponses.clear();
+          
+          _logState?.success('✅ RFCOMM 连接已建立 (bind 模式)');
+          _logState?.success('✅ SPP 连接成功');
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          _logState?.info('📋 连接信息:');
+          _logState?.info('   设备地址: $deviceAddress');
+          if (deviceName != null) {
+            _logState?.info('   设备名称: $deviceName');
           }
+          _logState?.info('   RFCOMM 通道: $targetChannel');
+          _logState?.info('   服务 UUID: ${uuid ?? _serviceUuid}');
+          _logState?.info('   设备路径: $devicePath');
+          _logState?.info('   连接模式: RFCOMM bind');
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+          
+          return true;
         } else {
           _logState?.error('❌ 设备文件未创建');
           await _unbindRfcomm();
@@ -655,9 +661,16 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 使用保持的写入句柄（类似串口的 _port!.write(data)）
+      // 如果写入句柄未打开，现在打开它
       if (_deviceFile == null) {
-        throw Exception('设备文件未打开');
+        _logState?.info('   首次发送，打开写入句柄...');
+        final devicePath = '/dev/rfcomm0';
+        final deviceFile = File(devicePath);
+        _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+            .timeout(const Duration(seconds: 5), onTimeout: () {
+          throw TimeoutException('打开写入句柄超时');
+        });
+        _logState?.success('   ✅ 写入句柄已打开');
       }
       
       _logState?.debug('   准备写入 ${data.length} 字节...');
