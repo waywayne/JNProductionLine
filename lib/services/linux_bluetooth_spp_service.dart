@@ -463,16 +463,22 @@ hciconfig hci0 up 2>/dev/null || true
         if (await deviceFile.exists()) {
           _logState?.success('   ✅ 设备文件已创建: $devicePath');
           
-          // 打开设备文件（触发 RFCOMM 连接）
+          // 先启动 cat 读取循环（触发 RFCOMM 连接）
+          _logState?.info('   启动读取进程（触发连接）...');
+          await _startReadLoop(devicePath);
+          
+          // 等待连接建立
+          _logState?.info('   等待 RFCOMM 连接建立...');
+          await Future.delayed(const Duration(milliseconds: 1500));
+          
+          // 打开写入句柄
           try {
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
+            _logState?.info('   打开写入句柄...');
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+                .timeout(const Duration(seconds: 5), onTimeout: () {
+              throw TimeoutException('打开写入句柄超时');
+            });
             _logState?.success('✅ 设备文件已打开，RFCOMM 连接已建立 (bind 模式)');
-            
-            // 等待连接稳定
-            await Future.delayed(const Duration(milliseconds: 800));
-            
-            // 启动数据读取循环
-            await _startReadLoop(devicePath);
             
             // 连接成功
             _currentDeviceAddress = deviceAddress;
