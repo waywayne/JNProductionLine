@@ -10,7 +10,8 @@ import 'gtp_protocol.dart';
 /// 基于 Linux 蓝牙栈实现的 SPP 协议通信服务
 /// 支持自定义 UUID 服务发现和 RFCOMM 通道绑定
 class LinuxBluetoothSppService {
-  Process? _bluetoothProcess;
+  Process? _bluetoothProcess;  // rfcomm connect 进程
+  Process? _catProcess;        // cat 读取进程
   Socket? _socket;
   StreamSubscription? _subscription;
   RandomAccessFile? _deviceFile;
@@ -439,213 +440,100 @@ hciconfig hci0 up 2>/dev/null || true
       
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 建立 RFCOMM 连接
+      // 建立 RFCOMM 连接（使用 rfcomm connect，最简单直接）
       _logState?.info('⏳ 建立 RFCOMM 连接...');
-      _logState?.info('   方法: rfcomm bind + 后台连接');
+      _logState?.info('   方法: rfcomm connect (后台模式)');
       
-      // 方法1: 先尝试 bind 方式（更稳定）
-      final bindResult = await Process.run('rfcomm', [
-        'bind',
-        '0',
-        deviceAddress,
-        targetChannel.toString(),
-      ]);
-      
-      if (bindResult.exitCode == 0) {
-        _logState?.info('   ✅ RFCOMM 绑定成功');
+      try {
+        // 使用 rfcomm connect（后台运行）
+        final process = await Process.start('rfcomm', [
+          'connect',
+          '0',
+          deviceAddress,
+          targetChannel.toString(),
+        ]);
+        
+        _bluetoothProcess = process;
+        _logState?.debug('   rfcomm connect 进程已启动 (PID: ${process.pid})');
+        
+        // 监听进程输出
+        process.stdout.listen((data) {
+          final msg = String.fromCharCodes(data);
+          if (msg.trim().isNotEmpty) {
+            _logState?.debug('   [rfcomm] $msg');
+          }
+        });
+        
+        process.stderr.listen((data) {
+          final msg = String.fromCharCodes(data);
+          if (msg.trim().isNotEmpty) {
+            _logState?.debug('   [rfcomm error] $msg');
+          }
+        });
         
         // 等待设备文件创建
+        _logState?.info('   等待设备文件创建...');
+        final deviceFile = File(devicePath);
+        
+        for (int i = 0; i < 20; i++) {
+          await Future.delayed(const Duration(milliseconds: 200));
+          if (await deviceFile.exists()) {
+            _logState?.success('   ✅ 设备文件已创建: $devicePath');
+            break;
+          }
+          if (i == 19) {
+            throw Exception('设备文件创建超时');
+          }
+        }
+        
+        // 等待连接稳定
         await Future.delayed(const Duration(milliseconds: 500));
         
-        // 检查设备文件是否存在
-        final deviceFile = File(devicePath);
-        if (await deviceFile.exists()) {
-          _logState?.success('   ✅ 设备文件已创建: $devicePath');
-          
-          // 不需要启动 connect 进程，直接使用设备文件
-          _bluetoothProcess = null;  // bind 模式不需要进程
-          
-          // bind 后直接打开设备文件（打开操作会触发 RFCOMM 连接）
-          try {
-            // 1. 先启动 cat 读取循环（cat 会触发 RFCOMM 连接）
-            await _startReadLoop(devicePath);
-            
-            // 2. 等待连接建立
-            await Future.delayed(const Duration(milliseconds: 1000));
-            
-            // 3. 打开写入句柄（连接已建立，不会阻塞）
-            _logState?.debug('   准备打开写入句柄...');
-            final deviceFile = File(devicePath);
-            
-            // 检查设备文件状态
-            final stat = await Process.run('stat', [devicePath]);
-            _logState?.debug('   设备文件状态:\n${stat.stdout}');
-            
-            try {
-              _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
-                  .timeout(const Duration(seconds: 3), onTimeout: () {
-                throw TimeoutException('打开写入句柄超时');
-              });
-              _logState?.success('✅ 写入句柄已打开');
-            } catch (e) {
-              _logState?.error('   打开写入句柄失败: $e');
-              
-              // 检查 cat 进程状态
-              if (_bluetoothProcess != null) {
-                final exitCode = await _bluetoothProcess!.exitCode
-                    .timeout(const Duration(milliseconds: 100), onTimeout: () => -1);
-                if (exitCode != -1) {
-                  _logState?.error('   cat 进程已退出，退出码: $exitCode');
-                }
-              }
-              
-              rethrow;
-            }
-            
-            _logState?.success('✅ RFCOMM 连接已建立 (bind 模式)');
-            
-            await Future.delayed(const Duration(milliseconds: 200));
-            
-            _currentDeviceAddress = deviceAddress;
-            _currentDeviceName = deviceName;
-            _isConnected = true;
-            
-            // 重置序列号和缓冲区
-            _sequenceNumber = 0;
-            _buffer = Uint8List(0);
-            _packetCount = 0;
-            _pendingResponses.clear();
-            
-            _logState?.success('✅ SPP 连接成功 (RFCOMM bind 模式)');
-            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            _logState?.info('📋 连接信息:');
-            _logState?.info('   设备地址: $deviceAddress');
-            if (deviceName != null) {
-              _logState?.info('   设备名称: $deviceName');
-            }
-            _logState?.info('   RFCOMM 通道: $targetChannel');
-            _logState?.info('   服务 UUID: ${uuid ?? _serviceUuid}');
-            _logState?.info('   设备路径: $devicePath');
-            _logState?.info('   连接模式: RFCOMM bind');
-            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            
-            return true;
-          } catch (e) {
-            _logState?.error('❌ 打开设备失败: $e');
-            await _unbindRfcomm();
-            // 继续尝试 connect 模式
-          }
-        } else {
-          _logState?.warning('   ⚠️ bind 成功但设备文件未创建，尝试 connect 模式...');
-          await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
-        }
-      } else {
-        _logState?.warning('   ⚠️ RFCOMM bind 失败，尝试 connect 模式...');
-        _logState?.debug('   bind 错误: ${bindResult.stderr}');
-      }
-      
-      // 方法2: 使用 rfcomm connect（前台模式）
-      _logState?.info('   方法: rfcomm connect (前台)');
-      
-      // 使用 timeout 命令限制连接时间
-      final connectProcess = await Process.start('timeout', [
-        '5',  // 5秒超时
-        'rfcomm',
-        'connect',
-        '0',
-        deviceAddress,
-        targetChannel.toString(),
-      ]);
-      
-      // 监听输出判断连接状态
-      bool connected = false;
-      final outputCompleter = Completer<bool>();
-      
-      connectProcess.stdout.listen((data) {
-        final msg = String.fromCharCodes(data);
-        _logState?.debug('[rfcomm] $msg');
-        if (msg.contains('Connected') || msg.contains('Press CTRL-C')) {
-          connected = true;
-          if (!outputCompleter.isCompleted) {
-            outputCompleter.complete(true);
-          }
-        }
-      });
-      
-      connectProcess.stderr.listen((data) {
-        final msg = String.fromCharCodes(data);
-        if (msg.trim().isNotEmpty) {
-          _logState?.warning('[rfcomm] $msg');
-        }
-      });
-      
-      // 等待连接成功或超时
-      try {
-        await outputCompleter.future.timeout(const Duration(seconds: 6));
-      } catch (e) {
-        _logState?.error('❌ 连接超时或失败');
-        connectProcess.kill();
-        await _unbindRfcomm();
-        return false;
-      }
-      
-      if (!connected) {
-        _logState?.error('❌ 连接失败');
-        connectProcess.kill();
-        await _unbindRfcomm();
-        return false;
-      }
-      
-      // 保存进程引用
-      _bluetoothProcess = connectProcess;
-      
-      // 等待设备文件稳定
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // 打开设备文件
-      final file = File(devicePath);
-      if (!await file.exists()) {
-        _logState?.error('❌ 设备文件不存在');
-        return false;
-      }
-      
-      try {
-        _deviceFile = await file.open(mode: FileMode.writeOnly);
-        _logState?.success('✅ 设备已连接');
+        // 启动数据读取循环（使用 cat 读取设备文件）
+        await _startReadLoop(devicePath);
         
-        _startReadLoop(devicePath);
-        await Future.delayed(const Duration(milliseconds: 200));
+        // 打开写入句柄
+        _logState?.info('   打开写入句柄...');
+        final deviceFile = File(devicePath);
+        _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+            .timeout(const Duration(seconds: 5), onTimeout: () {
+          throw TimeoutException('打开写入句柄超时');
+        });
+        _logState?.success('✅ 写入句柄已打开');
+        
+        // 连接成功
+        _currentDeviceAddress = deviceAddress;
+        _currentDeviceName = deviceName;
+        _isConnected = true;
+        
+        // 重置序列号和缓冲区
+        _sequenceNumber = 0;
+        _buffer = Uint8List(0);
+        _packetCount = 0;
+        _pendingResponses.clear();
+        
+        _logState?.success('✅ SPP 连接成功 (RFCOMM connect 模式)');
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        _logState?.info('📋 连接信息:');
+        _logState?.info('   设备地址: $deviceAddress');
+        if (deviceName != null) {
+          _logState?.info('   设备名称: $deviceName');
+        }
+        _logState?.info('   RFCOMM 通道: $targetChannel');
+        _logState?.info('   服务 UUID: ${uuid ?? _serviceUuid}');
+        _logState?.info('   设备路径: $devicePath');
+        _logState?.info('   连接模式: RFCOMM connect');
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        
+        return true;
       } catch (e) {
-        _logState?.error('❌ 打开设备失败: $e');
+        _logState?.error('❌ RFCOMM 连接失败: $e');
+        await disconnect();
         return false;
       }
-      
-      _currentDeviceAddress = deviceAddress;
-      _currentDeviceName = deviceName;
-      _isConnected = true;
-      
-      // 重置序列号和缓冲区
-      _sequenceNumber = 0;
-      _buffer = Uint8List(0);
-      _packetCount = 0;
-      _pendingResponses.clear();
-      
-      _logState?.success('✅ SPP 连接成功');
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      _logState?.info('📋 连接信息:');
-      _logState?.info('   设备地址: $deviceAddress');
-      if (deviceName != null) {
-        _logState?.info('   设备名称: $deviceName');
-      }
-      _logState?.info('   RFCOMM 通道: $targetChannel');
-      _logState?.info('   服务 UUID: ${uuid ?? _serviceUuid}');
-      _logState?.info('   设备路径: $devicePath');
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
-      return true;
     } catch (e) {
       _logState?.error('❌ 连接失败: $e');
-      await _unbindRfcomm();
+      await disconnect();
       return false;
     }
   }
@@ -657,7 +545,7 @@ hciconfig hci0 up 2>/dev/null || true
     try {
       // 使用 cat 命令持续读取数据
       final process = await Process.start('cat', [devicePath]);
-      _bluetoothProcess = process;
+      _catProcess = process;  // 保存到 _catProcess，不覆盖 _bluetoothProcess
       
       _logState?.debug('   cat 进程已启动 (PID: ${process.pid})');
       
@@ -714,12 +602,17 @@ hciconfig hci0 up 2>/dev/null || true
   /// 断开连接
   Future<void> disconnect() async {
     try {
-      if (_isConnected || _bluetoothProcess != null || _deviceFile != null) {
+      if (_isConnected || _bluetoothProcess != null || _catProcess != null || _deviceFile != null) {
         _logState?.info('🔌 断开 SPP 连接...');
         
         await _subscription?.cancel();
         _subscription = null;
         
+        // 杀掉 cat 进程
+        _catProcess?.kill();
+        _catProcess = null;
+        
+        // 杀掉 rfcomm connect 进程
         _bluetoothProcess?.kill();
         _bluetoothProcess = null;
         
