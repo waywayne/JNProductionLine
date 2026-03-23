@@ -431,15 +431,18 @@ hciconfig hci0 up 2>/dev/null || true
           
           // bind 后直接打开设备文件（打开操作会触发 RFCOMM 连接）
           try {
-            // 先启动读取循环（cat 会触发 RFCOMM 连接并读取所有数据）
+            // 1. 先打开写入句柄（触发 RFCOMM 连接）
+            final deviceFile = File(devicePath);
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
+            _logState?.success('✅ 写入句柄已打开');
+            
+            // 2. 然后启动读取循环（cat 只读取，不会冲突）
             await _startReadLoop(devicePath);
             
-            // 等待连接稳定
+            // 3. 等待连接稳定
             await Future.delayed(const Duration(milliseconds: 500));
             
-            // 不打开设备文件，使用 shell 命令写入（避免与 cat 冲突）
-            _deviceFile = null;  // bind 模式使用 shell 写入
-            _logState?.success('✅ RFCOMM 连接已建立 (bind 模式，使用 shell 写入)');
+            _logState?.success('✅ RFCOMM 连接已建立 (bind 模式)');
             
             await Future.delayed(const Duration(milliseconds: 200));
             
@@ -710,39 +713,14 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // bind 模式：临时打开设备文件写入（不保持句柄）
-      final devicePath = '/dev/rfcomm0';
-      final deviceFile = File(devicePath);
-      
-      _logState?.debug('   准备打开设备文件: $devicePath');
-      
-      // 临时打开文件写入（添加超时）
-      RandomAccessFile? tempFile;
-      try {
-        _logState?.debug('   正在打开文件...');
-        tempFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
-            .timeout(const Duration(seconds: 2), onTimeout: () {
-          throw TimeoutException('打开设备文件超时');
-        });
-        
-        _logState?.debug('   文件已打开，准备写入 ${data.length} 字节...');
-        await tempFile.writeFrom(data)
-            .timeout(const Duration(seconds: 2), onTimeout: () {
-          throw TimeoutException('写入数据超时');
-        });
-        
-        _logState?.debug('   数据已写入，关闭文件...');
-        await tempFile.close();
-        _logState?.debug('   文件已关闭');
-      } catch (e) {
-        _logState?.error('   写入过程出错: $e');
-        if (tempFile != null) {
-          try {
-            await tempFile.close();
-          } catch (_) {}
-        }
-        throw e;
+      // 使用保持的写入句柄（类似串口的 _port!.write(data)）
+      if (_deviceFile == null) {
+        throw Exception('设备文件未打开');
       }
+      
+      _logState?.debug('   准备写入 ${data.length} 字节...');
+      await _deviceFile!.writeFrom(data);
+      _logState?.debug('   数据已写入');
       
       // 添加短暂延迟，确保数据完全发送到设备
       await Future.delayed(const Duration(milliseconds: 50));
