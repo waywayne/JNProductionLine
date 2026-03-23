@@ -216,12 +216,31 @@ hciconfig hci0 up 2>/dev/null || true
           _logState?.info('   Bonded: yes');
         }
         
-        // 对于已配对的设备，不需要 bluetoothctl connect
-        // 直接使用 RFCOMM 连接即可
-        _logState?.info('   设备已准备，可以直接使用 RFCOMM');
+        // 尝试建立蓝牙基础连接（某些设备需要）
+        _logState?.info('   尝试建立蓝牙连接...');
+        final connectScript = '''
+(
+  echo "connect $deviceAddress"
+  sleep 3
+) | bluetoothctl
+''';
+        
+        final connectResult = await Process.run('bash', ['-c', connectScript]);
+        _logState?.debug('   连接输出: ${connectResult.stdout}');
+        
+        // 检查连接状态
+        await Future.delayed(const Duration(seconds: 1));
+        final statusResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
+        final statusOutput = statusResult.stdout.toString();
+        
+        if (statusOutput.contains('Connected: yes')) {
+          _logState?.success('✅ 蓝牙基础连接已建立');
+        } else {
+          _logState?.warning('⚠️ 蓝牙基础连接未建立，但可能不影响 RFCOMM');
+        }
         
         // 等待设备准备好
-        await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(const Duration(seconds: 1));
         
         return true;
       } else {
