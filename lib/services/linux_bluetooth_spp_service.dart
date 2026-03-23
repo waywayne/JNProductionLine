@@ -437,10 +437,9 @@ hciconfig hci0 up 2>/dev/null || true
             // 等待连接建立和读取循环启动
             await Future.delayed(const Duration(milliseconds: 1000));
             
-            // 然后打开设备文件用于写入（使用 writeOnly 模式）
-            _logState?.info('   打开设备文件用于写入...');
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnly);
-            _logState?.success('✅ 设备文件已打开用于写入 (bind 模式)');
+            // 不打开设备文件，使用 shell 命令写入（避免与 cat 冲突）
+            _deviceFile = null;  // bind 模式使用 shell 写入
+            _logState?.success('✅ RFCOMM 连接已建立 (bind 模式，使用 shell 写入)');
             
             await Future.delayed(const Duration(milliseconds: 200));
             
@@ -680,7 +679,7 @@ hciconfig hci0 up 2>/dev/null || true
   
   /// 发送数据
   Future<bool> sendData(Uint8List data) async {
-    if (!_isConnected || _deviceFile == null) {
+    if (!_isConnected) {
       _logState?.error('❌ 未连接，无法发送数据');
       return false;
     }
@@ -694,10 +693,20 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 直接写入设备文件
-      await _deviceFile!.writeFrom(data);
+      // 根据连接模式选择写入方式
+      if (_deviceFile != null) {
+        // connect 模式：使用文件句柄写入
+        await _deviceFile!.writeFrom(data);
+      } else {
+        // bind 模式：使用 shell 命令写入（避免与 cat 冲突）
+        final devicePath = '/dev/rfcomm0';
+        final hexData = data.map((b) => '\\x${b.toRadixString(16).padLeft(2, '0')}').join('');
+        final result = await Process.run('sh', ['-c', 'printf "$hexData" > $devicePath']);
+        if (result.exitCode != 0) {
+          throw Exception('Shell write failed: ${result.stderr}');
+        }
+      }
       
-      // RFCOMM 设备不支持 flush()，数据会自动发送
       // 添加短暂延迟，确保数据完全发送到设备
       await Future.delayed(const Duration(milliseconds: 50));
       
