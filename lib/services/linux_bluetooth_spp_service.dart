@@ -661,16 +661,24 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 如果写入句柄未打开，现在打开它
+      // 如果写入句柄未打开，现在打开它（只打开一次）
       if (_deviceFile == null) {
         _logState?.info('   首次发送，打开写入句柄...');
         final devicePath = '/dev/rfcomm0';
         final deviceFile = File(devicePath);
-        _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
-            .timeout(const Duration(seconds: 5), onTimeout: () {
-          throw TimeoutException('打开写入句柄超时');
-        });
-        _logState?.success('   ✅ 写入句柄已打开');
+        
+        try {
+          _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+              .timeout(const Duration(seconds: 5), onTimeout: () {
+            throw TimeoutException('打开写入句柄超时');
+          });
+          _logState?.success('   ✅ 写入句柄已打开');
+        } catch (e) {
+          _logState?.error('   ❌ 打开写入句柄失败: $e');
+          // 如果打开失败，标记为未连接
+          _isConnected = false;
+          rethrow;
+        }
       }
       
       _logState?.debug('   准备写入 ${data.length} 字节...');
