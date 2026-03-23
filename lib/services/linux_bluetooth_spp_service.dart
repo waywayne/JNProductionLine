@@ -437,9 +437,10 @@ hciconfig hci0 up 2>/dev/null || true
             // 等待连接建立和读取循环启动
             await Future.delayed(const Duration(milliseconds: 1000));
             
-            // 然后打开设备文件用于写入（使用 writeOnlyAppend 避免干扰读取）
-            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend);
-            _logState?.success('✅ 设备文件已打开，RFCOMM 连接已建立 (bind 模式)');
+            // 然后打开设备文件用于写入（使用 writeOnly 模式）
+            _logState?.info('   打开设备文件用于写入...');
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnly);
+            _logState?.success('✅ 设备文件已打开用于写入 (bind 模式)');
             
             await Future.delayed(const Duration(milliseconds: 200));
             
