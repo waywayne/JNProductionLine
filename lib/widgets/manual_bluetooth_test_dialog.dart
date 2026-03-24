@@ -45,7 +45,7 @@ class _ManualBluetoothTestDialogState extends State<ManualBluetoothTestDialog> {
 
     setState(() {
       _productInfo = productInfo;
-      _status = '✅ 已获取设备信息\nSN: ${productInfo.sn}\n蓝牙地址: ${productInfo.bluetoothAddress ?? "未知"}';
+      _status = '✅ 已获取设备信息\nSN: ${productInfo.snCode}\n蓝牙地址: ${productInfo.bluetoothAddress}';
     });
 
     // 自动开始连接
@@ -79,7 +79,7 @@ class _ManualBluetoothTestDialogState extends State<ManualBluetoothTestDialog> {
         _isConnecting = false;
         _isConnected = connected;
         if (connected) {
-          _status = '✅ 蓝牙连接成功！\n\n设备信息：\nSN: ${_productInfo!.sn}\n蓝牙地址: $bluetoothAddress\n\n连接已保持，可以关闭此窗口进行手动测试。';
+          _status = '✅ 蓝牙连接成功！\n\n设备信息：\nSN: ${_productInfo!.snCode}\n蓝牙地址: $bluetoothAddress\n\n连接已保持，可以关闭此窗口进行手动测试。';
         } else {
           _status = '❌ 蓝牙连接失败\n\n请检查：\n1. 设备是否开机\n2. 蓝牙地址是否正确\n3. 设备是否已配对';
         }
@@ -149,9 +149,11 @@ class _ManualBluetoothTestDialogState extends State<ManualBluetoothTestDialog> {
                 ),
               ),
               const SizedBox(height: 8),
-              _buildInfoRow('SN码', _productInfo!.sn),
-              _buildInfoRow('蓝牙地址', _productInfo!.bluetoothAddress ?? '未知'),
-              _buildInfoRow('设备名称', _productInfo!.deviceName ?? '未知'),
+              _buildInfoRow('SN码', _productInfo!.snCode),
+              _buildInfoRow('蓝牙地址', _productInfo!.bluetoothAddress),
+              _buildInfoRow('MAC地址', _productInfo!.macAddress),
+              if (_productInfo!.hardwareVersion != null)
+                _buildInfoRow('硬件版本', _productInfo!.hardwareVersion!),
             ],
           ],
         ),
