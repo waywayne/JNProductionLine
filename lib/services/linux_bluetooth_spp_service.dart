@@ -479,10 +479,36 @@ hciconfig hci0 up 2>/dev/null || true
         
         _logState?.success('   ✅ RFCOMM Socket 进程已启动');
         
-        // 监听 stderr（日志输出）
+        // 保存进程引用（必须在监听前保存）
+        _socketProcess = process;
+        
+        // 立即监听 stderr（日志输出）
         process.stderr.transform(const SystemEncoding().decoder).listen((line) {
           _logState?.debug('   [Python] $line');
         });
+        
+        // 立即监听 stdout（接收数据）
+        _subscription = process.stdout.listen(
+          (data) {
+            if (data.isNotEmpty) {
+              _onDataReceived(Uint8List.fromList(data));
+            }
+          },
+          onError: (error) {
+            _logState?.error('❌ 数据接收错误: $error');
+            if (_isConnected) {
+              disconnect();
+            }
+          },
+          onDone: () {
+            // stdout 关闭通常意味着 Python 进程退出
+            _logState?.warning('⚠️ Socket 数据流结束');
+            if (_isConnected) {
+              disconnect();
+            }
+          },
+          cancelOnError: false,  // 不要因为错误就取消订阅
+        );
         
         // 监听进程退出
         process.exitCode.then((code) {
@@ -492,28 +518,8 @@ hciconfig hci0 up 2>/dev/null || true
           }
         });
         
-        // 等待连接建立
+        // 等待连接建立（Python 脚本需要时间连接）
         await Future.delayed(const Duration(seconds: 2));
-        
-        // 监听 stdout（接收数据）
-        _subscription = process.stdout.listen(
-          (data) {
-            if (data.isNotEmpty) {
-              _onDataReceived(Uint8List.fromList(data));
-            }
-          },
-          onError: (error) {
-            _logState?.error('❌ 数据接收错误: $error');
-            disconnect();
-          },
-          onDone: () {
-            _logState?.warning('⚠️ Socket 数据流结束');
-            disconnect();
-          },
-        );
-        
-        // 保存进程引用（用于发送数据）
-        _socketProcess = process;
         
         // 连接成功
         _currentDeviceAddress = deviceAddress;

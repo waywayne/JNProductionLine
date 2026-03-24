@@ -25,14 +25,14 @@ def create_rfcomm_socket(mac_address, channel):
         # 创建 RFCOMM socket
         sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
         
-        # 设置超时
+        # 设置连接超时
         sock.settimeout(10)
         
         # 连接到设备
         sock.connect((mac_address, channel))
         
-        # 连接成功后移除超时（阻塞模式）
-        sock.settimeout(None)
+        # 连接成功后设置为非阻塞模式（使用短超时）
+        sock.settimeout(0.1)  # 100ms 超时，避免永久阻塞
         
         log(f"✅ RFCOMM Socket 连接成功")
         return sock
@@ -45,17 +45,26 @@ def create_rfcomm_socket(mac_address, channel):
         return None
 
 def socket_to_stdout(sock):
-    """从 socket 读取数据并输出到 stdout"""
+    """从 socket 读取数据并输出到 stdout（非阻塞）"""
     try:
         while True:
-            data = sock.recv(1024)
-            if not data:
-                log("Socket 连接已关闭（读取端）")
+            try:
+                data = sock.recv(1024)
+                if not data:
+                    log("Socket 连接已关闭（读取端）")
+                    break
+                
+                # 输出到 stdout（Dart 会读取）
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+                
+            except socket.timeout:
+                # 超时是正常的，继续循环
+                time.sleep(0.01)
+                continue
+            except bluetooth.BluetoothError as e:
+                log(f"蓝牙读取错误: {e}")
                 break
-            
-            # 输出到 stdout（Dart 会读取）
-            sys.stdout.buffer.write(data)
-            sys.stdout.buffer.flush()
             
     except Exception as e:
         log(f"读取异常: {e}")
