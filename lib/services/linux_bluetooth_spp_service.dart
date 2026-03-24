@@ -10,11 +10,10 @@ import 'gtp_protocol.dart';
 /// 基于 Linux 蓝牙栈实现的 SPP 协议通信服务
 /// 支持自定义 UUID 服务发现和 RFCOMM 通道绑定
 class LinuxBluetoothSppService {
-  Process? _bluetoothProcess;  // rfcomm connect 进程
-  Process? _catProcess;        // cat 读取进程
-  Socket? _socket;
+  Process? _bluetoothProcess;  // rfcomm connect 进程（如果使用）
+  Socket? _socket;             // RFCOMM socket（备用方案）
   StreamSubscription? _subscription;
-  RandomAccessFile? _deviceFile;
+  RandomAccessFile? _deviceFile;  // 写入句柄
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   
   String? _currentDeviceAddress;
@@ -464,11 +463,25 @@ hciconfig hci0 up 2>/dev/null || true
         if (await deviceFile.exists()) {
           _logState?.success('   ✅ 设备文件已创建: $devicePath');
           
-          // 启动 cat 读取循环（触发 RFCOMM 连接）
-          _logState?.info('   启动读取进程（触发 RFCOMM 连接）...');
-          await _startReadLoop(devicePath);
+          // 打开设备文件（读写模式，单 fd 双向通信）
+          _logState?.info('   打开设备文件（读写模式）...');
+          try {
+            _deviceFile = await deviceFile.open(mode: FileMode.readWrite)
+                .timeout(const Duration(seconds: 5), onTimeout: () {
+              throw TimeoutException('打开设备文件超时');
+            });
+            _logState?.success('   ✅ 设备文件已打开（单 fd 双向通信）');
+          } catch (e) {
+            _logState?.error('   ❌ 打开设备文件失败: $e');
+            await _unbindRfcomm();
+            return false;
+          }
           
-          // 连接成功（不打开写入句柄，等发送数据时再打开）
+          // 启动读取循环（使用同一个 fd）
+          _logState?.info('   启动读取循环...');
+          _startReadLoop();
+          
+          // 连接成功
           _currentDeviceAddress = deviceAddress;
           _currentDeviceName = deviceName;
           _isConnected = true;
@@ -511,50 +524,53 @@ hciconfig hci0 up 2>/dev/null || true
     }
   }
   
-  /// 启动读取循环
-  Future<void> _startReadLoop(String devicePath) async {
-    _logState?.info('🔄 启动数据读取循环...');
+  /// 启动读取循环（单 fd 双向通信）
+  void _startReadLoop() {
+    if (_deviceFile == null) {
+      _logState?.error('❌ 设备文件未打开，无法启动读取循环');
+      return;
+    }
+    
+    _logState?.debug('   启动数据读取循环（单 fd 模式）...');
+    
+    // 在后台异步读取
+    _readLoopAsync();
+    
+    _logState?.success('✅ 数据读取循环已启动');
+  }
+  
+  /// 异步读取循环
+  Future<void> _readLoopAsync() async {
+    const bufferSize = 1024;
+    final buffer = Uint8List(bufferSize);
     
     try {
-      // 使用 cat 命令持续读取数据
-      final process = await Process.start('cat', [devicePath]);
-      _catProcess = process;  // 保存到 _catProcess，不覆盖 _bluetoothProcess
-      
-      _logState?.debug('   cat 进程已启动 (PID: ${process.pid})');
-      
-      // 监听进程退出
-      process.exitCode.then((code) {
-        _logState?.warning('⚠️ cat 进程已退出 (退出码: $code)');
-      });
-      
-      _subscription = process.stdout.listen(
-        (data) {
-          if (data.isNotEmpty) {
-            _onDataReceived(Uint8List.fromList(data));
+      while (_isConnected && _deviceFile != null) {
+        try {
+          final bytesRead = await _deviceFile!.readInto(buffer);
+          
+          if (bytesRead > 0) {
+            final data = Uint8List.fromList(buffer.sublist(0, bytesRead));
+            _onDataReceived(data);
+          } else {
+            // EOF，连接已断开
+            _logState?.warning('⚠️ 读取到 EOF，连接已断开');
+            break;
           }
-        },
-        onError: (error) {
-          _logState?.error('❌ 数据接收错误: $error');
-          disconnect();
-        },
-        onDone: () {
-          _logState?.warning('⚠️ 读取循环结束');
-          disconnect();
-        },
-      );
-      
-      // 监听 stderr
-      process.stderr.listen((data) {
-        final msg = String.fromCharCodes(data);
-        if (msg.trim().isNotEmpty) {
-          _logState?.error('❌ cat 错误: $msg');
+        } catch (e) {
+          if (_isConnected) {
+            _logState?.error('❌ 读取数据时出错: $e');
+            break;
+          }
         }
-      });
-      
-      _logState?.success('✅ 数据读取循环已启动');
+      }
     } catch (e) {
-      _logState?.error('❌ 启动读取循环失败: $e');
-      rethrow;
+      _logState?.error('❌ 读取循环异常: $e');
+    } finally {
+      if (_isConnected) {
+        _logState?.warning('⚠️ 读取循环已停止，断开连接');
+        await disconnect();
+      }
     }
   }
   
@@ -575,32 +591,30 @@ hciconfig hci0 up 2>/dev/null || true
   /// 断开连接
   Future<void> disconnect() async {
     try {
-      if (_isConnected || _bluetoothProcess != null || _catProcess != null || _deviceFile != null) {
+      if (_isConnected || _bluetoothProcess != null || _deviceFile != null) {
         _logState?.info('🔌 断开 SPP 连接...');
+        
+        // 先标记为未连接，停止读取循环
+        _isConnected = false;
         
         await _subscription?.cancel();
         _subscription = null;
         
-        // 杀掉 cat 进程
-        _catProcess?.kill();
-        _catProcess = null;
-        
-        // 杀掉 rfcomm connect 进程
+        // 杀掉 rfcomm connect 进程（如果有）
         _bluetoothProcess?.kill();
         _bluetoothProcess = null;
         
-        // 关闭设备文件
+        // 关闭设备文件（写入句柄）
         try {
           await _deviceFile?.close();
           _deviceFile = null;
-          _logState?.debug('   设备文件已关闭');
+          _logState?.debug('   写入句柄已关闭');
         } catch (e) {
-          _logState?.debug('   关闭设备文件时出错: $e');
+          _logState?.debug('   关闭写入句柄时出错: $e');
         }
         
         await _unbindRfcomm();
         
-        _isConnected = false;
         _currentDeviceAddress = null;
         _currentDeviceName = null;
         _currentChannel = null;
@@ -623,9 +637,9 @@ hciconfig hci0 up 2>/dev/null || true
     }
   }
   
-  /// 发送数据
+  /// 发送数据（单 fd 模式）
   Future<bool> sendData(Uint8List data) async {
-    if (!_isConnected) {
+    if (!_isConnected || _deviceFile == null) {
       _logState?.error('❌ 未连接，无法发送数据');
       return false;
     }
@@ -639,35 +653,13 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 如果写入句柄未打开，现在打开它（只打开一次）
-      if (_deviceFile == null) {
-        _logState?.info('   首次发送，打开写入句柄...');
-        final devicePath = '/dev/rfcomm0';
-        final deviceFile = File(devicePath);
-        
-        try {
-          _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
-              .timeout(const Duration(seconds: 5), onTimeout: () {
-            throw TimeoutException('打开写入句柄超时');
-          });
-          _logState?.success('   ✅ 写入句柄已打开');
-        } catch (e) {
-          _logState?.error('   ❌ 打开写入句柄失败: $e');
-          // 如果打开失败，标记为未连接
-          _isConnected = false;
-          rethrow;
-        }
-      }
-      
+      // 使用同一个 fd 写入数据
       _logState?.debug('   准备写入 ${data.length} 字节...');
       await _deviceFile!.writeFrom(data);
-      _logState?.debug('   数据已写入');
+      await _deviceFile!.flush();  // 确保数据刷新到设备
+      _logState?.debug('   数据已写入并刷新');
       
-      
-      // 添加短暂延迟，确保数据完全发送到设备
-      await Future.delayed(const Duration(milliseconds: 50));
-      
-      _logState?.success('✅ 数据已写入设备文件');
+      _logState?.success('✅ 数据已发送');
       
       return true;
     } catch (e) {
