@@ -67,8 +67,16 @@ def socket_to_stdout(sock):
                 time.sleep(0.01)
                 continue
             except bluetooth.BluetoothError as e:
-                log(f"蓝牙读取错误: {e}")
-                break
+                # 检查是否是超时错误
+                error_msg = str(e).lower()
+                if 'timed out' in error_msg or 'timeout' in error_msg:
+                    # 超时是正常的，继续循环
+                    time.sleep(0.01)
+                    continue
+                else:
+                    # 其他蓝牙错误，退出
+                    log(f"蓝牙读取错误: {e}")
+                    break
             
     except Exception as e:
         log(f"读取异常: {e}")
@@ -110,8 +118,16 @@ def stdin_to_socket(sock):
                         time.sleep(0.01)
                         continue
                     except bluetooth.BluetoothError as e:
-                        log(f"蓝牙发送错误: {e}")
-                        return
+                        # 检查是否是超时错误
+                        error_msg = str(e).lower()
+                        if 'timed out' in error_msg or 'timeout' in error_msg:
+                            # 超时重试
+                            time.sleep(0.01)
+                            continue
+                        else:
+                            # 其他蓝牙错误，退出
+                            log(f"蓝牙发送错误: {e}")
+                            return
                 
                 log(f"✅ 数据发送完成: {data_len} 字节")
                 # 发送后短暂延迟，确保设备接收
