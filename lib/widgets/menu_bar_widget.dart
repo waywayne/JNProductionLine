@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../screens/gpib_test_screen.dart';
 import '../screens/production_config_screen.dart';
 import '../screens/sn_records_screen.dart';
+import 'byd_mes_test_dialog.dart';
 
 class MenuBarWidget extends StatelessWidget {
   const MenuBarWidget({super.key});
@@ -54,6 +55,16 @@ class MenuBarWidget extends StatelessWidget {
                   ),
                 );
               }
+            },
+          ),
+          _MenuButton(
+            title: 'BYD MES 测试',
+            icon: Icons.cloud_sync,
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => const BydMesTestDialog(),
+              );
             },
           ),
           const Spacer(),

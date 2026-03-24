@@ -32,6 +32,9 @@ class LinuxBluetoothSppService {
   static const String defaultSppUuid = '00001101-0000-1000-8000-00805F9B34FB';
   String _serviceUuid = defaultSppUuid;
   
+  // 连接模式：true = rfcomm bind 模式，false = socket 模式
+  bool _useBindMode = true;  // 默认使用 bind 模式（与第三方工具一致）
+  
   void setLogState(LogState logState) {
     _logState = logState;
   }
@@ -433,9 +436,12 @@ hciconfig hci0 up 2>/dev/null || true
       
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 使用 RFCOMM Socket 连接（通过 Python 桥接）
-      _logState?.info('⏳ 建立 RFCOMM Socket 连接...');
-      _logState?.info('   方法: Python RFCOMM Socket');
+      // 选择连接模式
+      final scriptName = _useBindMode ? 'rfcomm_bind_bridge.py' : 'rfcomm_socket.py';
+      final modeDesc = _useBindMode ? 'RFCOMM Bind (与第三方工具一致)' : 'RFCOMM Socket';
+      
+      _logState?.info('⏳ 建立 RFCOMM 连接...');
+      _logState?.info('   连接模式: $modeDesc');
       
       // 查找 Python 脚本路径（多种可能的位置）
       String? scriptPath;
@@ -445,10 +451,10 @@ hciconfig hci0 up 2>/dev/null || true
       final executableDir = File(executablePath).parent.path;
       
       final possiblePaths = [
-        '$executableDir/scripts/rfcomm_socket.py',            // 打包后：与可执行文件同目录
-        'scripts/rfcomm_socket.py',                           // 开发环境：项目根目录
-        '/opt/jn-production-line/scripts/rfcomm_socket.py',   // 安装后的位置
-        '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket.py', // 开发路径
+        '$executableDir/scripts/$scriptName',            // 打包后：与可执行文件同目录
+        'scripts/$scriptName',                           // 开发环境：项目根目录
+        '/opt/jn-production-line/scripts/$scriptName',   // 安装后的位置
+        '${Platform.environment['HOME']}/git/JNProductionLine/scripts/$scriptName', // 开发路径
       ];
       
       for (final path in possiblePaths) {
