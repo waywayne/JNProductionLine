@@ -14,6 +14,7 @@ class LinuxBluetoothSppService {
   Socket? _socket;             // RFCOMM socket（备用方案）
   StreamSubscription? _subscription;
   RandomAccessFile? _deviceFile;  // 写入句柄
+  RandomAccessFile? _readFile;    // 读取句柄
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   
   String? _currentDeviceAddress;
@@ -463,21 +464,37 @@ hciconfig hci0 up 2>/dev/null || true
         if (await deviceFile.exists()) {
           _logState?.success('   ✅ 设备文件已创建: $devicePath');
           
-          // 打开设备文件（读写模式，单 fd 双向通信）
-          _logState?.info('   打开设备文件（读写模式）...');
+          // 先打开写入句柄，再打开读取句柄（避免阻塞）
+          _logState?.info('   打开写入句柄...');
           try {
-            _deviceFile = await deviceFile.open(mode: FileMode.readWrite)
-                .timeout(const Duration(seconds: 5), onTimeout: () {
-              throw TimeoutException('打开设备文件超时');
+            _deviceFile = await deviceFile.open(mode: FileMode.writeOnlyAppend)
+                .timeout(const Duration(seconds: 3), onTimeout: () {
+              throw TimeoutException('打开写入句柄超时');
             });
-            _logState?.success('   ✅ 设备文件已打开（单 fd 双向通信）');
+            _logState?.success('   ✅ 写入句柄已打开');
           } catch (e) {
-            _logState?.error('   ❌ 打开设备文件失败: $e');
+            _logState?.error('   ❌ 打开写入句柄失败: $e');
             await _unbindRfcomm();
             return false;
           }
           
-          // 启动读取循环（使用同一个 fd）
+          // 然后打开读取句柄
+          _logState?.info('   打开读取句柄...');
+          try {
+            _readFile = await deviceFile.open(mode: FileMode.read)
+                .timeout(const Duration(seconds: 3), onTimeout: () {
+              throw TimeoutException('打开读取句柄超时');
+            });
+            _logState?.success('   ✅ 读取句柄已打开');
+          } catch (e) {
+            _logState?.error('   ❌ 打开读取句柄失败: $e');
+            await _deviceFile?.close();
+            _deviceFile = null;
+            await _unbindRfcomm();
+            return false;
+          }
+          
+          // 启动读取循环
           _logState?.info('   启动读取循环...');
           _startReadLoop();
           
@@ -524,14 +541,14 @@ hciconfig hci0 up 2>/dev/null || true
     }
   }
   
-  /// 启动读取循环（单 fd 双向通信）
+  /// 启动读取循环
   void _startReadLoop() {
-    if (_deviceFile == null) {
-      _logState?.error('❌ 设备文件未打开，无法启动读取循环');
+    if (_readFile == null) {
+      _logState?.error('❌ 读取句柄未打开，无法启动读取循环');
       return;
     }
     
-    _logState?.debug('   启动数据读取循环（单 fd 模式）...');
+    _logState?.debug('   启动数据读取循环...');
     
     // 在后台异步读取
     _readLoopAsync();
@@ -545,9 +562,9 @@ hciconfig hci0 up 2>/dev/null || true
     final buffer = Uint8List(bufferSize);
     
     try {
-      while (_isConnected && _deviceFile != null) {
+      while (_isConnected && _readFile != null) {
         try {
-          final bytesRead = await _deviceFile!.readInto(buffer);
+          final bytesRead = await _readFile!.readInto(buffer);
           
           if (bytesRead > 0) {
             final data = Uint8List.fromList(buffer.sublist(0, bytesRead));
@@ -591,7 +608,7 @@ hciconfig hci0 up 2>/dev/null || true
   /// 断开连接
   Future<void> disconnect() async {
     try {
-      if (_isConnected || _bluetoothProcess != null || _deviceFile != null) {
+      if (_isConnected || _bluetoothProcess != null || _deviceFile != null || _readFile != null) {
         _logState?.info('🔌 断开 SPP 连接...');
         
         // 先标记为未连接，停止读取循环
@@ -604,7 +621,16 @@ hciconfig hci0 up 2>/dev/null || true
         _bluetoothProcess?.kill();
         _bluetoothProcess = null;
         
-        // 关闭设备文件（写入句柄）
+        // 关闭读取句柄
+        try {
+          await _readFile?.close();
+          _readFile = null;
+          _logState?.debug('   读取句柄已关闭');
+        } catch (e) {
+          _logState?.debug('   关闭读取句柄时出错: $e');
+        }
+        
+        // 关闭写入句柄
         try {
           await _deviceFile?.close();
           _deviceFile = null;
@@ -637,7 +663,7 @@ hciconfig hci0 up 2>/dev/null || true
     }
   }
   
-  /// 发送数据（单 fd 模式）
+  /// 发送数据
   Future<bool> sendData(Uint8List data) async {
     if (!_isConnected || _deviceFile == null) {
       _logState?.error('❌ 未连接，无法发送数据');
@@ -653,7 +679,7 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('📤 准备发送 [${data.length} 字节]: $hexStr');
       _logState?.info('📤 发送数据: $hexStr (ASCII: $asciiStr)');
       
-      // 使用同一个 fd 写入数据
+      // 使用写入句柄发送数据
       _logState?.debug('   准备写入 ${data.length} 字节...');
       await _deviceFile!.writeFrom(data);
       await _deviceFile!.flush();  // 确保数据刷新到设备
