@@ -385,29 +385,24 @@ hciconfig hci0 up 2>/dev/null || true
       // 确保蓝牙适配器已开启
       await ensureBluetoothPower();
       
-      // ========== 步骤 1: 配对并连接蓝牙设备 ==========
+      // ========== 步骤 1: 配对蓝牙设备（不需要 bluetoothctl connect）==========
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       final btConnected = await pairAndConnectDevice(deviceAddress);
       if (!btConnected) {
-        _logState?.error('❌ 蓝牙连接失败，无法继续');
+        _logState?.error('❌ 蓝牙配对失败，无法继续');
         return false;
       }
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // 如果未指定通道，则通过 SDP 查询
+      // 直接使用默认通道 5（跳过 SDP 发现）
       int targetChannel;
       if (channel != null) {
         targetChannel = channel;
-        _logState?.info('   使用指定通道: $targetChannel');
+        _logState?.info('✅ 使用指定通道: $targetChannel');
       } else {
-        _logState?.info('   开始服务发现...');
-        final discoveredChannel = await discoverServiceChannel(deviceAddress, uuid: uuid);
-        if (discoveredChannel == null) {
-          _logState?.warning('⚠️ 服务发现失败，使用默认通道 5');
-          targetChannel = 5;  // 使用默认通道 5
-        } else {
-          targetChannel = discoveredChannel;
-        }
+        targetChannel = 5;  // 默认通道 5（SPP 标准通道）
+        _logState?.info('✅ 使用默认 SPP 通道: $targetChannel');
+        _logState?.debug('   跳过 SDP 服务发现，直接连接');
       }
       
       _currentChannel = targetChannel;

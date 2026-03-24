@@ -5,11 +5,13 @@ RFCOMM Socket 桥接脚本
 """
 
 import sys
+import os
 import socket
 import bluetooth
 import struct
 import threading
 import time
+import select
 
 def log(message):
     """输出日志到 stderr"""
@@ -59,17 +61,29 @@ def socket_to_stdout(sock):
         log(f"读取异常: {e}")
 
 def stdin_to_socket(sock):
-    """从 stdin 读取数据并发送到 socket"""
+    """从 stdin 读取数据并发送到 socket（非阻塞）"""
     try:
+        # 设置 stdin 为非阻塞模式
+        import fcntl
+        flags = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)
+        fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        
         while True:
-            # 从 stdin 读取数据（Dart 会写入）
-            data = sys.stdin.buffer.read(1024)
-            if not data:
-                log("Stdin 已关闭")
-                break
+            # 使用 select 等待数据（带超时）
+            readable, _, _ = select.select([sys.stdin], [], [], 0.1)
             
-            # 发送到 socket
-            sock.sendall(data)
+            if readable:
+                # 从 stdin 读取数据（Dart 会写入）
+                data = sys.stdin.buffer.read(1024)
+                if not data:
+                    log("Stdin 已关闭")
+                    break
+                
+                # 发送到 socket
+                sock.sendall(data)
+            
+            # 短暂休眠，避免 CPU 占用过高
+            time.sleep(0.01)
             
     except Exception as e:
         log(f"写入异常: {e}")
