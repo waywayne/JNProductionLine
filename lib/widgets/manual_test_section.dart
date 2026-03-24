@@ -6,6 +6,7 @@ import '../services/product_sn_api.dart';
 import 'led_test_dialog.dart';
 import 'linux_bluetooth_scan_dialog.dart';
 import 'sn_input_dialog.dart';
+import 'manual_bluetooth_test_dialog.dart';
 
 /// Manual test section with individual buttons for each test
 class ManualTestSection extends StatelessWidget {
@@ -21,6 +22,8 @@ class ManualTestSection extends StatelessWidget {
             spacing: 12,
             runSpacing: 12,
             children: [
+              // 蓝牙测试按钮（最前面）
+              _buildBluetoothTestButton(context, state),
               _buildTestButton(
                 context,
                 '唤醒设备',
@@ -765,6 +768,124 @@ class ManualTestSection extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建蓝牙测试按钮
+  Widget _buildBluetoothTestButton(BuildContext context, TestState state) {
+    final isConnected = state.isLinuxBluetoothConnected;
+    
+    return SizedBox(
+      width: 140,
+      height: 80,
+      child: ElevatedButton(
+        onPressed: () async {
+          if (isConnected) {
+            // 已连接，显示断开选项
+            final shouldDisconnect = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('蓝牙已连接'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('当前已连接到: ${state.linuxBluetoothDeviceName ?? "未知"}'),
+                    const SizedBox(height: 8),
+                    Text(
+                      '地址: ${state.linuxBluetoothDeviceAddress ?? "未知"}',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: const Text('取消'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('断开连接'),
+                  ),
+                ],
+              ),
+            );
+            
+            if (shouldDisconnect == true) {
+              await state.disconnectLinuxBluetooth();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('🔌 已断开蓝牙连接'),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
+            }
+          } else {
+            // 未连接，显示蓝牙测试对话框
+            final connected = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => const ManualBluetoothTestDialog(),
+            );
+            
+            if (connected == true && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('✅ 蓝牙连接成功，可以开始手动测试'),
+                  backgroundColor: Colors.green,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            }
+          }
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isConnected ? Colors.green[400] : Colors.blue[600],
+          foregroundColor: Colors.white,
+          elevation: isConnected ? 4 : 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: isConnected 
+                ? BorderSide(color: Colors.green[700]!, width: 2) 
+                : BorderSide.none,
+          ),
+          padding: const EdgeInsets.all(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isConnected ? Icons.bluetooth_connected : Icons.bluetooth,
+              size: 32,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '蓝牙测试',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isConnected ? '已连接' : '点击连接',
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
