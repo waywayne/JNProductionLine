@@ -491,6 +491,10 @@ hciconfig hci0 up 2>/dev/null || true
         _subscription = process.stdout.listen(
           (data) {
             if (data.isNotEmpty) {
+              // 打印从 Python 进程接收到的原始字节
+              final rawHex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+              _logState?.debug('🔵 从 Python stdout 接收 [${data.length} 字节]: $rawHex');
+              
               _onDataReceived(Uint8List.fromList(data));
             }
           },
@@ -729,13 +733,18 @@ hciconfig hci0 up 2>/dev/null || true
   /// 处理接收到的数据
   void _onDataReceived(Uint8List data) {
     try {
-      // 详细的接收日志
+      // ========== 原始响应日志（最优先） ==========
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       final asciiStr = String.fromCharCodes(
         data.map((b) => (b >= 32 && b <= 126) ? b : 46), // 46 = '.'
       );
-      _logState?.debug('📥 接收 [${data.length} 字节]: $hexStr');
-      _logState?.info('📥 接收: $hexStr (ASCII: $asciiStr)');
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('📥 原始响应数据 [${data.length} 字节]');
+      _logState?.info('   HEX: $hexStr');
+      _logState?.info('   ASCII: $asciiStr');
+      _logState?.info('   字节数组: [${data.join(', ')}]');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // 添加到缓冲区
       final newBuffer = Uint8List(_buffer.length + data.length);
@@ -755,7 +764,9 @@ hciconfig hci0 up 2>/dev/null || true
   
   /// 处理缓冲区中的数据包
   void _processBuffer() {
+    final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
     _logState?.debug('🔍 处理缓冲区，当前长度: ${_buffer.length} 字节');
+    _logState?.debug('   缓冲区内容: $bufferHex');
     
     while (_buffer.length >= 16) { // GTP 最小长度
       // 查找 GTP 数据包起始标志 (Preamble: 0xD0 0xD2 0xC5 0xC2)
@@ -826,12 +837,41 @@ hciconfig hci0 up 2>/dev/null || true
     try {
       _packetCount++;
       
-      // 详细的数据包日志
+      // ========== 详细的 GTP 数据包日志 ==========
       final hexStr = packet.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-      _logState?.debug('📦 GTP 数据包 #$_packetCount [${packet.length} 字节]: $hexStr');
-      _logState?.info('📦 完整 GTP 数据包 #$_packetCount:');
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('📦 GTP 数据包 #$_packetCount');
       _logState?.info('   总长度: ${packet.length} 字节');
-      _logState?.info('   HEX: $hexStr');
+      _logState?.info('   完整 HEX: $hexStr');
+      _logState?.info('   字节数组: [${packet.join(', ')}]');
+      
+      // 解析 GTP 头部
+      if (packet.length >= 16) {
+        _logState?.info('   --- GTP 头部 ---');
+        _logState?.info('   Preamble: ${packet.sublist(0, 4).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+        final length = packet[5] | (packet[6] << 8);
+        _logState?.info('   Length: $length (0x${length.toRadixString(16).padLeft(4, '0').toUpperCase()})');
+        final moduleId = packet[7] | (packet[8] << 8);
+        _logState?.info('   Module ID: 0x${moduleId.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+        final messageId = packet[9] | (packet[10] << 8);
+        _logState?.info('   Message ID: 0x${messageId.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+        final sn = packet[11] | (packet[12] << 8);
+        _logState?.info('   Sequence: $sn');
+        final result = packet[13] | (packet[14] << 8);
+        _logState?.info('   Result: $result');
+        
+        if (packet.length > 16) {
+          final payloadLen = packet.length - 16 - 4; // 减去头部和 CRC
+          final payload = packet.sublist(16, 16 + payloadLen);
+          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+          _logState?.info('   Payload (${payloadLen} 字节): $payloadHex');
+        }
+        
+        final crc = packet.sublist(packet.length - 4);
+        _logState?.info('   CRC: ${crc.map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // 使用 GTP 协议解析
       final parsedGTP = GTPProtocol.parseGTPResponse(packet);

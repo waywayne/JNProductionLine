@@ -54,6 +54,10 @@ def socket_to_stdout(sock):
                     log("Socket 连接已关闭（读取端）")
                     break
                 
+                # 记录接收到的数据
+                data_hex = ' '.join(f'{b:02X}' for b in data)
+                log(f"📥 接收到 {len(data)} 字节: {data_hex[:100]}{'...' if len(data_hex) > 100 else ''}")
+                
                 # 输出到 stdout（Dart 会读取）
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
@@ -88,8 +92,30 @@ def stdin_to_socket(sock):
                     log("Stdin 已关闭")
                     break
                 
-                # 发送到 socket
-                sock.sendall(data)
+                # 发送到 socket（带重试）
+                sent = 0
+                data_len = len(data)
+                log(f"准备发送 {data_len} 字节数据")
+                
+                while sent < data_len:
+                    try:
+                        n = sock.send(data[sent:])
+                        if n == 0:
+                            log("Socket 连接已关闭（写入端）")
+                            return
+                        sent += n
+                        log(f"已发送 {sent}/{data_len} 字节")
+                    except socket.timeout:
+                        # 发送缓冲区满，稍后重试
+                        time.sleep(0.01)
+                        continue
+                    except bluetooth.BluetoothError as e:
+                        log(f"蓝牙发送错误: {e}")
+                        return
+                
+                log(f"✅ 数据发送完成: {data_len} 字节")
+                # 发送后短暂延迟，确保设备接收
+                time.sleep(0.05)
             
             # 短暂休眠，避免 CPU 占用过高
             time.sleep(0.01)
