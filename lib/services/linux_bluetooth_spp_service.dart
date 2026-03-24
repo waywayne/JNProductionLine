@@ -406,10 +406,11 @@ hciconfig hci0 up 2>/dev/null || true
         _logState?.info('   开始服务发现...');
         final discoveredChannel = await discoverServiceChannel(deviceAddress, uuid: uuid);
         if (discoveredChannel == null) {
-          _logState?.error('❌ 服务发现失败');
-          return false;
+          _logState?.warning('⚠️ 服务发现失败，使用默认通道 5');
+          targetChannel = 5;  // 使用默认通道 5
+        } else {
+          targetChannel = discoveredChannel;
         }
-        targetChannel = discoveredChannel;
       }
       
       _currentChannel = targetChannel;
