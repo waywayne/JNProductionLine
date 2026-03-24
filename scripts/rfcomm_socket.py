@@ -130,8 +130,9 @@ def stdin_to_socket(sock):
                             return
                 
                 log(f"✅ 数据发送完成: {data_len} 字节")
-                # 发送后短暂延迟，确保设备接收
-                time.sleep(0.05)
+                # 发送后延迟，确保设备有足够时间处理
+                # 蓝牙传输比串口慢，需要更长的处理时间
+                time.sleep(0.2)  # 200ms 延迟
             
             # 短暂休眠，避免 CPU 占用过高
             time.sleep(0.01)
