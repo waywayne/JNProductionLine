@@ -66,9 +66,38 @@ apt-get install -y \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-wqy-microhei \
-    fonts-wqy-zenhei
+    fonts-wqy-zenhei \
+    python3 \
+    python3-pip \
+    python3-bluez
 
 echo "   ✅ 已安装系统依赖和中文字体"
+
+# 安装 Python 蓝牙库（RFCOMM Socket 支持）
+echo "🐍 安装 Python 蓝牙库..."
+if ! python3 -c "import bluetooth" 2>/dev/null; then
+    echo "   正在安装 PyBluez..."
+    
+    # 优先使用系统包
+    if apt-cache show python3-bluez >/dev/null 2>&1; then
+        apt-get install -y python3-bluez
+        echo "   ✅ 已通过 apt 安装 python3-bluez"
+    else
+        # 降级使用 pip
+        pip3 install pybluez --break-system-packages 2>/dev/null || pip3 install pybluez
+        echo "   ✅ 已通过 pip 安装 PyBluez"
+    fi
+else
+    echo "   ✅ PyBluez 已安装"
+fi
+
+# 验证 Python 蓝牙库
+if python3 -c "import bluetooth" 2>/dev/null; then
+    PYBLUEZ_VERSION=$(python3 -c "import bluetooth; print(bluetooth.__version__)" 2>/dev/null || echo "未知版本")
+    echo "   ✅ PyBluez 验证成功 (版本: $PYBLUEZ_VERSION)"
+else
+    echo "   ⚠️  警告: PyBluez 安装可能失败，RFCOMM Socket 功能可能不可用"
+fi
 
 # 创建安装目录
 echo "📁 创建安装目录..."
@@ -96,6 +125,12 @@ fi
 # 设置权限
 echo "🔐 设置权限..."
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
+
+# 设置 Python 脚本权限（如果存在）
+if [ -f "$INSTALL_DIR/scripts/rfcomm_socket.py" ]; then
+    chmod +x "$INSTALL_DIR/scripts/rfcomm_socket.py"
+    echo "   ✅ 已设置 RFCOMM Socket 脚本权限"
+fi
 
 # 验证文件
 echo "🔍 验证安装..."
@@ -198,7 +233,12 @@ echo "⚠️  重要提示:"
 echo "   1. Linux 蓝牙功能需要使用 sudo 运行应用："
 echo "      $ sudo $APP_NAME"
 echo ""
-echo "   2. 已安装中文字体支持，如果中文显示异常："
+echo "   2. 已安装以下依赖："
+echo "      ✅ Python3 和 PyBluez (RFCOMM Socket 支持)"
+echo "      ✅ BlueZ 蓝牙工具"
+echo "      ✅ 中文字体支持"
+echo ""
+echo "   3. 如果中文显示异常："
 echo "      - 重启应用"
 echo "      - 或运行: sudo fc-cache -fv"
 echo ""
@@ -206,6 +246,7 @@ echo ""
 echo "📚 更多信息请查看:"
 echo "   - 构建指南: docs/LINUX_BUILD_GUIDE.md"
 echo "   - 蓝牙权限: docs/BLUETOOTH_PERMISSIONS.md"
+echo "   - RFCOMM Socket: docs/RFCOMM_SOCKET.md"
 echo "   - 中文字体: docs/CHINESE_FONTS.md"
 echo "   - GitHub: https://github.com/waywayne/JNProductionLine"
 echo ""
