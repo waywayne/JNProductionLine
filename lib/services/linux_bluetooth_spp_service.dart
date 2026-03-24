@@ -10,7 +10,6 @@ import 'gtp_protocol.dart';
 /// 基于 Linux 蓝牙栈实现的 SPP 协议通信服务
 /// 支持自定义 UUID 服务发现和 RFCOMM 通道绑定
 class LinuxBluetoothSppService {
-  Socket? _socket;             // RFCOMM socket
   Process? _socketProcess;     // Python RFCOMM socket 进程
   StreamSubscription? _subscription;
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
@@ -443,23 +442,45 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('⏳ 建立 RFCOMM Socket 连接...');
       _logState?.info('   方法: Python RFCOMM Socket');
       
-      // 查找 Python 脚本路径
-      final scriptPath = 'scripts/rfcomm_socket.py';
-      final scriptFile = File(scriptPath);
+      // 查找 Python 脚本路径（多种可能的位置）
+      String? scriptPath;
       
-      if (!await scriptFile.exists()) {
-        _logState?.error('❌ RFCOMM Socket 脚本不存在: $scriptPath');
+      // 获取可执行文件所在目录
+      final executablePath = Platform.resolvedExecutable;
+      final executableDir = File(executablePath).parent.path;
+      
+      final possiblePaths = [
+        '$executableDir/scripts/rfcomm_socket.py',            // 打包后：与可执行文件同目录
+        'scripts/rfcomm_socket.py',                           // 开发环境：项目根目录
+        '/opt/jn-production-line/scripts/rfcomm_socket.py',   // 安装后的位置
+        '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket.py', // 开发路径
+      ];
+      
+      for (final path in possiblePaths) {
+        if (await File(path).exists()) {
+          scriptPath = path;
+          _logState?.debug('   找到脚本: $path');
+          break;
+        }
+      }
+      
+      if (scriptPath == null) {
+        _logState?.error('❌ RFCOMM Socket 脚本不存在');
+        _logState?.error('   已尝试以下路径:');
+        for (final path in possiblePaths) {
+          _logState?.error('   - $path');
+        }
         return false;
       }
       
       // 启动 Python RFCOMM socket 进程
       try {
+        _logState?.debug('   启动命令: python3 $scriptPath $deviceAddress $targetChannel');
+        
         final process = await Process.start(
           'python3',
           [scriptPath, deviceAddress, targetChannel.toString()],
         );
-        
-        _socket = await Socket.connect('localhost', 0).catchError((_) => null);
         
         _logState?.success('   ✅ RFCOMM Socket 进程已启动');
         
@@ -550,19 +571,12 @@ hciconfig hci0 up 2>/dev/null || true
         await _subscription?.cancel();
         _subscription = null;
         
-        // 关闭 socket
-        try {
-          await _socket?.close();
-          _socket = null;
-          _logState?.debug('   Socket 已关闭');
-        } catch (e) {
-          _logState?.debug('   关闭 Socket 时出错: $e');
-        }
-        
         // 杀掉 Python 进程
-        _socketProcess?.kill();
-        _socketProcess = null;
-        _logState?.debug('   Python 进程已终止');
+        if (_socketProcess != null) {
+          _socketProcess!.kill();
+          _socketProcess = null;
+          _logState?.debug('   Python 进程已终止');
+        }
         
         _currentDeviceAddress = null;
         _currentDeviceName = null;

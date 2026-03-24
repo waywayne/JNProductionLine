@@ -96,6 +96,19 @@ jobs:
         fi
         
         echo "📦 Packaging from: $BUILD_DIR"
+        
+        # 复制 scripts 目录到构建产物中
+        echo "📋 复制 scripts 目录..."
+        cp -r scripts "$BUILD_DIR/"
+        
+        # 设置脚本执行权限
+        chmod +x "$BUILD_DIR/scripts/"*.py
+        chmod +x "$BUILD_DIR/scripts/"*.sh
+        
+        echo "✅ Scripts 目录已复制"
+        ls -la "$BUILD_DIR/scripts/"
+        
+        # 打包
         cd "$BUILD_DIR"
         tar -czf ../../../../../jn-production-line-linux-${{ matrix.arch }}.tar.gz .
         cd ../../../../../
