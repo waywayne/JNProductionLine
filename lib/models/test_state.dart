@@ -13,6 +13,7 @@ import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
 import '../services/sn_manager_service.dart';
 import '../services/sn_api_service.dart';
+import '../services/product_sn_api.dart';
 import 'log_state.dart';
 import '../config/test_config.dart';
 import '../config/production_config.dart';
@@ -3069,139 +3070,164 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// Linux 蓝牙 SPP 测试（基于自定义 UUID 服务发现）
+  /// Linux 蓝牙 SPP 连接
+  /// 支持通过 SN 查询蓝牙 MAC 地址，或直接使用蓝牙 MAC 地址连接
+  /// 默认使用 channel 5，UUID 7033
+  /// 连接后保持不断开，除非用户主动断开
   Future<bool> testLinuxBluetooth({
     String? deviceAddress,
     String? deviceName,
+    String? snCode,
     String? uuid,
     int? channel,
   }) async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('🐧 开始 Linux 蓝牙 SPP 测试', type: LogType.debug);
+      _logState?.info('🐧 Linux 蓝牙 SPP 连接', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      // 默认参数
+      const int defaultChannel = 5;
+      const String defaultUuid = '7033';
+      
+      final int targetChannel = channel ?? defaultChannel;
+      final String targetUuid = uuid ?? defaultUuid;
+      
+      _logState?.info('📋 连接参数:', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $targetChannel (默认: $defaultChannel)', type: LogType.debug);
+      _logState?.info('   服务 UUID: $targetUuid (默认: $defaultUuid)', type: LogType.debug);
       
       String? targetAddress = deviceAddress;
       String? targetName = deviceName;
       
-      // 检查是否已经连接到目标设备
-      if (_linuxBtService.isConnected && targetAddress != null && targetAddress.isNotEmpty) {
+      // ========== 步骤 1: 获取蓝牙 MAC 地址 ==========
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📡 步骤 1: 获取蓝牙 MAC 地址', type: LogType.debug);
+      
+      // 如果提供了 SN，通过 API 查询蓝牙 MAC 地址
+      if (snCode != null && snCode.isNotEmpty) {
+        _logState?.info('   输入类型: SN 码', type: LogType.debug);
+        _logState?.info('   SN: $snCode', type: LogType.debug);
+        _logState?.info('   正在查询蓝牙 MAC 地址...', type: LogType.debug);
+        
+        try {
+          final productInfo = await ProductSNApi.getProductSNInfo(snCode);
+          if (productInfo != null && productInfo.bluetoothAddress.isNotEmpty) {
+            targetAddress = productInfo.bluetoothAddress;
+            _logState?.success('✅ 查询成功', type: LogType.debug);
+            _logState?.info('   蓝牙 MAC: $targetAddress', type: LogType.debug);
+            _logState?.info('   WiFi MAC: ${productInfo.macAddress}', type: LogType.debug);
+            if (productInfo.hardwareVersion != null) {
+              _logState?.info('   硬件版本: ${productInfo.hardwareVersion}', type: LogType.debug);
+            }
+          } else {
+            _logState?.error('❌ 未找到 SN 对应的蓝牙地址', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return false;
+          }
+        } catch (e) {
+          _logState?.error('❌ 查询 SN 信息失败: $e', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return false;
+        }
+      } else if (targetAddress != null && targetAddress.isNotEmpty) {
+        _logState?.info('   输入类型: 蓝牙 MAC 地址', type: LogType.debug);
+        _logState?.info('   蓝牙 MAC: $targetAddress', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 未提供 SN 或蓝牙 MAC 地址', type: LogType.debug);
+        _logState?.info('   请提供以下任一参数:', type: LogType.debug);
+        _logState?.info('   - snCode: 产品 SN 码（自动查询蓝牙 MAC）', type: LogType.debug);
+        _logState?.info('   - deviceAddress: 蓝牙 MAC 地址', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      // 格式化蓝牙地址（统一为大写，冒号分隔）
+      targetAddress = targetAddress!.toUpperCase().replaceAll('-', ':');
+      _logState?.info('   格式化地址: $targetAddress', type: LogType.debug);
+      
+      // ========== 步骤 2: 检查现有连接 ==========
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔍 步骤 2: 检查现有连接', type: LogType.debug);
+      
+      if (_linuxBtService.isConnected) {
         final currentAddress = _linuxBtService.currentDeviceAddress;
         if (currentAddress != null) {
-          // 格式化地址进行比较（统一为大写，冒号分隔）
           final normalizedCurrent = currentAddress.toUpperCase().replaceAll('-', ':');
-          final normalizedTarget = targetAddress.toUpperCase().replaceAll('-', ':');
           
-          if (normalizedCurrent == normalizedTarget) {
-            _logState?.success('✅ 已连接到目标设备，跳过连接步骤', type: LogType.debug);
+          if (normalizedCurrent == targetAddress) {
+            _logState?.success('✅ 已连接到目标设备，保持连接', type: LogType.debug);
             _logState?.info('   设备地址: $currentAddress', type: LogType.debug);
             if (_linuxBtService.currentDeviceName != null) {
               _logState?.info('   设备名称: ${_linuxBtService.currentDeviceName}', type: LogType.debug);
             }
             _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
-            _logState?.info('   连接状态: 保持连接', type: LogType.debug);
+            _logState?.info('   连接状态: 已连接（保持）', type: LogType.debug);
             _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
             return true;
+          } else {
+            _logState?.warning('⚠️ 当前已连接到其他设备: $currentAddress', type: LogType.debug);
+            _logState?.info('   将断开当前连接并连接到新设备', type: LogType.debug);
           }
         }
-      }
-      
-      // 如果指定了 UUID，设置服务 UUID
-      if (uuid != null && uuid.isNotEmpty) {
-        _linuxBtService.setServiceUuid(uuid);
-        _logState?.info('   自定义 UUID: $uuid', type: LogType.debug);
-      }
-      
-      // 始终先扫描设备，确保设备可见（增强健壮性）
-      _logState?.info('🔍 扫描蓝牙设备...', type: LogType.debug);
-      
-      // 重试扫描机制：最多尝试3次
-      List<Map<String, String>> devices = [];
-      for (int retry = 0; retry < 3; retry++) {
-        if (retry > 0) {
-          _logState?.info('   重试扫描 ($retry/3)...', type: LogType.debug);
-          await Future.delayed(const Duration(seconds: 2));
-        }
-        
-        devices = await _linuxBtService.scanDevices(timeout: const Duration(seconds: 10));
-        
-        if (devices.isNotEmpty) {
-          _logState?.info('   扫描到 ${devices.length} 个设备', type: LogType.debug);
-          break;
-        }
-      }
-      
-      if (devices.isEmpty) {
-        _logState?.error('❌ 未找到任何蓝牙设备（已重试3次）', type: LogType.debug);
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return false;
-      }
-      
-      // 如果指定了目标地址，过滤匹配的设备
-      if (targetAddress != null && targetAddress.isNotEmpty) {
-        _logState?.info('   查找目标设备: $targetAddress', type: LogType.debug);
-        
-        // 格式化目标地址（统一为大写，冒号分隔）
-        final normalizedTarget = targetAddress.toUpperCase().replaceAll('-', ':');
-        
-        // 在扫描结果中查找匹配的设备
-        final matchedDevice = devices.firstWhere(
-          (device) {
-            final addr = device['address']?.toUpperCase().replaceAll('-', ':') ?? '';
-            return addr == normalizedTarget;
-          },
-          orElse: () => {},
-        );
-        
-        if (matchedDevice.isEmpty) {
-          _logState?.error('❌ 未找到目标设备: $targetAddress', type: LogType.debug);
-          _logState?.info('   扫描到的设备:', type: LogType.debug);
-          for (final dev in devices) {
-            _logState?.info('     - ${dev['name']} (${dev['address']})', type: LogType.debug);
-          }
-          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-          return false;
-        }
-        
-        targetAddress = matchedDevice['address'];
-        targetName = matchedDevice['name'];
-        _logState?.success('✅ 找到目标设备: $targetName ($targetAddress)', type: LogType.debug);
       } else {
-        // 未指定地址，使用第一个设备
-        targetAddress = devices.first['address'];
-        targetName = devices.first['name'];
-        _logState?.info('   选择设备: $targetName ($targetAddress)', type: LogType.debug);
+        _logState?.info('   当前未连接任何设备', type: LogType.debug);
       }
       
-      // 连接设备
-      _logState?.info('🔗 连接蓝牙设备...', type: LogType.debug);
+      // ========== 步骤 3: 设置服务 UUID ==========
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('⚙️ 步骤 3: 设置服务参数', type: LogType.debug);
+      
+      _linuxBtService.setServiceUuid(targetUuid);
+      _logState?.info('   服务 UUID: $targetUuid', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $targetChannel', type: LogType.debug);
+      
+      // ========== 步骤 4: 连接蓝牙设备 ==========
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔗 步骤 4: 连接蓝牙设备', type: LogType.debug);
+      _logState?.info('   目标地址: $targetAddress', type: LogType.debug);
+      if (targetName != null) {
+        _logState?.info('   设备名称: $targetName', type: LogType.debug);
+      }
+      
       final connected = await _linuxBtService.connect(
-        targetAddress!,
+        targetAddress,
         deviceName: targetName,
-        channel: channel,
-        uuid: uuid,
+        channel: targetChannel,
+        uuid: targetUuid,
       );
       
       if (!connected) {
-        _logState?.error('❌ 连接失败', type: LogType.debug);
+        _logState?.error('❌ 蓝牙连接失败', type: LogType.debug);
+        _logState?.info('   可能原因:', type: LogType.debug);
+        _logState?.info('   1. 设备未开机或不在范围内', type: LogType.debug);
+        _logState?.info('   2. 设备未配对', type: LogType.debug);
+        _logState?.info('   3. RFCOMM 通道不正确', type: LogType.debug);
+        _logState?.info('   4. 蓝牙适配器异常', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return false;
       }
       
-      // 连接成功即测试通过
-      _logState?.success('✅ Linux 蓝牙连接测试成功', type: LogType.debug);
+      // ========== 连接成功 ==========
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.success('✅ Linux 蓝牙 SPP 连接成功', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📋 连接信息:', type: LogType.debug);
       _logState?.info('   设备地址: $targetAddress', type: LogType.debug);
       if (targetName != null) {
         _logState?.info('   设备名称: $targetName', type: LogType.debug);
       }
       _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
-      _logState?.info('   连接状态: 保持连接', type: LogType.debug);
+      _logState?.info('   服务 UUID: $targetUuid', type: LogType.debug);
+      _logState?.info('   协议: GTP over SPP', type: LogType.debug);
+      _logState?.info('   连接状态: 已连接（保持）', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('💡 提示: 连接将保持，直到用户主动断开', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       
-      // 保持连接，不断开（用于后续测试步骤）
       return true;
     } catch (e) {
-      _logState?.error('❌ Linux 蓝牙测试异常: $e', type: LogType.debug);
+      _logState?.error('❌ Linux 蓝牙连接异常: $e', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       await _linuxBtService.disconnect();
       return false;
@@ -3285,24 +3311,251 @@ class TestState extends ChangeNotifier {
   String? get linuxBluetoothDeviceName => _linuxBtService.currentDeviceName;
   String? get linuxBluetoothDeviceAddress => _linuxBtService.currentDeviceAddress;
 
-  /// 通过 Linux 蓝牙发送命令并等待响应
+  /// 通过 Linux 蓝牙发送命令并等待响应（GTP 协议封装）
   Future<Map<String, dynamic>?> sendCommandViaLinuxBluetooth(
     dynamic command, {
     Duration timeout = const Duration(seconds: 5),
     int? moduleId,
     int? messageId,
   }) async {
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    _logState?.info('📤 Linux 蓝牙发送命令', type: LogType.debug);
+    
+    // 检查连接状态
     if (!_linuxBtService.isConnected) {
       _logState?.error('❌ Linux 蓝牙未连接', type: LogType.debug);
+      _logState?.info('   请先调用 testLinuxBluetooth 建立连接', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       return {'error': 'Linux 蓝牙未连接'};
     }
     
-    return await _linuxBtService.sendCommandAndWaitResponse(
+    // 打印连接信息
+    _logState?.info('📋 连接信息:', type: LogType.debug);
+    _logState?.info('   设备地址: ${_linuxBtService.currentDeviceAddress}', type: LogType.debug);
+    if (_linuxBtService.currentDeviceName != null) {
+      _logState?.info('   设备名称: ${_linuxBtService.currentDeviceName}', type: LogType.debug);
+    }
+    _logState?.info('   RFCOMM Channel: ${_linuxBtService.currentChannel}', type: LogType.debug);
+    
+    // 打印命令信息
+    Uint8List commandBytes;
+    if (command is Uint8List) {
+      commandBytes = command;
+    } else if (command is List<int>) {
+      commandBytes = Uint8List.fromList(command);
+    } else {
+      _logState?.error('❌ 命令格式错误: ${command.runtimeType}', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return {'error': '命令格式错误'};
+    }
+    
+    final cmdHex = commandBytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+    _logState?.info('📦 命令详情:', type: LogType.debug);
+    _logState?.info('   Payload: [$cmdHex]', type: LogType.debug);
+    _logState?.info('   长度: ${commandBytes.length} 字节', type: LogType.debug);
+    _logState?.info('   超时: ${timeout.inSeconds} 秒', type: LogType.debug);
+    if (moduleId != null) {
+      _logState?.info('   Module ID: 0x${moduleId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+    }
+    if (messageId != null) {
+      _logState?.info('   Message ID: 0x${messageId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+    }
+    _logState?.info('   协议: GTP over SPP', type: LogType.debug);
+    
+    _logState?.info('⏳ 发送命令并等待响应...', type: LogType.debug);
+    
+    final response = await _linuxBtService.sendCommandAndWaitResponse(
       command,
       timeout: timeout,
       moduleId: moduleId,
       messageId: messageId,
     );
+    
+    // 打印响应信息
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    if (response == null) {
+      _logState?.error('❌ 响应为空', type: LogType.debug);
+    } else if (response.containsKey('error')) {
+      _logState?.error('❌ 响应错误: ${response['error']}', type: LogType.debug);
+      if (response.containsKey('details')) {
+        _logState?.info('   详情: ${response['details']}', type: LogType.debug);
+      }
+    } else {
+      _logState?.success('✅ 收到响应', type: LogType.debug);
+      if (response.containsKey('payload')) {
+        final payload = response['payload'];
+        if (payload is Uint8List) {
+          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+          _logState?.info('   Payload: [$payloadHex]', type: LogType.debug);
+          _logState?.info('   长度: ${payload.length} 字节', type: LogType.debug);
+        }
+      }
+      if (response.containsKey('moduleId')) {
+        _logState?.info('   Module ID: 0x${(response['moduleId'] as int).toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      }
+      if (response.containsKey('messageId')) {
+        _logState?.info('   Message ID: 0x${(response['messageId'] as int).toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
+      }
+      if (response.containsKey('result')) {
+        _logState?.info('   Result: ${response['result']}', type: LogType.debug);
+      }
+    }
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    
+    return response;
+  }
+
+  // ========== 标准 SPP 蓝牙连接方法（用于超声前产测）==========
+  
+  /// 标准 SPP 蓝牙连接测试
+  /// 使用 flutter_bluetooth_serial (Android) 或 flutter_bluetooth_classic_serial (Windows)
+  Future<bool> testStandardSppBluetooth({
+    required String deviceAddress,
+    String? deviceName,
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📡 开始标准 SPP 蓝牙连接测试', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      if (deviceName != null) {
+        _logState?.info('   设备名称: $deviceName', type: LogType.debug);
+      }
+      
+      // 检查是否已经连接到目标设备
+      if (_sppService.isConnected) {
+        final currentAddress = _sppService.currentDeviceAddress;
+        if (currentAddress != null) {
+          // 格式化地址进行比较（统一为大写，冒号分隔）
+          final normalizedCurrent = currentAddress.toUpperCase().replaceAll('-', ':');
+          final normalizedTarget = deviceAddress.toUpperCase().replaceAll('-', ':');
+          
+          if (normalizedCurrent == normalizedTarget) {
+            _logState?.success('✅ 已连接到目标设备，跳过连接步骤', type: LogType.debug);
+            _logState?.info('   设备地址: $currentAddress', type: LogType.debug);
+            if (_sppService.currentDeviceName != null) {
+              _logState?.info('   设备名称: ${_sppService.currentDeviceName}', type: LogType.debug);
+            }
+            _logState?.info('   连接状态: 保持连接', type: LogType.debug);
+            _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+            return true;
+          }
+        }
+      }
+      
+      // 设置日志状态
+      _sppService.setLogState(_logState!);
+      
+      // 1. 扫描蓝牙设备
+      _logState?.info('🔍 步骤 1/2: 扫描蓝牙设备', type: LogType.debug);
+      final devices = await _sppService.getAvailableDevices();
+      
+      if (devices.isEmpty) {
+        _logState?.error('❌ 未找到任何蓝牙设备', type: LogType.debug);
+        _logState?.info('   提示：请确保设备已配对', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('   找到 ${devices.length} 个已配对设备', type: LogType.debug);
+      
+      // 2. 查找目标设备
+      final normalizedTarget = deviceAddress.toUpperCase().replaceAll('-', ':');
+      dynamic targetDevice;
+      
+      for (final device in devices) {
+        final addr = device.address.toUpperCase().replaceAll('-', ':');
+        if (addr == normalizedTarget) {
+          targetDevice = device;
+          break;
+        }
+      }
+      
+      if (targetDevice == null) {
+        _logState?.error('❌ 未找到目标设备: $deviceAddress', type: LogType.debug);
+        _logState?.info('   已配对的设备:', type: LogType.debug);
+        for (final dev in devices) {
+          _logState?.info('     - ${dev.name ?? "未知"} (${dev.address})', type: LogType.debug);
+        }
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ 找到目标设备: ${targetDevice.name ?? "未知"} (${targetDevice.address})', type: LogType.debug);
+      
+      // 3. 通过 SPP 连接设备
+      _logState?.info('🔗 步骤 2/2: 建立 SPP 连接', type: LogType.debug);
+      
+      final connected = await _sppService.connect(targetDevice);
+      
+      if (!connected) {
+        _logState?.error('❌ SPP 连接失败', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.success('✅ 标准 SPP 蓝牙连接成功', type: LogType.debug);
+      _logState?.info('   设备地址: ${targetDevice.address}', type: LogType.debug);
+      _logState?.info('   设备名称: ${targetDevice.name ?? "未知"}', type: LogType.debug);
+      _logState?.info('   连接状态: 保持连接', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return true;
+    } catch (e) {
+      _logState?.error('❌ 标准 SPP 蓝牙测试异常: $e', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      await _sppService.disconnect();
+      return false;
+    }
+  }
+  
+  /// 检查标准 SPP 蓝牙是否已连接
+  bool get isStandardSppConnected => _sppService.isConnected;
+  
+  /// 获取当前连接的标准 SPP 蓝牙设备信息
+  String? get standardSppDeviceName => _sppService.currentDeviceName;
+  String? get standardSppDeviceAddress => _sppService.currentDeviceAddress;
+  
+  /// 通过标准 SPP 蓝牙发送命令并等待响应（带 GTP 协议封装）
+  Future<Map<String, dynamic>?> sendCommandViaStandardSpp(
+    dynamic command, {
+    Duration timeout = const Duration(seconds: 5),
+    int? moduleId,
+    int? messageId,
+  }) async {
+    if (!_sppService.isConnected) {
+      _logState?.error('❌ 标准 SPP 蓝牙未连接', type: LogType.debug);
+      return {'error': '标准 SPP 蓝牙未连接'};
+    }
+    
+    // 确保 command 是 Uint8List
+    Uint8List commandBytes;
+    if (command is Uint8List) {
+      commandBytes = command;
+    } else if (command is List<int>) {
+      commandBytes = Uint8List.fromList(command);
+    } else {
+      _logState?.error('❌ 命令格式错误', type: LogType.debug);
+      return {'error': '命令格式错误'};
+    }
+    
+    return await _sppService.sendGTPCommandAndWaitResponse(
+      commandBytes,
+      timeout: timeout,
+      moduleId: moduleId,
+      messageId: messageId,
+    );
+  }
+  
+  /// 断开标准 SPP 蓝牙连接
+  Future<void> disconnectStandardSpp() async {
+    try {
+      await _sppService.disconnect();
+      _logState?.info('🔌 已断开标准 SPP 蓝牙连接', type: LogType.debug);
+      notifyListeners();
+    } catch (e) {
+      _logState?.error('❌ 断开连接失败: $e', type: LogType.debug);
+    }
   }
 
   /// 从设备通过FTP下载Sensor测试图片

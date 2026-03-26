@@ -392,9 +392,9 @@ class ManualTestSection extends StatelessWidget {
         return;
       }
 
+      // 使用 Linux 蓝牙 SPP 连接
       final connected = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
-        uuid: '7033',
       );
 
       if (!connected) {

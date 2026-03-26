@@ -69,9 +69,9 @@ class _ManualBluetoothTestDialogState extends State<ManualBluetoothTestDialog> {
     });
 
     final state = context.read<TestState>();
+    // 使用 Linux 蓝牙 SPP 连接
     final connected = await state.testLinuxBluetooth(
       deviceAddress: bluetoothAddress,
-      uuid: '7033',
     );
 
     if (mounted) {

@@ -646,6 +646,7 @@ hciconfig hci0 up 2>/dev/null || true
   }
   
   /// 发送命令并等待响应（带重试机制）
+  /// 基于 GTP over SPP 协议通讯
   Future<Map<String, dynamic>?> sendCommandAndWaitResponse(
     Uint8List command, {
     Duration timeout = const Duration(seconds: 10),  // 增加默认超时到10秒
@@ -653,15 +654,45 @@ hciconfig hci0 up 2>/dev/null || true
     int? moduleId,
     int? messageId,
   }) async {
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _logState?.info('📡 GTP over SPP 发送命令');
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
     if (!_isConnected) {
-      _logState?.error('❌ 未连接');
+      _logState?.error('❌ SPP 未连接，无法发送命令');
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       return {'error': 'Not connected'};
+    }
+    
+    // 打印连接状态
+    _logState?.info('📋 连接状态:');
+    _logState?.info('   设备地址: $_currentDeviceAddress');
+    if (_currentDeviceName != null) {
+      _logState?.info('   设备名称: $_currentDeviceName');
+    }
+    _logState?.info('   RFCOMM Channel: $_currentChannel');
+    _logState?.info('   协议: GTP over SPP');
+    
+    // 打印命令参数
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _logState?.info('📦 命令参数:');
+    final cmdHex = command.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+    _logState?.info('   Payload: [$cmdHex]');
+    _logState?.info('   Payload 长度: ${command.length} 字节');
+    _logState?.info('   超时时间: ${timeout.inSeconds} 秒');
+    _logState?.info('   最大重试: $maxRetries 次');
+    if (moduleId != null) {
+      _logState?.info('   Module ID: 0x${moduleId.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+    }
+    if (messageId != null) {
+      _logState?.info('   Message ID: 0x${messageId.toRadixString(16).toUpperCase().padLeft(2, '0')}');
     }
     
     // 重试逻辑
     for (int attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        _logState?.warning('⚠️ 第 $attempt 次重试...');
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        _logState?.warning('🔄 第 $attempt 次重试...');
         await Future.delayed(const Duration(milliseconds: 500));
       }
       
@@ -670,8 +701,10 @@ hciconfig hci0 up 2>/dev/null || true
         final completer = Completer<Map<String, dynamic>?>();
         _pendingResponses[seqNum] = completer;
         
-        _logState?.info('🔄 序列号: $seqNum, 等待响应 (超时: ${timeout.inSeconds}秒, 尝试: ${attempt + 1}/${maxRetries + 1})');
-        _logState?.debug('   Payload 长度: ${command.length} 字节');
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        _logState?.info('📤 发送 GTP 数据包 (尝试 ${attempt + 1}/${maxRetries + 1})');
+        _logState?.info('   序列号 (SN): $seqNum');
+        _logState?.info('   待处理响应数: ${_pendingResponses.length}');
         
         // 构建 GTP 数据包
         final gtpPacket = GTPProtocol.buildGTPPacket(
@@ -681,58 +714,129 @@ hciconfig hci0 up 2>/dev/null || true
           sequenceNumber: seqNum,
         );
         
-        // 打印 payload (CMD + OPT + 数据)
-        final cmdHex = command.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-        _logState?.info('📤 发送 Payload: [$cmdHex] (${command.length} 字节)');
-        
-        // 打印完整的 GTP 数据包
+        // 详细打印 GTP 数据包结构
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        _logState?.info('📦 GTP 数据包结构:');
         final fullPacketHex = gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-        _logState?.info('📦 完整数据包: [$fullPacketHex]');
+        _logState?.info('   完整 HEX: [$fullPacketHex]');
         _logState?.info('   总长度: ${gtpPacket.length} 字节');
         
+        // 解析 GTP 头部结构
+        if (gtpPacket.length >= 12) {
+          _logState?.info('   --- GTP 头部 ---');
+          _logState?.info('   Preamble (4B): ${gtpPacket.sublist(0, 4).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+          _logState?.info('   Version (1B): 0x${gtpPacket[4].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+          final length = gtpPacket[5] | (gtpPacket[6] << 8);
+          _logState?.info('   Length (2B): $length (0x${length.toRadixString(16).padLeft(4, '0').toUpperCase()})');
+          _logState?.info('   Type (1B): 0x${gtpPacket[7].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+          _logState?.info('   FC (1B): 0x${gtpPacket[8].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+          final seq = gtpPacket[9] | (gtpPacket[10] << 8);
+          _logState?.info('   Seq (2B): $seq');
+          _logState?.info('   CRC8 (1B): 0x${gtpPacket[11].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+          
+          // CLI 消息部分
+          if (gtpPacket.length >= 28) {
+            _logState?.info('   --- CLI 消息 ---');
+            final cliStart = gtpPacket[12] | (gtpPacket[13] << 8);
+            _logState?.info('   Start (2B): 0x${cliStart.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+            final cliModuleId = gtpPacket[14] | (gtpPacket[15] << 8);
+            _logState?.info('   Module ID (2B): 0x${cliModuleId.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+            final cliCrc = gtpPacket[16] | (gtpPacket[17] << 8);
+            _logState?.info('   CRC16 (2B): 0x${cliCrc.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+            final cliMsgId = gtpPacket[18] | (gtpPacket[19] << 8);
+            _logState?.info('   Message ID (2B): 0x${cliMsgId.toRadixString(16).padLeft(4, '0').toUpperCase()}');
+            _logState?.info('   Flags (1B): 0x${gtpPacket[20].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+            _logState?.info('   Result (1B): 0x${gtpPacket[21].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+            final cliLen = gtpPacket[22] | (gtpPacket[23] << 8);
+            _logState?.info('   Payload Len (2B): $cliLen');
+            final cliSn = gtpPacket[24] | (gtpPacket[25] << 8);
+            _logState?.info('   SN (2B): $cliSn');
+          }
+        }
+        
         // 发送完整的 GTP 数据包
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        _logState?.info('⏳ 发送数据包...');
         final success = await sendData(gtpPacket);
         if (!success) {
           _pendingResponses.remove(seqNum);
-          _logState?.error('❌ 命令发送失败');
+          _logState?.error('❌ 数据包发送失败');
           continue;  // 重试
         }
+        _logState?.success('✅ 数据包已发送');
         
         // 等待响应
+        _logState?.info('⏳ 等待响应 (超时: ${timeout.inSeconds}秒)...');
         final response = await completer.future.timeout(
           timeout,
           onTimeout: () {
             _pendingResponses.remove(seqNum);
-            _logState?.warning('⚠️ 命令超时 (${timeout.inSeconds}秒)');
-            return {'error': 'Timeout'};
+            _logState?.error('❌ 响应超时 (${timeout.inSeconds}秒)');
+            _logState?.info('   当前待处理响应数: ${_pendingResponses.length}');
+            _logState?.info('   缓冲区大小: ${_buffer.length} 字节');
+            return {'error': 'Timeout', 'details': '响应超时 ${timeout.inSeconds}秒'};
           },
         );
         
         _pendingResponses.remove(seqNum);
         
-        // 如果响应成功（不是超时或错误），返回结果
+        // 打印响应结果
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         if (response != null && !response.containsKey('error')) {
-          _logState?.success('✅ 命令响应成功 (尝试: ${attempt + 1})');
+          _logState?.success('✅ 收到有效响应 (尝试 ${attempt + 1})');
+          _logState?.info('📥 响应详情:');
+          if (response.containsKey('moduleId')) {
+            _logState?.info('   Module ID: 0x${(response['moduleId'] as int?)?.toRadixString(16).toUpperCase().padLeft(4, '0') ?? 'N/A'}');
+          }
+          if (response.containsKey('messageId')) {
+            _logState?.info('   Message ID: 0x${(response['messageId'] as int?)?.toRadixString(16).toUpperCase().padLeft(4, '0') ?? 'N/A'}');
+          }
+          if (response.containsKey('sn')) {
+            _logState?.info('   序列号: ${response['sn']}');
+          }
+          if (response.containsKey('result')) {
+            _logState?.info('   Result: ${response['result']}');
+          }
+          if (response.containsKey('payload')) {
+            final payload = response['payload'];
+            if (payload is Uint8List && payload.isNotEmpty) {
+              final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+              _logState?.info('   Payload [${payload.length} 字节]: $payloadHex');
+            }
+          }
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           return response;
+        }
+        
+        // 响应失败
+        _logState?.error('❌ 响应失败');
+        if (response != null && response.containsKey('error')) {
+          _logState?.info('   错误: ${response['error']}');
+          if (response.containsKey('details')) {
+            _logState?.info('   详情: ${response['details']}');
+          }
         }
         
         // 如果是最后一次尝试，返回错误
         if (attempt == maxRetries) {
-          _logState?.error('❌ 所有重试均失败');
+          _logState?.error('❌ 所有重试均失败 ($maxRetries 次)');
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           return response;
         }
         
         // 否则继续重试
-        _logState?.warning('⚠️ 响应失败，准备重试...');
+        _logState?.warning('⚠️ 准备重试...');
         
       } catch (e) {
         _logState?.error('❌ 命令执行异常: $e');
         if (attempt == maxRetries) {
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
           return {'error': e.toString()};
         }
       }
     }
     
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     return {'error': 'Max retries exceeded'};
   }
   

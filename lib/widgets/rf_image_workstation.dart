@@ -531,8 +531,9 @@ class _RFImageWorkstationState extends State<RFImageWorkstation> {
       
       final bluetoothAddress = _productInfo!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      logState.info('🔗 使用 Linux 蓝牙 SPP 连接');
       
-      // 调用Linux蓝牙SPP测试，传入指定的蓝牙地址
+      // 使用 Linux 蓝牙 SPP 连接
       final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
       );

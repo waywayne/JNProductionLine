@@ -350,6 +350,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
   // ========== 测试步骤实现 ==========
 
   /// 步骤1: 蓝牙连接测试
+  /// 使用 Linux 蓝牙 SPP 连接方式 (bluetoothctl + rfcomm)
   Future<bool> _testBluetoothConnection(TestState state, LogState logState) async {
     try {
       if (_productInfo == null) {
@@ -359,11 +360,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       
       final bluetoothAddress = _productInfo!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔍 使用 UUID: 7033 查找 RFCOMM 通道');
+      logState.info('🔗 使用 Linux 蓝牙 SPP 连接');
       
+      // 使用 Linux 蓝牙 SPP 连接（基于 bluetoothctl + rfcomm）
       final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
-        uuid: '7033',  // 使用UUID 7033查找RFCOMM通道
       );
       
       return success;
@@ -390,6 +391,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         }
         
         try {
+          // 使用 Linux 蓝牙发送命令
           final response = await state.sendCommandViaLinuxBluetooth(
             command,
             timeout: const Duration(seconds: 5),
@@ -451,7 +453,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         logState.info('📤 发送WiFi连接命令 (0x05)...');
         
         try {
-          // 发送命令并等待响应（10秒超时）
+          // 使用 Linux 蓝牙发送命令并等待响应（10秒超时）
           final response = await state.sendCommandViaLinuxBluetooth(
             command,
             timeout: const Duration(seconds: 10),
@@ -521,6 +523,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         }
         
         try {
+          // 使用 Linux 蓝牙发送命令
           final response = await state.sendCommandViaLinuxBluetooth(
             command,
             timeout: const Duration(seconds: 5),
@@ -692,6 +695,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         }
         
         try {
+          // 使用 Linux 蓝牙发送命令
           final response = await state.sendCommandViaLinuxBluetooth(
             command,
             timeout: const Duration(seconds: 5),
