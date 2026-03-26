@@ -166,17 +166,44 @@ hciconfig hci0 up 2>/dev/null || true
       if (alreadyPaired) {
         _logState?.info('   设备已配对');
       } else {
-        _logState?.info('   开始配对设备...');
+        _logState?.info('   设备未配对，开始扫描并配对...');
         
-        // 配对设备（使用管道方式，一次性发送所有命令）
-        final pairScript = '''
+        // 先扫描设备（关键步骤：设备必须先被发现才能配对）
+        _logState?.info('   📡 开始扫描蓝牙设备...');
+        final scanScript = '''
 (
   echo "power on"
   sleep 1
   echo "agent on"
-  sleep 1
+  sleep 0.5
   echo "default-agent"
-  sleep 1
+  sleep 0.5
+  echo "scan on"
+  sleep 8
+  echo "scan off"
+  sleep 0.5
+) | bluetoothctl
+''';
+        
+        final scanResult = await Process.run('bash', ['-c', scanScript]);
+        _logState?.debug('   扫描输出: ${scanResult.stdout}');
+        
+        // 检查设备是否被发现
+        final checkDevice = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
+        final deviceFound = !checkDevice.stdout.toString().contains('Device $deviceAddress not available');
+        
+        if (!deviceFound) {
+          _logState?.error('❌ 扫描后仍未发现设备: $deviceAddress');
+          _logState?.info('   请确保设备已开机并处于可发现状态');
+          return false;
+        }
+        
+        _logState?.success('✅ 设备已发现');
+        
+        // 配对设备
+        _logState?.info('   🔐 开始配对设备...');
+        final pairScript = '''
+(
   echo "pair $deviceAddress"
   sleep 5
   echo "trust $deviceAddress"
@@ -568,6 +595,298 @@ hciconfig hci0 up 2>/dev/null || true
     }
   }
   
+  /// 方案 2: 直接连接（跳过扫描和配对，假设设备已配对）
+  Future<bool> connectDirectly(String deviceAddress, {String? deviceName, int? channel}) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('🟢 直接连接模式（跳过扫描配对）');
+      _logState?.info('   设备地址: $deviceAddress');
+      
+      // 断开现有连接
+      await disconnect();
+      
+      // 确保蓝牙开启
+      await ensureBluetoothPower();
+      
+      // 直接尝试建立蓝牙连接（不扫描不配对）
+      _logState?.info('   尝试直接连接蓝牙...');
+      final connectScript = '''
+(
+  echo "connect $deviceAddress"
+  sleep 3
+) | bluetoothctl
+''';
+      final connectResult = await Process.run('bash', ['-c', connectScript]);
+      _logState?.debug('   连接输出: ${connectResult.stdout}');
+      
+      // 检查连接状态
+      final statusResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
+      final statusOutput = statusResult.stdout.toString();
+      
+      if (statusOutput.contains('Connected: yes')) {
+        _logState?.success('✅ 蓝牙基础连接已建立');
+      } else {
+        _logState?.warning('⚠️ 蓝牙基础连接未建立，继续尝试 RFCOMM...');
+      }
+      
+      // 启动 RFCOMM Socket
+      return await _startRfcommSocket(deviceAddress, deviceName: deviceName, channel: channel ?? 5);
+    } catch (e) {
+      _logState?.error('❌ 直接连接失败: $e');
+      return false;
+    }
+  }
+  
+  /// 方案 3: RFCOMM Bind 模式
+  Future<bool> connectWithRfcommBind(String deviceAddress, {String? deviceName, int? channel}) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('🟠 RFCOMM Bind 模式');
+      _logState?.info('   设备地址: $deviceAddress');
+      
+      // 断开现有连接
+      await disconnect();
+      
+      // 确保蓝牙开启
+      await ensureBluetoothPower();
+      
+      final targetChannel = channel ?? 5;
+      const devicePath = '/dev/rfcomm0';
+      
+      // 清理旧连接
+      _logState?.info('   清理旧的 RFCOMM 连接...');
+      await Process.run('pkill', ['-9', 'cat']).catchError((_) => null);
+      await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 使用 rfcomm bind 命令
+      _logState?.info('   执行: sudo rfcomm bind 0 $deviceAddress $targetChannel');
+      final bindResult = await Process.run('sudo', ['rfcomm', 'bind', '0', deviceAddress, targetChannel.toString()]);
+      
+      if (bindResult.exitCode != 0) {
+        _logState?.error('❌ rfcomm bind 失败: ${bindResult.stderr}');
+        return false;
+      }
+      
+      // 等待设备文件创建
+      await Future.delayed(const Duration(seconds: 1));
+      
+      // 检查设备文件是否存在
+      final deviceFile = File(devicePath);
+      if (!await deviceFile.exists()) {
+        _logState?.error('❌ 设备文件 $devicePath 不存在');
+        return false;
+      }
+      
+      _logState?.success('✅ RFCOMM Bind 成功: $devicePath');
+      
+      // 使用 Python 脚本读写设备文件
+      return await _startRfcommBindBridge(deviceAddress, deviceName: deviceName, channel: targetChannel);
+    } catch (e) {
+      _logState?.error('❌ RFCOMM Bind 失败: $e');
+      return false;
+    }
+  }
+  
+  /// 方案 4: RFCOMM Socket 模式（直接使用 Python socket）
+  Future<bool> connectWithRfcommSocket(String deviceAddress, {String? deviceName, int? channel}) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      _logState?.info('🟣 RFCOMM Socket 模式');
+      _logState?.info('   设备地址: $deviceAddress');
+      
+      // 断开现有连接
+      await disconnect();
+      
+      // 确保蓝牙开启
+      await ensureBluetoothPower();
+      
+      // 直接启动 Python RFCOMM Socket（不做配对）
+      return await _startRfcommSocket(deviceAddress, deviceName: deviceName, channel: channel ?? 5);
+    } catch (e) {
+      _logState?.error('❌ RFCOMM Socket 连接失败: $e');
+      return false;
+    }
+  }
+  
+  /// 启动 RFCOMM Socket 连接（内部方法）
+  Future<bool> _startRfcommSocket(String deviceAddress, {String? deviceName, int? channel}) async {
+    final targetChannel = channel ?? 5;
+    _currentChannel = targetChannel;
+    
+    _logState?.info('   启动 RFCOMM Socket...');
+    _logState?.info('   通道: $targetChannel');
+    
+    // 查找 Python 脚本
+    String? scriptPath;
+    final executablePath = Platform.resolvedExecutable;
+    final executableDir = File(executablePath).parent.path;
+    
+    final possiblePaths = [
+      '$executableDir/scripts/rfcomm_socket.py',
+      'scripts/rfcomm_socket.py',
+      '/opt/jn-production-line/scripts/rfcomm_socket.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket.py',
+    ];
+    
+    for (final path in possiblePaths) {
+      if (await File(path).exists()) {
+        scriptPath = path;
+        break;
+      }
+    }
+    
+    if (scriptPath == null) {
+      _logState?.error('❌ rfcomm_socket.py 脚本不存在');
+      return false;
+    }
+    
+    try {
+      _logState?.debug('   启动命令: python3 $scriptPath $deviceAddress $targetChannel');
+      
+      final process = await Process.start(
+        'python3',
+        [scriptPath, deviceAddress, targetChannel.toString()],
+      );
+      
+      _socketProcess = process;
+      
+      // 监听 stderr
+      process.stderr.transform(const SystemEncoding().decoder).listen((line) {
+        _logState?.debug('   [Python] $line');
+      });
+      
+      // 监听 stdout
+      _subscription = process.stdout.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            final rawHex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+            _logState?.debug('🔵 接收 [${data.length} 字节]: $rawHex');
+            _onDataReceived(Uint8List.fromList(data));
+          }
+        },
+        onError: (error) {
+          _logState?.error('❌ 数据接收错误: $error');
+          if (_isConnected) disconnect();
+        },
+        onDone: () {
+          _logState?.warning('⚠️ Socket 数据流结束');
+          if (_isConnected) disconnect();
+        },
+      );
+      
+      process.exitCode.then((code) {
+        _logState?.warning('⚠️ RFCOMM Socket 进程退出 (退出码: $code)');
+        if (_isConnected) disconnect();
+      });
+      
+      // 等待连接建立
+      await Future.delayed(const Duration(seconds: 2));
+      
+      _currentDeviceAddress = deviceAddress;
+      _currentDeviceName = deviceName;
+      _isConnected = true;
+      _sequenceNumber = 0;
+      _buffer = Uint8List(0);
+      _packetCount = 0;
+      _pendingResponses.clear();
+      
+      _logState?.success('✅ RFCOMM Socket 连接成功');
+      return true;
+    } catch (e) {
+      _logState?.error('❌ 启动 RFCOMM Socket 失败: $e');
+      return false;
+    }
+  }
+  
+  /// 启动 RFCOMM Bind Bridge 连接（内部方法）
+  Future<bool> _startRfcommBindBridge(String deviceAddress, {String? deviceName, int? channel}) async {
+    final targetChannel = channel ?? 5;
+    _currentChannel = targetChannel;
+    
+    _logState?.info('   启动 RFCOMM Bind Bridge...');
+    
+    // 查找 Python 脚本
+    String? scriptPath;
+    final executablePath = Platform.resolvedExecutable;
+    final executableDir = File(executablePath).parent.path;
+    
+    final possiblePaths = [
+      '$executableDir/scripts/rfcomm_bind_bridge.py',
+      'scripts/rfcomm_bind_bridge.py',
+      '/opt/jn-production-line/scripts/rfcomm_bind_bridge.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_bind_bridge.py',
+    ];
+    
+    for (final path in possiblePaths) {
+      if (await File(path).exists()) {
+        scriptPath = path;
+        break;
+      }
+    }
+    
+    if (scriptPath == null) {
+      _logState?.error('❌ rfcomm_bind_bridge.py 脚本不存在');
+      return false;
+    }
+    
+    try {
+      _logState?.debug('   启动命令: python3 $scriptPath $deviceAddress $targetChannel');
+      
+      final process = await Process.start(
+        'python3',
+        [scriptPath, deviceAddress, targetChannel.toString()],
+      );
+      
+      _socketProcess = process;
+      
+      // 监听 stderr
+      process.stderr.transform(const SystemEncoding().decoder).listen((line) {
+        _logState?.debug('   [Python] $line');
+      });
+      
+      // 监听 stdout
+      _subscription = process.stdout.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            final rawHex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+            _logState?.debug('🔵 接收 [${data.length} 字节]: $rawHex');
+            _onDataReceived(Uint8List.fromList(data));
+          }
+        },
+        onError: (error) {
+          _logState?.error('❌ 数据接收错误: $error');
+          if (_isConnected) disconnect();
+        },
+        onDone: () {
+          _logState?.warning('⚠️ Bind Bridge 数据流结束');
+          if (_isConnected) disconnect();
+        },
+      );
+      
+      process.exitCode.then((code) {
+        _logState?.warning('⚠️ RFCOMM Bind Bridge 进程退出 (退出码: $code)');
+        if (_isConnected) disconnect();
+      });
+      
+      // 等待连接建立
+      await Future.delayed(const Duration(seconds: 2));
+      
+      _currentDeviceAddress = deviceAddress;
+      _currentDeviceName = deviceName;
+      _isConnected = true;
+      _sequenceNumber = 0;
+      _buffer = Uint8List(0);
+      _packetCount = 0;
+      _pendingResponses.clear();
+      
+      _logState?.success('✅ RFCOMM Bind Bridge 连接成功');
+      return true;
+    } catch (e) {
+      _logState?.error('❌ 启动 RFCOMM Bind Bridge 失败: $e');
+      return false;
+    }
+  }
   
   /// 断开连接
   Future<void> disconnect() async {

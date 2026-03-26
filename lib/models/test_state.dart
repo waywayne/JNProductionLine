@@ -3307,6 +3307,169 @@ class TestState extends ChangeNotifier {
   /// 检查 Linux 蓝牙是否已连接
   bool get isLinuxBluetoothConnected => _linuxBtService.isConnected;
 
+  // ========== 多种蓝牙连接方案测试 ==========
+  
+  /// 方案 1: 自动扫描配对连接
+  /// 先扫描发现设备 → 配对 → 信任 → RFCOMM Socket 连接
+  Future<bool> testBluetoothMethod1AutoScan({
+    required String deviceAddress,
+    String? deviceName,
+    int channel = 5,
+    String uuid = '7033',
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🔵 方案 1: 自动扫描配对连接', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $channel', type: LogType.debug);
+      _logState?.info('   UUID: $uuid', type: LogType.debug);
+      
+      // 设置服务 UUID
+      _linuxBtService.setServiceUuid(uuid);
+      
+      // 使用默认的 connect 方法（包含扫描和配对）
+      final connected = await _linuxBtService.connect(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+        uuid: uuid,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ 方案 1 连接成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 方案 1 连接失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return connected;
+    } catch (e) {
+      _logState?.error('❌ 方案 1 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 方案 2: 直接连接（已配对设备）
+  /// 跳过扫描，直接使用已配对设备进行 RFCOMM Socket 连接
+  Future<bool> testBluetoothMethod2DirectConnect({
+    required String deviceAddress,
+    String? deviceName,
+    int channel = 5,
+    String uuid = '7033',
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🟢 方案 2: 直接连接（已配对）', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $channel', type: LogType.debug);
+      _logState?.info('   UUID: $uuid', type: LogType.debug);
+      
+      // 设置服务 UUID
+      _linuxBtService.setServiceUuid(uuid);
+      
+      // 直接连接，跳过扫描和配对
+      final connected = await _linuxBtService.connectDirectly(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ 方案 2 连接成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 方案 2 连接失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return connected;
+    } catch (e) {
+      _logState?.error('❌ 方案 2 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 方案 3: RFCOMM Bind 模式
+  /// 使用 rfcomm bind 命令绑定设备到 /dev/rfcommX
+  Future<bool> testBluetoothMethod3RfcommBind({
+    required String deviceAddress,
+    String? deviceName,
+    int channel = 5,
+    String uuid = '7033',
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🟠 方案 3: RFCOMM Bind 模式', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $channel', type: LogType.debug);
+      _logState?.info('   UUID: $uuid', type: LogType.debug);
+      
+      // 设置服务 UUID
+      _linuxBtService.setServiceUuid(uuid);
+      
+      // 使用 RFCOMM Bind 模式连接
+      final connected = await _linuxBtService.connectWithRfcommBind(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ 方案 3 连接成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 方案 3 连接失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return connected;
+    } catch (e) {
+      _logState?.error('❌ 方案 3 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 方案 4: RFCOMM Socket 模式
+  /// 使用 Python bluetooth socket 直接连接
+  Future<bool> testBluetoothMethod4RfcommSocket({
+    required String deviceAddress,
+    String? deviceName,
+    int channel = 5,
+    String uuid = '7033',
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🟣 方案 4: RFCOMM Socket 模式', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $channel', type: LogType.debug);
+      _logState?.info('   UUID: $uuid', type: LogType.debug);
+      
+      // 设置服务 UUID
+      _linuxBtService.setServiceUuid(uuid);
+      
+      // 使用 RFCOMM Socket 模式连接
+      final connected = await _linuxBtService.connectWithRfcommSocket(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ 方案 4 连接成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 方案 4 连接失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return connected;
+    } catch (e) {
+      _logState?.error('❌ 方案 4 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
   /// 获取当前连接的 Linux 蓝牙设备信息
   String? get linuxBluetoothDeviceName => _linuxBtService.currentDeviceName;
   String? get linuxBluetoothDeviceAddress => _linuxBtService.currentDeviceAddress;

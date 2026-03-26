@@ -7,6 +7,7 @@ import '../services/product_sn_api.dart';
 import '../services/production_test_commands.dart';
 import '../config/wifi_config.dart';
 import 'sn_input_dialog.dart';
+import 'bluetooth_test_options_dialog.dart';
 
 /// 超声前整机产测自动测试组件
 class PreUltrasoundAutoTest extends StatefulWidget {
@@ -118,6 +119,68 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
               ),
               
               const SizedBox(height: 20),
+              
+              // 蓝牙测试方案按钮区域
+              if (!_isAutoTesting) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.bluetooth, color: Colors.blue[700], size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            '蓝牙连接测试方案',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _buildMethodButton(
+                            label: '方案1: 扫描配对',
+                            color: Colors.blue,
+                            icon: Icons.search,
+                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.autoScan),
+                          ),
+                          _buildMethodButton(
+                            label: '方案2: 直接连接',
+                            color: Colors.green,
+                            icon: Icons.link,
+                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.directConnect),
+                          ),
+                          _buildMethodButton(
+                            label: '方案3: RFCOMM Bind',
+                            color: Colors.orange,
+                            icon: Icons.cable,
+                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommBind),
+                          ),
+                          _buildMethodButton(
+                            label: '方案4: RFCOMM Socket',
+                            color: Colors.purple,
+                            icon: Icons.code,
+                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommSocket),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               
               // 控制按钮
               Row(
@@ -345,6 +408,208 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       _isAutoTesting = false;
     });
     logState.warning('⏹️ 超声前整机产测已停止');
+  }
+
+  /// 构建方案测试按钮
+  Widget _buildMethodButton({
+    required String label,
+    required Color color,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 16),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  /// 单独测试某个蓝牙连接方案
+  Future<void> _testSingleMethod(TestState state, BluetoothTestMethod method) async {
+    final logState = context.read<LogState>();
+    
+    // 弹出简单的地址输入对话框
+    if (!mounted) return;
+    final result = await showDialog<BluetoothTestOptions>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _SimpleBluetoothInputDialog(method: method),
+    );
+    
+    if (result == null) {
+      logState.warning('用户取消测试');
+      return;
+    }
+    
+    final bluetoothAddress = result.productInfo.bluetoothAddress;
+    final channel = result.channel;
+    final uuid = result.uuid;
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔵 ${_getMethodName(method)}');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('   蓝牙地址: $bluetoothAddress');
+    logState.info('   RFCOMM Channel: $channel');
+    logState.info('   UUID: $uuid');
+    
+    bool success = false;
+    
+    switch (method) {
+      case BluetoothTestMethod.autoScan:
+        success = await state.testBluetoothMethod1AutoScan(
+          deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.directConnect:
+        success = await state.testBluetoothMethod2DirectConnect(
+          deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.rfcommBind:
+        success = await state.testBluetoothMethod3RfcommBind(
+          deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.rfcommSocket:
+        success = await state.testBluetoothMethod4RfcommSocket(
+          deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
+        );
+        break;
+    }
+    
+    if (success) {
+      logState.info('✅ ${_getMethodName(method)} 连接成功！');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('✅ ${_getMethodName(method)} 连接成功！'), backgroundColor: Colors.green),
+        );
+      }
+    } else {
+      logState.error('❌ ${_getMethodName(method)} 连接失败');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ ${_getMethodName(method)} 连接失败'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
+
+  /// 蓝牙连接方案测试
+  /// 支持多种连接方式测试，方便排查问题
+  Future<void> _startBluetoothMethodTest(TestState state) async {
+    final logState = context.read<LogState>();
+    
+    if (!mounted) return;
+    final result = await showDialog<BluetoothTestOptions>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const BluetoothTestOptionsDialog(),
+    );
+    
+    if (result == null) {
+      logState.warning('用户取消蓝牙方案测试');
+      return;
+    }
+    
+    final bluetoothAddress = result.productInfo.bluetoothAddress;
+    final method = result.method;
+    final channel = result.channel;
+    final uuid = result.uuid;
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔵 蓝牙连接方案测试');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('   蓝牙地址: $bluetoothAddress');
+    logState.info('   RFCOMM Channel: $channel');
+    logState.info('   UUID: $uuid');
+    logState.info('   测试方案: ${_getMethodName(method)}');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
+    bool success = false;
+    
+    switch (method) {
+      case BluetoothTestMethod.autoScan:
+        logState.info('🔵 执行方案 1: 自动扫描配对连接');
+        success = await state.testBluetoothMethod1AutoScan(
+          deviceAddress: bluetoothAddress,
+          channel: channel,
+          uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.directConnect:
+        logState.info('🟢 执行方案 2: 直接连接（已配对）');
+        success = await state.testBluetoothMethod2DirectConnect(
+          deviceAddress: bluetoothAddress,
+          channel: channel,
+          uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.rfcommBind:
+        logState.info('🟠 执行方案 3: RFCOMM Bind 模式');
+        success = await state.testBluetoothMethod3RfcommBind(
+          deviceAddress: bluetoothAddress,
+          channel: channel,
+          uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.rfcommSocket:
+        logState.info('🟣 执行方案 4: RFCOMM Socket 模式');
+        success = await state.testBluetoothMethod4RfcommSocket(
+          deviceAddress: bluetoothAddress,
+          channel: channel,
+          uuid: uuid,
+        );
+        break;
+    }
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    if (success) {
+      logState.info('✅ ${_getMethodName(method)} 连接成功！');
+      logState.info('   连接已保持，可以进行后续测试');
+      
+      // 显示成功提示
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ ${_getMethodName(method)} 连接成功！'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } else {
+      logState.error('❌ ${_getMethodName(method)} 连接失败');
+      
+      // 显示失败提示
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ ${_getMethodName(method)} 连接失败'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
+  
+  String _getMethodName(BluetoothTestMethod method) {
+    switch (method) {
+      case BluetoothTestMethod.autoScan:
+        return '方案1: 自动扫描配对连接';
+      case BluetoothTestMethod.directConnect:
+        return '方案2: 直接连接';
+      case BluetoothTestMethod.rfcommBind:
+        return '方案3: RFCOMM Bind';
+      case BluetoothTestMethod.rfcommSocket:
+        return '方案4: RFCOMM Socket';
+    }
   }
 
   // ========== 测试步骤实现 ==========
@@ -746,4 +1011,191 @@ class TestStepResult {
     required this.status,
     this.message,
   });
+}
+
+/// 简单的蓝牙地址输入对话框（用于单独测试某个方案）
+class _SimpleBluetoothInputDialog extends StatefulWidget {
+  final BluetoothTestMethod method;
+  
+  const _SimpleBluetoothInputDialog({required this.method});
+
+  @override
+  State<_SimpleBluetoothInputDialog> createState() => _SimpleBluetoothInputDialogState();
+}
+
+class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog> {
+  final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _channelController = TextEditingController(text: '5');
+  final TextEditingController _uuidController = TextEditingController(text: '7033');
+  String? _errorMessage;
+
+  String get _methodName {
+    switch (widget.method) {
+      case BluetoothTestMethod.autoScan:
+        return '方案1: 扫描配对连接';
+      case BluetoothTestMethod.directConnect:
+        return '方案2: 直接连接';
+      case BluetoothTestMethod.rfcommBind:
+        return '方案3: RFCOMM Bind';
+      case BluetoothTestMethod.rfcommSocket:
+        return '方案4: RFCOMM Socket';
+    }
+  }
+
+  Color get _methodColor {
+    switch (widget.method) {
+      case BluetoothTestMethod.autoScan:
+        return Colors.blue;
+      case BluetoothTestMethod.directConnect:
+        return Colors.green;
+      case BluetoothTestMethod.rfcommBind:
+        return Colors.orange;
+      case BluetoothTestMethod.rfcommSocket:
+        return Colors.purple;
+    }
+  }
+
+  bool _isValidBluetoothAddress(String address) {
+    final regex = RegExp(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$');
+    return regex.hasMatch(address);
+  }
+
+  void _handleConfirm() {
+    final address = _addressController.text.trim();
+    
+    if (address.isEmpty) {
+      setState(() => _errorMessage = '请输入蓝牙 MAC 地址');
+      return;
+    }
+    
+    if (!_isValidBluetoothAddress(address)) {
+      setState(() => _errorMessage = '蓝牙地址格式不正确');
+      return;
+    }
+    
+    final formattedAddress = address.toUpperCase().replaceAll('-', ':');
+    final channel = int.tryParse(_channelController.text.trim()) ?? 5;
+    final uuid = _uuidController.text.trim().isEmpty ? '7033' : _uuidController.text.trim();
+    
+    final result = BluetoothTestOptions(
+      productInfo: ProductSNInfo(
+        snCode: '手动输入',
+        bluetoothAddress: formattedAddress,
+        macAddress: '',
+      ),
+      method: widget.method,
+      channel: channel,
+      uuid: uuid,
+    );
+    
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 标题
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _methodColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.bluetooth, color: _methodColor),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _methodName,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: _methodColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // 蓝牙地址输入
+            TextField(
+              controller: _addressController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: '蓝牙 MAC 地址',
+                hintText: '例如: 48:08:EB:60:00:60',
+                prefixIcon: const Icon(Icons.bluetooth),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                errorText: _errorMessage,
+              ),
+              onSubmitted: (_) => _handleConfirm(),
+            ),
+            const SizedBox(height: 12),
+            
+            // Channel 和 UUID
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _channelController,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'Channel',
+                      hintText: '5',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _uuidController,
+                    decoration: InputDecoration(
+                      labelText: 'UUID',
+                      hintText: '7033',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            
+            // 按钮
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('取消'),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: _handleConfirm,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _methodColor,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('开始测试'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
