@@ -335,23 +335,26 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
   Future<void> _startAutoTest(TestState state) async {
     final logState = context.read<LogState>();
     
-    // 先弹窗输入SN号
+    // 先弹窗输入SN号或MAC地址，并选择连接方案
     if (!mounted) return;
-    final snResult = await showDialog<ProductSNInfo>(
+    final options = await showDialog<_AutoTestOptions>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const SNInputDialog(),
+      builder: (context) => _AutoTestInputDialog(defaultMethod: _selectedMethod),
     );
     
-    if (snResult == null) {
-      logState.warning('用户取消SN输入');
+    if (options == null) {
+      logState.warning('用户取消输入');
       return;
     }
     
-    _productInfo = snResult;
+    _productInfo = options.productInfo;
+    _selectedMethod = options.method;
+    
     logState.info('获取到设备信息: SN=${_productInfo!.snCode}');
     logState.info('蓝牙地址: ${_productInfo!.bluetoothAddress}');
     logState.info('WiFi MAC: ${_productInfo!.macAddress}');
+    logState.info('连接方案: ${_getMethodName(_selectedMethod)}');
     
     setState(() {
       _isAutoTesting = true;
@@ -1043,11 +1046,48 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       
       logState.info('📸 发送拍照命令...');
       
+      // 发送 Sensor 命令 (0x0C + 0x02 = 开始发送数据)
       final command = ProductionTestCommands.createSensorCommand(0x02);
-      await state.runManualTest('摄像头拍照', command);
+      final cmdHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      logState.info('📤 发送: [$cmdHex] (${command.length} bytes)');
       
-      logState.info('⏳ 开始监听图片数据流...');
-      await Future.delayed(const Duration(seconds: 2));
+      // 等待嵌入式主动推送的响应，超时时间 10 秒
+      logState.info('⏳ 等待嵌入式推送拍照完成指令 (超时: 10s)...');
+      final response = await state.sendCommandViaLinuxBluetooth(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      // 检查响应
+      if (response == null) {
+        logState.error('❌ 等待拍照响应超时');
+        return false;
+      }
+      
+      if (response.containsKey('error')) {
+        logState.error('❌ 拍照命令失败: ${response['error']}');
+        return false;
+      }
+      
+      // 解析响应，检查是否为 Sensor 命令的响应
+      if (response.containsKey('payload')) {
+        final payload = response['payload'];
+        if (payload is Uint8List && payload.isNotEmpty) {
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          logState.info('📥 收到响应: [$payloadHex]');
+          
+          // 检查响应的 CMD 是否为 Sensor (0x0C)
+          if (payload[0] == ProductionTestCommands.cmdSensor) {
+            logState.info('✅ 收到 Sensor 响应，拍照完成');
+          } else {
+            logState.warning('⚠️ 响应 CMD 不匹配: 0x${payload[0].toRadixString(16).toUpperCase()}');
+          }
+        }
+      }
+      
+      logState.info('✅ 拍照命令执行成功，准备下载图片...');
       
       if (_deviceIP == null || _deviceIP!.isEmpty) {
         logState.error('❌ 无法下载图片：设备IP地址为空');
@@ -1348,6 +1388,338 @@ class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog
           ],
         ),
       ),
+    );
+  }
+}
+
+// 自动测试选项
+class _AutoTestOptions {
+  final ProductSNInfo productInfo;
+  final BluetoothTestMethod method;
+  
+  _AutoTestOptions({
+    required this.productInfo,
+    required this.method,
+  });
+}
+
+// 自动测试输入对话框（支持 SN 或 MAC 地址输入 + 方案选择）
+class _AutoTestInputDialog extends StatefulWidget {
+  final BluetoothTestMethod defaultMethod;
+  
+  const _AutoTestInputDialog({required this.defaultMethod});
+
+  @override
+  State<_AutoTestInputDialog> createState() => _AutoTestInputDialogState();
+}
+
+class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
+  final TextEditingController _macController = TextEditingController();
+  BluetoothTestMethod _selectedMethod = BluetoothTestMethod.rfcommBind;
+  ProductSNInfo? _productInfo;
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedMethod = widget.defaultMethod;
+  }
+
+  @override
+  void dispose() {
+    _macController.dispose();
+    super.dispose();
+  }
+
+  bool _isValidBluetoothAddress(String address) {
+    final regex = RegExp(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$');
+    return regex.hasMatch(address);
+  }
+
+  Future<void> _showSNInput() async {
+    final productInfo = await showDialog<ProductSNInfo>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const SNInputDialog(),
+    );
+
+    if (productInfo != null) {
+      setState(() {
+        _productInfo = productInfo;
+        _errorMessage = null;
+      });
+    }
+  }
+
+  void _useManualMacInput() {
+    final address = _macController.text.trim();
+    
+    if (address.isEmpty) {
+      setState(() => _errorMessage = '请输入蓝牙 MAC 地址');
+      return;
+    }
+    
+    if (!_isValidBluetoothAddress(address)) {
+      setState(() => _errorMessage = 'MAC 地址格式不正确，例如: 48:08:EB:60:00:60');
+      return;
+    }
+    
+    final formattedAddress = address.toUpperCase().replaceAll('-', ':');
+    
+    setState(() {
+      _productInfo = ProductSNInfo(
+        snCode: '手动输入',
+        bluetoothAddress: formattedAddress,
+        macAddress: '',
+      );
+      _errorMessage = null;
+    });
+  }
+
+  void _handleConfirm() {
+    if (_productInfo == null) {
+      setState(() => _errorMessage = '请先输入 SN 码或蓝牙 MAC 地址');
+      return;
+    }
+    
+    Navigator.of(context).pop(_AutoTestOptions(
+      productInfo: _productInfo!,
+      method: _selectedMethod,
+    ));
+  }
+
+  String _getMethodName(BluetoothTestMethod method) {
+    switch (method) {
+      case BluetoothTestMethod.autoScan:
+        return '方案1: 扫描配对';
+      case BluetoothTestMethod.directConnect:
+        return '方案2: 直接连接';
+      case BluetoothTestMethod.rfcommBind:
+        return '方案3: RFCOMM Bind ⭐';
+      case BluetoothTestMethod.rfcommSocket:
+        return '方案4: RFCOMM Socket';
+      case BluetoothTestMethod.serial:
+        return '方案5: 串口设备';
+      case BluetoothTestMethod.commandLine:
+        return '方案6: 命令行工具';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.bluetooth, color: Colors.blue[700]),
+          const SizedBox(width: 12),
+          const Text('自动测试设置'),
+        ],
+      ),
+      content: SizedBox(
+        width: 450,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 输入方式选择
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange[200]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.bluetooth, color: Colors.orange[700], size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          '输入蓝牙 MAC 地址',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _macController,
+                      decoration: InputDecoration(
+                        hintText: '例如: 48:08:EB:60:00:60',
+                        prefixIcon: const Icon(Icons.bluetooth, size: 20),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: _useManualMacInput,
+                            icon: const Icon(Icons.check, size: 16),
+                            label: const Text('确认地址'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _showSNInput,
+                            icon: const Icon(Icons.qr_code, size: 16),
+                            label: const Text('SN码查询'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              
+              // 显示已获取的设备信息
+              if (_productInfo != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[300]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.green[700], size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            '设备信息',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text('SN: ${_productInfo!.snCode}', style: const TextStyle(fontSize: 13)),
+                      Text('蓝牙: ${_productInfo!.bluetoothAddress}', style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
+                      if (_productInfo!.macAddress.isNotEmpty)
+                        Text('WiFi: ${_productInfo!.macAddress}', style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
+                    ],
+                  ),
+                ),
+              ],
+              
+              // 错误信息
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red[300]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error, color: Colors.red[700], size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(fontSize: 12, color: Colors.red[700]),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              
+              // 方案选择
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.settings, color: Colors.blue[700], size: 16),
+                        const SizedBox(width: 8),
+                        Text(
+                          '选择连接方案',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<BluetoothTestMethod>(
+                      value: _selectedMethod,
+                      isDense: true,
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        filled: true,
+                        fillColor: Colors.white,
+                      ),
+                      items: BluetoothTestMethod.values.map((method) {
+                        return DropdownMenuItem(
+                          value: method,
+                          child: Text(_getMethodName(method), style: const TextStyle(fontSize: 13)),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedMethod = value);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        ElevatedButton(
+          onPressed: _productInfo != null ? _handleConfirm : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blue,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('开始自动测试'),
+        ),
+      ],
     );
   }
 }
