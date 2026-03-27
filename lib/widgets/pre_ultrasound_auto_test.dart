@@ -528,6 +528,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
           deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
         );
         break;
+      case BluetoothTestMethod.serial:
+        success = await state.testBluetoothMethod5Serial(
+          deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.commandLine:
+        success = await state.testBluetoothMethod6CommandLine(
+          deviceAddress: bluetoothAddress, channel: channel, uuid: uuid,
+        );
+        break;
     }
     
     if (success) {
@@ -609,6 +619,22 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       case BluetoothTestMethod.rfcommSocket:
         logState.info('🟣 执行方案 4: RFCOMM Socket 模式');
         success = await state.testBluetoothMethod4RfcommSocket(
+          deviceAddress: bluetoothAddress,
+          channel: channel,
+          uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.serial:
+        logState.info('🟤 执行方案 5: 串口设备模式');
+        success = await state.testBluetoothMethod5Serial(
+          deviceAddress: bluetoothAddress,
+          channel: channel,
+          uuid: uuid,
+        );
+        break;
+      case BluetoothTestMethod.commandLine:
+        logState.info('⚫ 执行方案 6: 命令行工具模式');
+        success = await state.testBluetoothMethod6CommandLine(
           deviceAddress: bluetoothAddress,
           channel: channel,
           uuid: uuid,
