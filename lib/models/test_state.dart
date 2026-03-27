@@ -3469,6 +3469,86 @@ class TestState extends ChangeNotifier {
       return false;
     }
   }
+  
+  /// 方案 5: 串口设备模式
+  /// 使用 pyserial 读写 /dev/rfcomm0
+  Future<bool> testBluetoothMethod5Serial({
+    required String deviceAddress,
+    String? deviceName,
+    int channel = 5,
+    String uuid = '7033',
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('🟤 方案 5: 串口设备模式', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $channel', type: LogType.debug);
+      _logState?.info('   UUID: $uuid', type: LogType.debug);
+      
+      // 设置服务 UUID
+      _linuxBtService.setServiceUuid(uuid);
+      
+      // 使用串口设备模式连接
+      final connected = await _linuxBtService.connectWithSerial(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ 方案 5 连接成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 方案 5 连接失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return connected;
+    } catch (e) {
+      _logState?.error('❌ 方案 5 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
+  
+  /// 方案 6: 命令行工具模式
+  /// 使用 hcitool/bluetoothctl 命令行工具
+  Future<bool> testBluetoothMethod6CommandLine({
+    required String deviceAddress,
+    String? deviceName,
+    int channel = 5,
+    String uuid = '7033',
+  }) async {
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('⚫ 方案 6: 命令行工具模式', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('   目标地址: $deviceAddress', type: LogType.debug);
+      _logState?.info('   RFCOMM Channel: $channel', type: LogType.debug);
+      _logState?.info('   UUID: $uuid', type: LogType.debug);
+      
+      // 设置服务 UUID
+      _linuxBtService.setServiceUuid(uuid);
+      
+      // 使用命令行工具模式连接
+      final connected = await _linuxBtService.connectWithCommandLine(
+        deviceAddress,
+        deviceName: deviceName,
+        channel: channel,
+      );
+      
+      if (connected) {
+        _logState?.success('✅ 方案 6 连接成功', type: LogType.debug);
+      } else {
+        _logState?.error('❌ 方案 6 连接失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return connected;
+    } catch (e) {
+      _logState?.error('❌ 方案 6 异常: $e', type: LogType.debug);
+      return false;
+    }
+  }
 
   /// 获取当前连接的 Linux 蓝牙设备信息
   String? get linuxBluetoothDeviceName => _linuxBtService.currentDeviceName;

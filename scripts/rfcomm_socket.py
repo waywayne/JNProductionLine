@@ -44,21 +44,26 @@ def create_rfcomm_socket(mac_address, channel):
         log(f"❌ 连接异常: {e}")
         return None
 
-def socket_to_stdout(sock):
+def socket_to_stdout(sock, keep_alive_event):
     """从 socket 读取数据并输出到 stdout（非阻塞）"""
     try:
         log("🎧 开始监听 Socket 数据...")
         recv_count = 0
         timeout_count = 0
+        empty_count = 0
         
-        while True:
+        while keep_alive_event.is_set():
             try:
                 data = sock.recv(1024)
                 if not data:
-                    log("Socket 连接已关闭（读取端）")
-                    break
+                    empty_count += 1
+                    if empty_count > 10:
+                        log("Socket 连接已关闭（读取端）")
+                        break
+                    continue
                 
                 recv_count += 1
+                empty_count = 0  # 重置空读取计数
                 # 记录接收到的数据
                 data_hex = ' '.join(f'{b:02X}' for b in data)
                 log(f"📥 接收到 {len(data)} 字节 (第 {recv_count} 次): {data_hex[:100]}{'...' if len(data_hex) > 100 else ''}")
@@ -70,8 +75,8 @@ def socket_to_stdout(sock):
             except socket.timeout:
                 # 超时是正常的，继续循环
                 timeout_count += 1
-                if timeout_count % 100 == 0:  # 每 100 次超时打印一次
-                    log(f"⏳ 持续监听中... (超时次数: {timeout_count}, 已接收: {recv_count} 次)")
+                if timeout_count % 200 == 0:
+                    log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
                 time.sleep(0.01)
                 continue
             except bluetooth.BluetoothError as e:
@@ -80,8 +85,8 @@ def socket_to_stdout(sock):
                 if 'timed out' in error_msg or 'timeout' in error_msg:
                     # 超时是正常的，继续循环
                     timeout_count += 1
-                    if timeout_count % 100 == 0:
-                        log(f"⏳ 持续监听中... (蓝牙超时: {timeout_count}, 已接收: {recv_count} 次)")
+                    if timeout_count % 200 == 0:
+                        log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
                     time.sleep(0.01)
                     continue
                 else:
@@ -92,7 +97,7 @@ def socket_to_stdout(sock):
     except Exception as e:
         log(f"读取异常: {e}")
 
-def stdin_to_socket(sock):
+def stdin_to_socket(sock, keep_alive_event):
     """从 stdin 读取数据并发送到 socket（非阻塞）"""
     try:
         # 设置 stdin 为非阻塞模式
@@ -100,7 +105,7 @@ def stdin_to_socket(sock):
         flags = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)
         fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
         
-        while True:
+        while keep_alive_event.is_set():
             # 使用 select 等待数据（带超时）
             readable, _, _ = select.select([sys.stdin], [], [], 0.1)
             
@@ -166,9 +171,13 @@ def main():
     
     log("启动双向数据传输...")
     
+    # 创建 keep_alive 事件
+    keep_alive_event = threading.Event()
+    keep_alive_event.set()
+    
     # 创建两个线程：一个读取 socket 输出到 stdout，一个从 stdin 写入 socket
-    read_thread = threading.Thread(target=socket_to_stdout, args=(sock,), daemon=True)
-    write_thread = threading.Thread(target=stdin_to_socket, args=(sock,), daemon=True)
+    read_thread = threading.Thread(target=socket_to_stdout, args=(sock, keep_alive_event), daemon=True)
+    write_thread = threading.Thread(target=stdin_to_socket, args=(sock, keep_alive_event), daemon=True)
     
     read_thread.start()
     write_thread.start()
@@ -179,6 +188,7 @@ def main():
         write_thread.join()
     except KeyboardInterrupt:
         log("收到中断信号")
+        keep_alive_event.clear()
     finally:
         sock.close()
         log("Socket 已关闭")

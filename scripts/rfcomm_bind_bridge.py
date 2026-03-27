@@ -71,26 +71,32 @@ def setup_rfcomm_bind(mac_address, channel):
         log(f"❌ 绑定异常: {e}")
         return False
 
-def device_to_stdout(device_fd):
+def device_to_stdout(device_fd, keep_alive_event):
     """从设备读取数据并输出到 stdout"""
     log("🎧 开始监听设备数据...")
     recv_count = 0
     timeout_count = 0
+    empty_read_count = 0
     
     try:
-        while True:
+        while keep_alive_event.is_set():
             # 使用 select 检查是否有数据
-            readable, _, _ = select.select([device_fd], [], [], 0.1)
+            readable, _, _ = select.select([device_fd], [], [], 0.5)
             
             if readable:
                 try:
                     data = os.read(device_fd, 1024)
                     if not data:
-                        log("设备连接已关闭（读取端）")
-                        break
+                        empty_read_count += 1
+                        # 连续多次空读取才认为连接关闭
+                        if empty_read_count > 10:
+                            log("设备连接已关闭（读取端）")
+                            break
+                        continue
                     
                     recv_count += 1
                     timeout_count = 0  # 重置超时计数
+                    empty_read_count = 0  # 重置空读取计数
                     
                     # 记录接收到的数据
                     data_hex = ' '.join(f'{b:02X}' for b in data)
@@ -103,28 +109,28 @@ def device_to_stdout(device_fd):
                 except OSError as e:
                     if e.errno == 11:  # EAGAIN
                         timeout_count += 1
-                        if timeout_count % 100 == 0:
-                            log(f"⏳ 持续监听中... (超时: {timeout_count}, 已接收: {recv_count} 次)")
+                        if timeout_count % 200 == 0:
+                            log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
                         continue
                     else:
                         log(f"读取错误: {e}")
                         break
             else:
                 timeout_count += 1
-                if timeout_count % 100 == 0:
-                    log(f"⏳ 持续监听中... (超时: {timeout_count}, 已接收: {recv_count} 次)")
+                if timeout_count % 200 == 0:
+                    log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
             
     except Exception as e:
         log(f"读取异常: {e}")
 
-def stdin_to_device(device_fd):
+def stdin_to_device(device_fd, keep_alive_event):
     """从 stdin 读取数据并发送到设备"""
     log("📤 开始监听 stdin 数据...")
     
     try:
-        while True:
+        while keep_alive_event.is_set():
             # 使用 select 检查 stdin 是否有数据
-            readable, _, _ = select.select([sys.stdin.buffer], [], [], 0.1)
+            readable, _, _ = select.select([sys.stdin.buffer], [], [], 0.5)
             
             if readable:
                 try:
@@ -197,14 +203,18 @@ def main():
     log("✅ 连接已建立，开始数据传输")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    # 4. 启动双向数据传输
+    # 4. 创建 keep_alive 事件
+    keep_alive_event = threading.Event()
+    keep_alive_event.set()
+    
+    # 5. 启动双向数据传输
     try:
         # 设备 -> stdout（后台线程）
-        read_thread = threading.Thread(target=device_to_stdout, args=(device_fd,), daemon=True)
+        read_thread = threading.Thread(target=device_to_stdout, args=(device_fd, keep_alive_event), daemon=True)
         read_thread.start()
         
         # stdin -> 设备（主线程）
-        stdin_to_device(device_fd)
+        stdin_to_device(device_fd, keep_alive_event)
         
     except KeyboardInterrupt:
         log("收到中断信号")

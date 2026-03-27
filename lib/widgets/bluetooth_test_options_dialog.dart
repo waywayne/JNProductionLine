@@ -7,6 +7,8 @@ enum BluetoothTestMethod {
   directConnect,  // 方案2: 直接连接（已配对设备）
   rfcommBind,     // 方案3: RFCOMM Bind 模式
   rfcommSocket,   // 方案4: RFCOMM Socket 模式
+  serial,         // 方案5: 串口设备模式
+  commandLine,    // 方案6: 命令行工具模式
 }
 
 /// 蓝牙测试方案结果

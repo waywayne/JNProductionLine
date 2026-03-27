@@ -23,6 +23,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
   final List<TestStepResult> _stepResults = [];
   ProductSNInfo? _productInfo;
   String? _deviceIP;
+  BluetoothTestMethod _selectedMethod = BluetoothTestMethod.rfcommBind; // 默认使用方案3
 
   @override
   void initState() {
@@ -186,7 +187,53 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  if (!_isAutoTesting)
+                  if (!_isAutoTesting) ...[
+                    // 蓝牙方案选择
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<BluetoothTestMethod>(
+                          value: _selectedMethod,
+                          isDense: true,
+                          items: const [
+                            DropdownMenuItem(
+                              value: BluetoothTestMethod.autoScan,
+                              child: Text('方案1: 扫描配对', style: TextStyle(fontSize: 12)),
+                            ),
+                            DropdownMenuItem(
+                              value: BluetoothTestMethod.directConnect,
+                              child: Text('方案2: 直接连接', style: TextStyle(fontSize: 12)),
+                            ),
+                            DropdownMenuItem(
+                              value: BluetoothTestMethod.rfcommBind,
+                              child: Text('方案3: RFCOMM Bind ⭐', style: TextStyle(fontSize: 12)),
+                            ),
+                            DropdownMenuItem(
+                              value: BluetoothTestMethod.rfcommSocket,
+                              child: Text('方案4: RFCOMM Socket', style: TextStyle(fontSize: 12)),
+                            ),
+                            DropdownMenuItem(
+                              value: BluetoothTestMethod.serial,
+                              child: Text('方案5: 串口设备', style: TextStyle(fontSize: 12)),
+                            ),
+                            DropdownMenuItem(
+                              value: BluetoothTestMethod.commandLine,
+                              child: Text('方案6: 命令行工具', style: TextStyle(fontSize: 12)),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => _selectedMethod = value);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     ElevatedButton.icon(
                       onPressed: () => _startAutoTest(state),
                       icon: const Icon(Icons.play_arrow),
@@ -196,8 +243,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
-                    )
-                  else
+                    ),
+                  ] else
                     ElevatedButton.icon(
                       onPressed: () => _stopAutoTest(state),
                       icon: const Icon(Icons.stop),
@@ -609,13 +656,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         return '方案3: RFCOMM Bind';
       case BluetoothTestMethod.rfcommSocket:
         return '方案4: RFCOMM Socket';
+      case BluetoothTestMethod.serial:
+        return '方案5: 串口设备';
+      case BluetoothTestMethod.commandLine:
+        return '方案6: 命令行工具';
     }
   }
 
   // ========== 测试步骤实现 ==========
 
   /// 步骤1: 蓝牙连接测试
-  /// 使用 Linux 蓝牙 SPP 连接方式 (bluetoothctl + rfcomm)
+  /// 根据选择的方案使用不同的蓝牙连接方式
   Future<bool> _testBluetoothConnection(TestState state, LogState logState) async {
     try {
       if (_productInfo == null) {
@@ -625,7 +676,74 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       
       final bluetoothAddress = _productInfo!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 Linux 蓝牙 SPP 连接');
+      logState.info('🔗 使用 ${_getMethodName(_selectedMethod)}');
+      
+      bool success = false;
+      
+      // 根据选择的方案使用不同的连接方式
+      switch (_selectedMethod) {
+        case BluetoothTestMethod.autoScan:
+          success = await state.testBluetoothMethod1AutoScan(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
+          break;
+        case BluetoothTestMethod.directConnect:
+          success = await state.testBluetoothMethod2DirectConnect(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
+          break;
+        case BluetoothTestMethod.rfcommBind:
+          success = await state.testBluetoothMethod3RfcommBind(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
+          break;
+        case BluetoothTestMethod.rfcommSocket:
+          success = await state.testBluetoothMethod4RfcommSocket(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
+          break;
+        case BluetoothTestMethod.serial:
+          success = await state.testBluetoothMethod5Serial(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
+          break;
+        case BluetoothTestMethod.commandLine:
+          success = await state.testBluetoothMethod6CommandLine(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
+          break;
+      }
+      
+      return success;
+    } catch (e) {
+      logState.error('蓝牙连接测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 旧的蓝牙连接方法（保留作为备用）
+  Future<bool> _testBluetoothConnectionLegacy(TestState state, LogState logState) async {
+    try {
+      if (_productInfo == null) {
+        logState.error('设备信息未获取');
+        return false;
+      }
+      
+      final bluetoothAddress = _productInfo!.bluetoothAddress;
+      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      logState.info('🔗 使用 Linux 蓝牙 SPP 连接（旧方法）');
       
       // 使用 Linux 蓝牙 SPP 连接（基于 bluetoothctl + rfcomm）
       final success = await state.testLinuxBluetooth(
@@ -1039,6 +1157,10 @@ class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog
         return '方案3: RFCOMM Bind';
       case BluetoothTestMethod.rfcommSocket:
         return '方案4: RFCOMM Socket';
+      case BluetoothTestMethod.serial:
+        return '方案5: 串口设备';
+      case BluetoothTestMethod.commandLine:
+        return '方案6: 命令行工具';
     }
   }
 
@@ -1052,6 +1174,10 @@ class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog
         return Colors.orange;
       case BluetoothTestMethod.rfcommSocket:
         return Colors.purple;
+      case BluetoothTestMethod.serial:
+        return Colors.brown;
+      case BluetoothTestMethod.commandLine:
+        return Colors.grey;
     }
   }
 
