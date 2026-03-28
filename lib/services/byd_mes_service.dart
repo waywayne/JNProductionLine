@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../config/production_config.dart';
 
 /// BYD MES 系统服务
 /// 用于与 BYD MES 系统进行通讯
 class BydMesService {
-  // MES 配置
-  String _mesIp = '192.168.1.100';
-  String _clientId = 'DEFAULT_CLIENT';
+  // MES 配置 - 从 ProductionConfig 读取
+  final ProductionConfig _config = ProductionConfig();
   String _station = 'STATION1';
   
   // Python 脚本路径
@@ -17,14 +17,19 @@ class BydMesService {
   // 日志回调
   Function(String)? _onLog;
   
+  // 获取配置中的 MES IP
+  String get mesIp => _config.bydMesIp;
+  
+  // 获取配置中的 Client ID
+  String get clientId => _config.bydMesClientId;
+  
+  // 获取当前工站
+  String get station => _station;
+  
   BydMesService({
-    String? mesIp,
-    String? clientId,
     String? station,
     Function(String)? onLog,
   }) {
-    if (mesIp != null) _mesIp = mesIp;
-    if (clientId != null) _clientId = clientId;
     if (station != null) _station = station;
     _onLog = onLog;
     
@@ -52,19 +57,17 @@ class BydMesService {
     }
   }
   
-  /// 更新配置
-  void updateConfig({
-    String? mesIp,
-    String? clientId,
-    String? station,
-  }) {
-    if (mesIp != null) _mesIp = mesIp;
-    if (clientId != null) _clientId = clientId;
-    if (station != null) _station = station;
-    
-    _log('🔧 MES 配置已更新:');
-    _log('   MES IP: $_mesIp');
-    _log('   Client ID: $_clientId');
+  /// 更新工站配置
+  void updateStation(String station) {
+    _station = station;
+    _log('🔧 MES 工站已更新: $_station');
+  }
+  
+  /// 打印当前配置
+  void printConfig() {
+    _log('🔧 MES 配置:');
+    _log('   MES IP: $mesIp');
+    _log('   Client ID: $clientId');
     _log('   工站: $_station');
   }
   
@@ -93,8 +96,8 @@ class BydMesService {
         action,
         sn,
         _station,
-        _mesIp,
-        _clientId,
+        mesIp,
+        clientId,
         ...extraArgs,
       ];
       

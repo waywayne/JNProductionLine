@@ -30,6 +30,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _gpibAddressController;
   late TextEditingController _wifiSsidController;
   late TextEditingController _wifiPasswordController;
+  late TextEditingController _bydMesIpController;
+  late TextEditingController _bydMesClientIdController;
 
   @override
   void initState() {
@@ -53,6 +55,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _gpibAddressController = TextEditingController(text: _config.gpibAddress);
     _wifiSsidController = TextEditingController(text: _config.wifiSsid);
     _wifiPasswordController = TextEditingController(text: _config.wifiPassword);
+    _bydMesIpController = TextEditingController(text: _config.bydMesIp);
+    _bydMesClientIdController = TextEditingController(text: _config.bydMesClientId);
   }
 
   @override
@@ -72,6 +76,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _gpibAddressController.dispose();
     _wifiSsidController.dispose();
     _wifiPasswordController.dispose();
+    _bydMesIpController.dispose();
+    _bydMesClientIdController.dispose();
     super.dispose();
   }
 
@@ -92,6 +98,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setGpibAddress(_gpibAddressController.text);
       await _config.setWifiSsid(_wifiSsidController.text);
       await _config.setWifiPassword(_wifiPasswordController.text);
+      await _config.setBydMesIp(_bydMesIpController.text);
+      await _config.setBydMesClientId(_bydMesClientIdController.text);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -349,6 +357,29 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               inputType: TextInputType.text,
               helperText: 'WiFi控制测试中连接固定热点使用的密码',
               obscureText: true,
+            ),
+            const SizedBox(height: 32),
+
+            // BYD MES 配置
+            _buildSectionTitle('BYD MES 配置'),
+            _buildTextField(
+              controller: _bydMesIpController,
+              label: 'MES 服务器 IP',
+              hint: '例如: 192.168.1.100',
+              suffix: '',
+              icon: Icons.dns,
+              inputType: TextInputType.text,
+              helperText: 'BYD MES 系统服务器 IP 地址',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _bydMesClientIdController,
+              label: 'MES 客户端 ID',
+              hint: '例如: STATION_001',
+              suffix: '',
+              icon: Icons.badge,
+              inputType: TextInputType.text,
+              helperText: 'BYD MES 系统客户端标识',
             ),
             const SizedBox(height: 32),
 

@@ -5,11 +5,13 @@ import '../models/test_state.dart';
 import '../models/log_state.dart';
 import '../services/product_sn_api.dart';
 import '../services/production_test_commands.dart';
+import '../services/byd_mes_service.dart';
 import '../config/wifi_config.dart';
+import '../config/production_config.dart';
 import 'sn_input_dialog.dart';
 import 'bluetooth_test_options_dialog.dart';
 
-/// 超声前整机产测自动测试组件
+/// 超声前整机产测自动测试组件 - 支持三个工位
 class PreUltrasoundAutoTest extends StatefulWidget {
   const PreUltrasoundAutoTest({super.key});
 
@@ -17,23 +19,43 @@ class PreUltrasoundAutoTest extends StatefulWidget {
   State<PreUltrasoundAutoTest> createState() => _PreUltrasoundAutoTestState();
 }
 
-class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
-  bool _isAutoTesting = false;
-  int _currentStep = 0;
-  final List<TestStepResult> _stepResults = [];
-  ProductSNInfo? _productInfo;
-  String? _deviceIP;
-  BluetoothTestMethod _selectedMethod = BluetoothTestMethod.rfcommBind; // 默认使用方案3
+class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  
+  // 工位1状态
+  bool _isAutoTesting1 = false;
+  int _currentStep1 = 0;
+  final List<TestStepResult> _stepResults1 = [];
+  ProductSNInfo? _productInfo1;
+  String? _deviceIP1;
+  BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommBind;
+  
+  // 工位3状态
+  bool _isAutoTesting3 = false;
+  int _currentStep3 = 0;
+  final List<TestStepResult> _stepResults3 = [];
+  ProductSNInfo? _productInfo3;
+  BluetoothTestMethod _selectedMethod3 = BluetoothTestMethod.rfcommBind;
+  final BydMesService _mesService3 = BydMesService(station: 'STATION3');
+  final ProductionConfig _config = ProductionConfig();
 
   @override
   void initState() {
     super.initState();
-    _initializeSteps();
+    _tabController = TabController(length: 3, vsync: this);
+    _initializeSteps1();
+    _initializeSteps3();
   }
 
-  void _initializeSteps() {
-    _stepResults.clear();
-    _stepResults.addAll([
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _initializeSteps1() {
+    _stepResults1.clear();
+    _stepResults1.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: '产测开始', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 3, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
@@ -41,6 +63,29 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       TestStepResult(stepNumber: 5, name: 'IMU传感器测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 6, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 7, name: '产测结束', status: TestStepStatus.pending),
+    ]);
+  }
+
+  void _initializeSteps3() {
+    _stepResults3.clear();
+    _stepResults3.addAll([
+      TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '设备电压测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '电量检测测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '充电状态测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '右触控-TK1测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '右触控-TK2测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '右触控-TK3测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '左触控-佩戴测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '左触控-点击测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '左触控-双击测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '左触控-长按测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: '结束产测', status: TestStepStatus.pending),
     ]);
   }
 
@@ -58,146 +103,204 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.orange.shade200),
           ),
-          padding: const EdgeInsets.all(20),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 标题
-              Row(
-                children: [
-                  Icon(Icons.devices_other, color: Colors.orange.shade700, size: 28),
-                  const SizedBox(width: 12),
-                  Text(
-                    '超声前整机产测',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orange.shade900,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (_isAutoTesting)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade100,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.orange.shade700),
-                            ),
+              // 标题和 Tab 栏
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.devices_other, color: Colors.orange.shade700, size: 28),
+                        const SizedBox(width: 12),
+                        Text(
+                          '超声前整机产测',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade900,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '测试进行中...',
-                            style: TextStyle(
-                              color: Colors.orange.shade700,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              
-              // 测试步骤列表
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _stepResults.length,
-                  itemBuilder: (context, index) {
-                    final step = _stepResults[index];
-                    return _buildStepCard(step, index == _currentStep);
-                  },
+                    const SizedBox(height: 16),
+                    // Tab 栏
+                    TabBar(
+                      controller: _tabController,
+                      labelColor: Colors.orange.shade700,
+                      unselectedLabelColor: Colors.grey,
+                      indicatorColor: Colors.orange.shade700,
+                      indicatorWeight: 3,
+                      tabs: const [
+                        Tab(
+                          icon: Icon(Icons.wifi),
+                          text: '工位1: 射频图像',
+                        ),
+                        Tab(
+                          icon: Icon(Icons.volume_up),
+                          text: '工位2: 音频测试',
+                        ),
+                        Tab(
+                          icon: Icon(Icons.power),
+                          text: '工位3: 电源外设',
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
               
-              const SizedBox(height: 20),
-              
-              // 蓝牙测试方案按钮区域
-              if (!_isAutoTesting) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue[200]!),
+              // Tab 内容
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    // 工位1: 射频图像测试
+                    _buildWorkstation1Content(state),
+                    // 工位2: 音频测试（待实现）
+                    _buildWorkstation2Content(state),
+                    // 工位3: 电源外设测试
+                    _buildWorkstation3Content(state),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ========== 工位1: 射频图像测试 ==========
+  Widget _buildWorkstation1Content(TestState state) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 测试进行中提示
+          if (_isAutoTesting1)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.orange.shade700),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(width: 8),
+                  Text(
+                    '测试进行中...',
+                    style: TextStyle(
+                      color: Colors.orange.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
+          // 测试步骤列表
+          Expanded(
+            child: ListView.builder(
+              itemCount: _stepResults1.length,
+              itemBuilder: (context, index) {
+                final step = _stepResults1[index];
+                return _buildStepCard(step, index == _currentStep1 && _isAutoTesting1);
+              },
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // 蓝牙测试方案按钮区域
+          if (!_isAutoTesting1) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue[50],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue[200]!),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.bluetooth, color: Colors.blue[700], size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            '蓝牙连接测试方案',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _buildMethodButton(
-                            label: '方案1: 扫描配对',
-                            color: Colors.blue,
-                            icon: Icons.search,
-                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.autoScan),
-                          ),
-                          _buildMethodButton(
-                            label: '方案2: 直接连接',
-                            color: Colors.green,
-                            icon: Icons.link,
-                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.directConnect),
-                          ),
-                          _buildMethodButton(
-                            label: '方案3: RFCOMM Bind',
-                            color: Colors.orange,
-                            icon: Icons.cable,
-                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommBind),
-                          ),
-                          _buildMethodButton(
-                            label: '方案4: RFCOMM Socket',
-                            color: Colors.purple,
-                            icon: Icons.code,
-                            onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommSocket),
-                          ),
-                        ],
+                      Icon(Icons.bluetooth, color: Colors.blue[700], size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '蓝牙连接测试方案',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[700],
+                        ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              
-              // 控制按钮
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (!_isAutoTesting) ...[
-                    // 蓝牙方案选择
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildMethodButton(
+                        label: '方案1: 扫描配对',
+                        color: Colors.blue,
+                        icon: Icons.search,
+                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.autoScan),
                       ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<BluetoothTestMethod>(
-                          value: _selectedMethod,
+                      _buildMethodButton(
+                        label: '方案2: 直接连接',
+                        color: Colors.green,
+                        icon: Icons.link,
+                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.directConnect),
+                      ),
+                      _buildMethodButton(
+                        label: '方案3: RFCOMM Bind',
+                        color: Colors.orange,
+                        icon: Icons.cable,
+                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommBind),
+                      ),
+                      _buildMethodButton(
+                        label: '方案4: RFCOMM Socket',
+                        color: Colors.purple,
+                        icon: Icons.code,
+                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommSocket),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          
+          // 控制按钮
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (!_isAutoTesting1) ...[
+                // 蓝牙方案选择
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<BluetoothTestMethod>(
+                          value: _selectedMethod1,
                           isDense: true,
                           items: const [
                             DropdownMenuItem(
@@ -227,7 +330,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
                           ],
                           onChanged: (value) {
                             if (value != null) {
-                              setState(() => _selectedMethod = value);
+                              setState(() => _selectedMethod1 = value);
                             }
                           },
                         ),
@@ -235,7 +338,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: () => _startAutoTest(state),
+                      onPressed: () => _startAutoTest1(state),
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('开始自动测试'),
                       style: ElevatedButton.styleFrom(
@@ -246,7 +349,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
                     ),
                   ] else
                     ElevatedButton.icon(
-                      onPressed: () => _stopAutoTest(state),
+                      onPressed: _stopAutoTest1,
                       icon: const Icon(Icons.stop),
                       label: const Text('停止测试'),
                       style: ElevatedButton.styleFrom(
@@ -260,7 +363,204 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
             ],
           ),
         );
-      },
+  }
+
+  // ========== 工位2: 音频测试（待实现）==========
+  Widget _buildWorkstation2Content(TestState state) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.volume_up, size: 64, color: Colors.grey[400]),
+          const SizedBox(height: 16),
+          Text(
+            '音频测试工位',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '即将开放',
+            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========== 工位3: 电源外设测试 ==========
+  Widget _buildWorkstation3Content(TestState state) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 测试进行中提示
+          if (_isAutoTesting3)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green.shade100,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.green.shade700),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '测试进行中...',
+                    style: TextStyle(
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
+          // 测试步骤列表
+          Expanded(
+            child: ListView.builder(
+              itemCount: _stepResults3.length,
+              itemBuilder: (context, index) {
+                final step = _stepResults3[index];
+                return _buildStepCard3(step, index == _currentStep3 && _isAutoTesting3);
+              },
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // 控制按钮
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (!_isAutoTesting3) ...[
+                // 蓝牙方案选择
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey[300]!),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<BluetoothTestMethod>(
+                      value: _selectedMethod3,
+                      isDense: true,
+                      items: const [
+                        DropdownMenuItem(
+                          value: BluetoothTestMethod.autoScan,
+                          child: Text('方案1: 扫描配对', style: TextStyle(fontSize: 12)),
+                        ),
+                        DropdownMenuItem(
+                          value: BluetoothTestMethod.directConnect,
+                          child: Text('方案2: 直接连接', style: TextStyle(fontSize: 12)),
+                        ),
+                        DropdownMenuItem(
+                          value: BluetoothTestMethod.rfcommBind,
+                          child: Text('方案3: RFCOMM Bind ⭐', style: TextStyle(fontSize: 12)),
+                        ),
+                        DropdownMenuItem(
+                          value: BluetoothTestMethod.rfcommSocket,
+                          child: Text('方案4: RFCOMM Socket', style: TextStyle(fontSize: 12)),
+                        ),
+                        DropdownMenuItem(
+                          value: BluetoothTestMethod.serial,
+                          child: Text('方案5: 串口设备', style: TextStyle(fontSize: 12)),
+                        ),
+                        DropdownMenuItem(
+                          value: BluetoothTestMethod.commandLine,
+                          child: Text('方案6: 命令行工具', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _selectedMethod3 = value);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: () => _startAutoTest3(state),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('开始自动测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ] else
+                ElevatedButton.icon(
+                  onPressed: _stopAutoTest3,
+                  icon: const Icon(Icons.stop),
+                  label: const Text('停止测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepCard3(TestStepResult step, bool isCurrent) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCurrent ? Colors.green.shade50 : Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isCurrent ? Colors.green : Colors.grey.shade300,
+          width: isCurrent ? 2 : 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          _getStepStatusIcon(step.status),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '步骤${step.stepNumber}: ${step.name}',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                    color: Colors.black87,
+                  ),
+                ),
+                if (step.message != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    step.message!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: step.status == TestStepStatus.failed ? Colors.red : Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -332,7 +632,15 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     }
   }
 
-  Future<void> _startAutoTest(TestState state) async {
+  // ========== 工位1: 停止测试 ==========
+  void _stopAutoTest1() {
+    setState(() {
+      _isAutoTesting1 = false;
+    });
+  }
+
+  // ========== 工位1: 开始自动测试 ==========
+  Future<void> _startAutoTest1(TestState state) async {
     final logState = context.read<LogState>();
     
     // 先弹窗输入SN号或MAC地址，并选择连接方案
@@ -340,7 +648,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     final options = await showDialog<_AutoTestOptions>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _AutoTestInputDialog(defaultMethod: _selectedMethod),
+      builder: (context) => _AutoTestInputDialog(defaultMethod: _selectedMethod1),
     );
     
     if (options == null) {
@@ -348,29 +656,31 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       return;
     }
     
-    _productInfo = options.productInfo;
-    _selectedMethod = options.method;
+    _productInfo1 = options.productInfo;
+    _selectedMethod1 = options.method;
     
-    logState.info('获取到设备信息: SN=${_productInfo!.snCode}');
-    logState.info('蓝牙地址: ${_productInfo!.bluetoothAddress}');
-    logState.info('WiFi MAC: ${_productInfo!.macAddress}');
-    logState.info('连接方案: ${_getMethodName(_selectedMethod)}');
+    logState.info('获取到设备信息: SN=${_productInfo1!.snCode}');
+    logState.info('蓝牙地址: ${_productInfo1!.bluetoothAddress}');
+    logState.info('WiFi MAC: ${_productInfo1!.macAddress}');
+    logState.info('连接方案: ${_getMethodName(_selectedMethod1)}');
     
     setState(() {
-      _isAutoTesting = true;
-      _currentStep = 0;
-      _initializeSteps();
+      _isAutoTesting1 = true;
+      _currentStep1 = 0;
+      _initializeSteps1();
     });
 
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔧 工位1: 射频图像测试');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    // 执行5个测试步骤
-    for (int i = 0; i < _stepResults.length; i++) {
-      if (!_isAutoTesting) break;
+    // 执行测试步骤
+    for (int i = 0; i < _stepResults1.length; i++) {
+      if (!_isAutoTesting1) break;
 
       setState(() {
-        _currentStep = i;
-        _stepResults[i].status = TestStepStatus.running;
+        _currentStep1 = i;
+        _stepResults1[i].status = TestStepStatus.running;
       });
 
       bool success = false;
@@ -380,7 +690,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         switch (i) {
           case 0: // 蓝牙连接测试
             logState.info('步骤1: 蓝牙连接测试');
-            success = await _testBluetoothConnection(state, logState);
+            success = await _testBluetoothConnection1(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
             break;
           case 1: // 产测开始
@@ -391,7 +701,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
           case 2: // WIFI连接热点并获取IP
             logState.info('步骤3: WIFI连接热点并获取IP');
             success = await _testWiFiConnectionWithIP(state, logState);
-            message = success ? 'WiFi连接成功，IP: $_deviceIP' : 'WiFi连接失败';
+            message = success ? 'WiFi连接成功，IP: $_deviceIP1' : 'WiFi连接失败';
             break;
           case 3: // 光敏传感器测试
             logState.info('步骤4: 光敏传感器测试');
@@ -420,11 +730,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
         logState.error('步骤${i + 1}异常: $e');
       }
 
-      if (!_isAutoTesting) break;
+      if (!_isAutoTesting1) break;
 
       setState(() {
-        _stepResults[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
-        _stepResults[i].message = message;
+        _stepResults1[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
+        _stepResults1[i].message = message;
       });
 
       if (!success) {
@@ -438,26 +748,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     }
 
     setState(() {
-      _isAutoTesting = false;
+      _isAutoTesting1 = false;
     });
 
-    final passedCount = _stepResults.where((s) => s.status == TestStepStatus.passed).length;
-    final totalCount = _stepResults.length;
+    final passedCount = _stepResults1.where((s) => s.status == TestStepStatus.passed).length;
+    final totalCount = _stepResults1.length;
     
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     if (passedCount == totalCount) {
-      logState.info('🎉 超声前整机产测全部通过！($passedCount/$totalCount)');
+      logState.info('🎉 工位1测试全部通过！($passedCount/$totalCount)');
     } else {
-      logState.warning('⚠️ 超声前整机产测完成，通过 $passedCount/$totalCount 项');
+      logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项');
     }
-  }
-
-  void _stopAutoTest(TestState state) {
-    final logState = context.read<LogState>();
-    setState(() {
-      _isAutoTesting = false;
-    });
-    logState.warning('⏹️ 超声前整机产测已停止');
   }
 
   /// 构建方案测试按钮
@@ -692,66 +994,40 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     }
   }
 
-  // ========== 测试步骤实现 ==========
+  // ========== 工位1: 测试步骤实现 ==========
 
-  /// 步骤1: 蓝牙连接测试
-  /// 根据选择的方案使用不同的蓝牙连接方式
-  Future<bool> _testBluetoothConnection(TestState state, LogState logState) async {
+  /// 工位1 步骤1: 蓝牙连接测试
+  Future<bool> _testBluetoothConnection1(TestState state, LogState logState) async {
     try {
-      if (_productInfo == null) {
+      if (_productInfo1 == null) {
         logState.error('设备信息未获取');
         return false;
       }
       
-      final bluetoothAddress = _productInfo!.bluetoothAddress;
+      final bluetoothAddress = _productInfo1!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 ${_getMethodName(_selectedMethod)}');
+      logState.info('🔗 使用 ${_getMethodName(_selectedMethod1)}');
       
       bool success = false;
       
-      // 根据选择的方案使用不同的连接方式
-      switch (_selectedMethod) {
+      switch (_selectedMethod1) {
         case BluetoothTestMethod.autoScan:
-          success = await state.testBluetoothMethod1AutoScan(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
+          success = await state.testBluetoothMethod1AutoScan(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
           break;
         case BluetoothTestMethod.directConnect:
-          success = await state.testBluetoothMethod2DirectConnect(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
+          success = await state.testBluetoothMethod2DirectConnect(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
           break;
         case BluetoothTestMethod.rfcommBind:
-          success = await state.testBluetoothMethod3RfcommBind(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
+          success = await state.testBluetoothMethod3RfcommBind(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
           break;
         case BluetoothTestMethod.rfcommSocket:
-          success = await state.testBluetoothMethod4RfcommSocket(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
+          success = await state.testBluetoothMethod4RfcommSocket(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
           break;
         case BluetoothTestMethod.serial:
-          success = await state.testBluetoothMethod5Serial(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
+          success = await state.testBluetoothMethod5Serial(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
           break;
         case BluetoothTestMethod.commandLine:
-          success = await state.testBluetoothMethod6CommandLine(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
+          success = await state.testBluetoothMethod6CommandLine(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
           break;
       }
       
@@ -762,15 +1038,473 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
     }
   }
 
+  // ========== 工位3: 停止测试 ==========
+  void _stopAutoTest3() {
+    setState(() {
+      _isAutoTesting3 = false;
+    });
+  }
+
+  // ========== 工位3: 开始自动测试 ==========
+  Future<void> _startAutoTest3(TestState state) async {
+    final logState = context.read<LogState>();
+    
+    if (!mounted) return;
+    final options = await showDialog<_AutoTestOptions>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _AutoTestInputDialog(defaultMethod: _selectedMethod3),
+    );
+    
+    if (options == null) {
+      logState.warning('用户取消输入');
+      return;
+    }
+    
+    _productInfo3 = options.productInfo;
+    _selectedMethod3 = options.method;
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔧 工位3: 电源外设测试');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('SN: ${_productInfo3!.snCode}');
+    logState.info('蓝牙地址: ${_productInfo3!.bluetoothAddress}');
+    logState.info('连接方案: ${_getMethodName(_selectedMethod3)}');
+    
+    setState(() {
+      _isAutoTesting3 = true;
+      _currentStep3 = 0;
+      _initializeSteps3();
+    });
+
+    for (int i = 0; i < _stepResults3.length; i++) {
+      if (!_isAutoTesting3) break;
+
+      setState(() {
+        _currentStep3 = i;
+        _stepResults3[i].status = TestStepStatus.running;
+      });
+
+      bool success = false;
+      String? message;
+
+      try {
+        switch (i) {
+          case 0: // 蓝牙连接
+            success = await _testBluetoothConnection3(state, logState);
+            message = success ? '蓝牙连接成功' : '蓝牙连接失败';
+            break;
+          case 1: // 产测开始
+            success = await _testProductionStart(state, logState);
+            message = success ? '产测开始成功' : '产测开始失败';
+            break;
+          case 2: // 设备电压测试
+            final result = await _testVoltage3(state, logState);
+            success = result['success'] as bool;
+            message = result['message'] as String?;
+            break;
+          case 3: // 电量检测测试
+            final result = await _testBattery3(state, logState);
+            success = result['success'] as bool;
+            message = result['message'] as String?;
+            break;
+          case 4: // 充电状态测试
+            final result = await _testChargeStatus3(state, logState);
+            success = result['success'] as bool;
+            message = result['message'] as String?;
+            break;
+          case 5: // LED灯(外侧)开启
+            success = await _testLED3(state, logState, isOuter: true, turnOn: true);
+            message = success ? 'LED外侧开启成功' : 'LED外侧开启失败';
+            break;
+          case 6: // LED灯(外侧)关闭
+            success = await _testLED3(state, logState, isOuter: true, turnOn: false);
+            message = success ? 'LED外侧关闭成功' : 'LED外侧关闭失败';
+            break;
+          case 7: // LED灯(内侧)开启
+            success = await _testLED3(state, logState, isOuter: false, turnOn: true);
+            message = success ? 'LED内侧开启成功' : 'LED内侧开启失败';
+            break;
+          case 8: // LED灯(内侧)关闭
+            success = await _testLED3(state, logState, isOuter: false, turnOn: false);
+            message = success ? 'LED内侧关闭成功' : 'LED内侧关闭失败';
+            break;
+          case 9: // 右触控-TK1测试
+            success = await _testTouch3(state, logState, touchType: 'TK1');
+            message = success ? 'TK1测试通过' : 'TK1测试失败';
+            break;
+          case 10: // 右触控-TK2测试
+            success = await _testTouch3(state, logState, touchType: 'TK2');
+            message = success ? 'TK2测试通过' : 'TK2测试失败';
+            break;
+          case 11: // 右触控-TK3测试
+            success = await _testTouch3(state, logState, touchType: 'TK3');
+            message = success ? 'TK3测试通过' : 'TK3测试失败';
+            break;
+          case 12: // 左触控-佩戴测试
+            success = await _testLeftTouch3(state, logState, touchType: 'wear');
+            message = success ? '佩戴检测通过' : '佩戴检测失败';
+            break;
+          case 13: // 左触控-点击测试
+            success = await _testLeftTouch3(state, logState, touchType: 'click');
+            message = success ? '点击检测通过' : '点击检测失败';
+            break;
+          case 14: // 左触控-双击测试
+            success = await _testLeftTouch3(state, logState, touchType: 'double_click');
+            message = success ? '双击检测通过' : '双击检测失败';
+            break;
+          case 15: // 左触控-长按测试
+            success = await _testLeftTouch3(state, logState, touchType: 'long_press');
+            message = success ? '长按检测通过' : '长按检测失败';
+            break;
+          case 16: // 结束产测
+            success = await _testProductionEnd3(state, logState);
+            message = success ? '产测结束成功' : '产测结束失败';
+            break;
+        }
+      } catch (e) {
+        success = false;
+        message = '异常: $e';
+        logState.error('步骤${i + 1}异常: $e');
+      }
+
+      setState(() {
+        _stepResults3[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
+        _stepResults3[i].message = message;
+      });
+
+      if (!success) {
+        logState.error('❌ 步骤${i + 1}失败，停止测试');
+        break;
+      }
+    }
+
+    setState(() {
+      _isAutoTesting3 = false;
+    });
+
+    final allPassed = _stepResults3.every((s) => s.status == TestStepStatus.passed);
+    if (allPassed) {
+      logState.info('✅ 工位3测试全部通过');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ 工位3测试全部通过'), backgroundColor: Colors.green),
+        );
+      }
+    } else {
+      logState.error('❌ 工位3测试未通过');
+    }
+  }
+
+  // ========== 工位3: 蓝牙连接测试 ==========
+  Future<bool> _testBluetoothConnection3(TestState state, LogState logState) async {
+    logState.info('🔵 步骤1: 蓝牙连接测试');
+    
+    final bluetoothAddress = _productInfo3!.bluetoothAddress;
+    if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
+      logState.error('❌ 蓝牙地址为空');
+      return false;
+    }
+
+    bool success = false;
+    switch (_selectedMethod3) {
+      case BluetoothTestMethod.autoScan:
+        success = await state.testBluetoothMethod1AutoScan(deviceAddress: bluetoothAddress);
+        break;
+      case BluetoothTestMethod.directConnect:
+        success = await state.testBluetoothMethod2DirectConnect(deviceAddress: bluetoothAddress);
+        break;
+      case BluetoothTestMethod.rfcommBind:
+        success = await state.testBluetoothMethod3RfcommBind(deviceAddress: bluetoothAddress);
+        break;
+      case BluetoothTestMethod.rfcommSocket:
+        success = await state.testBluetoothMethod4RfcommSocket(deviceAddress: bluetoothAddress);
+        break;
+      case BluetoothTestMethod.serial:
+        success = await state.testBluetoothMethod5Serial(deviceAddress: bluetoothAddress);
+        break;
+      case BluetoothTestMethod.commandLine:
+        success = await state.testBluetoothMethod6CommandLine(deviceAddress: bluetoothAddress);
+        break;
+    }
+
+    if (success) {
+      logState.info('✅ 蓝牙连接成功');
+      // 蓝牙连接成功后调用 BYD MES start
+      logState.info('📤 调用 BYD MES start...');
+      _mesService3.printConfig();
+      final mesResult = await _mesService3.start(_productInfo3!.snCode);
+      if (mesResult['success'] == true) {
+        logState.info('✅ MES start 成功');
+      } else {
+        logState.warning('⚠️ MES start 失败: ${mesResult['error']}');
+      }
+    }
+
+    return success;
+  }
+
+  // ========== 工位3: 电压测试 ==========
+  Future<Map<String, dynamic>> _testVoltage3(TestState state, LogState logState) async {
+    logState.info('🔋 步骤3: 设备电压测试');
+    
+    final command = ProductionTestCommands.createGetVoltageCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取电压失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 5) {
+      final voltageBytes = payload.sublist(1, 5);
+      final byteData = ByteData.sublistView(Uint8List.fromList(voltageBytes));
+      final voltage = byteData.getFloat32(0, Endian.little);
+      
+      final threshold = _config.minVoltageV;
+      final success = voltage > threshold;
+      
+      logState.info('   电压值: ${voltage.toStringAsFixed(2)}V (阈值: >${threshold}V)');
+      
+      return {
+        'success': success,
+        'message': '电压: ${voltage.toStringAsFixed(2)}V ${success ? "✅" : "❌"}',
+      };
+    }
+
+    return {'success': false, 'message': '电压数据解析失败'};
+  }
+
+  // ========== 工位3: 电量测试 ==========
+  Future<Map<String, dynamic>> _testBattery3(TestState state, LogState logState) async {
+    logState.info('🔋 步骤4: 电量检测测试');
+    
+    final command = ProductionTestCommands.createGetCurrentCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取电量失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 2) {
+      final battery = payload[1];
+      final minBattery = _config.minBatteryPercent;
+      final maxBattery = _config.maxBatteryPercent;
+      final success = battery >= minBattery && battery <= maxBattery;
+      
+      logState.info('   电量值: $battery% (范围: $minBattery~$maxBattery%)');
+      
+      return {
+        'success': success,
+        'message': '电量: $battery% ${success ? "✅" : "❌"}',
+      };
+    }
+
+    return {'success': false, 'message': '电量数据解析失败'};
+  }
+
+  // ========== 工位3: 充电状态测试 ==========
+  Future<Map<String, dynamic>> _testChargeStatus3(TestState state, LogState logState) async {
+    logState.info('🔌 步骤5: 充电状态测试');
+    
+    final command = ProductionTestCommands.createGetChargeStatusCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取充电状态失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 2) {
+      final chargeStatus = payload[1];
+      final isCharging = chargeStatus == 0x01;
+      
+      logState.info('   充电状态: ${isCharging ? "充电中" : "未充电"}');
+      
+      return {
+        'success': isCharging,
+        'message': isCharging ? '充电中 ✅' : '未充电 ❌',
+      };
+    }
+
+    return {'success': false, 'message': '充电状态数据解析失败'};
+  }
+
+  // ========== 工位3: LED测试 ==========
+  Future<bool> _testLED3(TestState state, LogState logState, {required bool isOuter, required bool turnOn}) async {
+    final ledName = isOuter ? '外侧' : '内侧';
+    final action = turnOn ? '开启' : '关闭';
+    logState.info('💡 LED灯($ledName)$action');
+    
+    final ledNumber = isOuter ? ProductionTestCommands.ledOuter : ProductionTestCommands.ledInner;
+    final ledState = turnOn ? ProductionTestCommands.ledOn : ProductionTestCommands.ledOff;
+    
+    final command = ProductionTestCommands.createControlLEDCommand(ledNumber, ledState);
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ LED控制命令失败');
+      return false;
+    }
+
+    if (!mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(turnOn ? Icons.lightbulb : Icons.lightbulb_outline, color: turnOn ? Colors.amber : Colors.grey),
+            const SizedBox(width: 12),
+            Text('LED灯($ledName)$action'),
+          ],
+        ),
+        content: Text('请确认LED灯($ledName)是否已$action？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('未通过')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('通过'),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed == true;
+  }
+
+  // ========== 工位3: 右触控测试 ==========
+  Future<bool> _testTouch3(TestState state, LogState logState, {required String touchType}) async {
+    logState.info('👆 右触控-$touchType测试');
+    
+    if (!mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.touch_app, color: Colors.blue),
+            const SizedBox(width: 12),
+            Text('右触控-$touchType测试'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('请按住$touchType区域，确认阈值变化量超过${_config.touchThreshold}'),
+            const SizedBox(height: 8),
+            const Text('确认测试通过后点击"通过"按钮', style: TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('未通过')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('通过'),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed == true;
+  }
+
+  // ========== 工位3: 左触控测试 ==========
+  Future<bool> _testLeftTouch3(TestState state, LogState logState, {required String touchType}) async {
+    final touchName = {'wear': '佩戴', 'click': '点击', 'double_click': '双击', 'long_press': '长按'}[touchType] ?? touchType;
+    logState.info('👆 左触控-$touchName测试');
+    
+    if (!mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.touch_app, color: Colors.orange),
+            const SizedBox(width: 12),
+            Text('左触控-$touchName测试'),
+          ],
+        ),
+        content: Text('请执行$touchName操作，确认设备响应正确后点击"通过"'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('未通过')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('通过'),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed == true;
+  }
+
+  // ========== 工位3: 结束产测 ==========
+  Future<bool> _testProductionEnd3(TestState state, LogState logState) async {
+    logState.info('🏁 步骤17: 结束产测');
+    
+    final command = ProductionTestCommands.createEndTestCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 产测结束命令失败');
+      return false;
+    }
+
+    // 调用 BYD MES complete
+    logState.info('📤 调用 BYD MES complete...');
+    final mesResult = await _mesService3.complete(_productInfo3!.snCode);
+    if (mesResult['success'] == true) {
+      logState.info('✅ MES complete 成功');
+    } else {
+      logState.warning('⚠️ MES complete 失败: ${mesResult['error']}');
+    }
+
+    logState.info('✅ 产测结束成功');
+    return true;
+  }
+
   /// 旧的蓝牙连接方法（保留作为备用）
   Future<bool> _testBluetoothConnectionLegacy(TestState state, LogState logState) async {
     try {
-      if (_productInfo == null) {
+      if (_productInfo1 == null) {
         logState.error('设备信息未获取');
         return false;
       }
       
-      final bluetoothAddress = _productInfo!.bluetoothAddress;
+      final bluetoothAddress = _productInfo1!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
       logState.info('🔗 使用 Linux 蓝牙 SPP 连接（旧方法）');
       
@@ -854,7 +1588,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       final command = ProductionTestCommands.createControlWifiCommand(0x05, data: payload);
       
       // 重试机制：最多尝试3次，每次超时10秒
-      _deviceIP = null;
+      _deviceIP1 = null;
       
       for (int retry = 0; retry < 3; retry++) {
         if (retry > 0) {
@@ -887,8 +1621,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
               
               if (wifiResult != null && wifiResult['success'] == true) {
                 if (wifiResult.containsKey('ip')) {
-                  _deviceIP = wifiResult['ip'];
-                  logState.success('✅ 获取到设备IP: $_deviceIP');
+                  _deviceIP1 = wifiResult['ip'];
+                  logState.success('✅ 获取到设备IP: $_deviceIP1');
                   logState.info('✅ WiFi连接成功');
                   return true;
                 } else {
@@ -1089,13 +1823,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> {
       
       logState.info('✅ 拍照命令执行成功，准备下载图片...');
       
-      if (_deviceIP == null || _deviceIP!.isEmpty) {
+      if (_deviceIP1 == null || _deviceIP1!.isEmpty) {
         logState.error('❌ 无法下载图片：设备IP地址为空');
         return false;
       }
       
       logState.info('📥 开始FTP下载图片...');
-      final downloadSuccess = await state.downloadImageFromDevice(_deviceIP!);
+      final downloadSuccess = await state.downloadImageFromDevice(_deviceIP1!);
       
       if (!downloadSuccess) {
         logState.error('❌ 图片下载失败');

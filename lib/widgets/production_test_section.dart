@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import 'rf_image_workstation.dart';
+import 'power_peripheral_workstation.dart';
 
 /// 整机产测主界面 - 支持三个工位
 class ProductionTestSection extends StatefulWidget {
@@ -165,7 +166,7 @@ class _ProductionTestSectionState extends State<ProductionTestSection> {
                   ),
                   const SizedBox(width: 16),
                   
-                  // 工位3: 电源外设测试 (待实现)
+                  // 工位3: 电源外设测试
                   Expanded(
                     child: _buildWorkstationCard(
                       title: '电源外设测试',
@@ -173,14 +174,19 @@ class _ProductionTestSectionState extends State<ProductionTestSection> {
                       icon: Icons.power,
                       color: Colors.green,
                       tests: [
-                        '电源测试',
-                        'LED测试',
-                        'Touch测试',
-                        'RTC测试',
+                        '产测开始',
+                        '设备电压测试',
+                        '电量检测测试',
+                        '充电状态测试',
+                        'LED灯测试',
+                        '触控测试',
+                        '结束产测',
                       ],
-                      enabled: false,
+                      enabled: true,
                       onTap: () {
-                        // TODO: 实现电源外设测试工位
+                        setState(() {
+                          _selectedWorkstation = 'power_peripheral';
+                        });
                       },
                     ),
                   ),
@@ -491,8 +497,7 @@ class _ProductionTestSectionState extends State<ProductionTestSection> {
         // TODO: 实现音频测试工位
         return const Center(child: Text('音频测试工位 - 待实现'));
       case 'power_peripheral':
-        // TODO: 实现电源外设测试工位
-        return const Center(child: Text('电源外设测试工位 - 待实现'));
+        return const PowerPeripheralWorkstation();
       default:
         return const Center(child: Text('未知工位'));
     }
