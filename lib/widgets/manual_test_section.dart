@@ -260,6 +260,13 @@ class ManualTestSection extends StatelessWidget {
                 () => state.runManualTest('光敏传感器', ProductionTestCommands.createLightSensorCommand()),
               ),
               _buildIMUToggleButton(context, state),
+              _buildTestButton(
+                context,
+                '摄像头棋盘格',
+                Icons.grid_on,
+                () => _testCameraChessboard(context, state),
+                color: Colors.cyan,
+              ),
               _buildSensorToggleButton(context, state),
               _buildTestButton(
                 context,
@@ -891,5 +898,157 @@ class ManualTestSection extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 摄像头棋盘格测试
+  Future<void> _testCameraChessboard(BuildContext context, TestState state) async {
+    // 先检查蓝牙连接
+    if (!state.isLinuxBluetoothConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ 请先连接蓝牙'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // 弹窗确认
+    final userConfirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.camera_alt, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('摄像头棋盘格测试'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('请将棋盘格放置在摄像头前方'),
+            SizedBox(height: 8),
+            Text('确保棋盘格清晰可见且光线充足'),
+            SizedBox(height: 16),
+            Text(
+              '点击"确定"开始拍摄',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+
+    if (userConfirmed != true) return;
+
+    // 发送 Sensor 命令 (0x0C + 0x02 = 开始发送数据)
+    final command = ProductionTestCommands.createSensorCommand(0x02);
+    
+    try {
+      final response = await state.sendCommandViaLinuxBluetooth(
+        command,
+        timeout: const Duration(seconds: 10),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null || response.containsKey('error')) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ 拍照命令失败: ${response?['error'] ?? '超时'}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // 提示用户需要输入设备IP进行图片下载
+      if (context.mounted) {
+        final ipController = TextEditingController();
+        final ip = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('输入设备IP'),
+            content: TextField(
+              controller: ipController,
+              decoration: const InputDecoration(
+                hintText: '例如: 192.168.1.100',
+                labelText: '设备IP地址',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: const Text('取消'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(ipController.text),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+        );
+
+        if (ip == null || ip.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ 未输入IP，跳过图片下载'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
+
+        // 下载图片
+        final downloadSuccess = await state.downloadImageFromDevice(ip);
+        if (!downloadSuccess) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('❌ 图片下载失败'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+
+        // 图片质量检测
+        final qualitySuccess = await state.testCameraImageQuality();
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(qualitySuccess ? '✅ 摄像头棋盘格测试通过' : '❌ 图片质量检测失败'),
+              backgroundColor: qualitySuccess ? Colors.green : Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ 测试异常: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }

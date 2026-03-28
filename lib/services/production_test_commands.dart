@@ -584,27 +584,48 @@ class ProductionTestCommands {
         
       case 0x01: // 连接热点 - 返回IP地址
       case 0x05: // WiFi连接命令 - 返回IP地址
-        if (payload.length >= 2) { // CMD + IP数据
-          // IP地址以ASCII字符串形式返回，格式如 "192.168.1.100"
-          // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
-          List<int> ipBytes = payload.sublist(1);
+        if (payload.length >= 2) { // CMD + IP数据或状态码
+          // 检查第二个字节是否是状态码（非ASCII可打印字符）
+          // 状态码通常是 0x00 (成功), 0x01 (失败), 等
+          int secondByte = payload[1];
           
-          // 找到\0的位置
-          int nullIndex = ipBytes.indexOf(0);
-          if (nullIndex >= 0) {
-            ipBytes = ipBytes.sublist(0, nullIndex);
-          }
-          
-          // 将字节转换为ASCII字符串
-          String ipAddress = String.fromCharCodes(ipBytes);
-          
-          // 验证IP地址格式
-          if (ipAddress.isNotEmpty) {
-            result['ip'] = ipAddress;
-            result['success'] = true;
+          // 如果第二个字节是状态码（0x00-0x0F 范围内的控制字符）
+          if (secondByte < 0x20) {
+            // 这是状态码响应
+            if (secondByte == 0x00) {
+              // 0x00 = 成功，但没有IP数据
+              result['success'] = true;
+              result['statusCode'] = secondByte;
+              result['message'] = 'WiFi命令执行成功（无IP返回）';
+            } else {
+              // 其他状态码 = 失败或进行中
+              result['success'] = false;
+              result['statusCode'] = secondByte;
+              result['error'] = 'WiFi命令返回状态码: 0x${secondByte.toRadixString(16).padLeft(2, '0').toUpperCase()}';
+            }
           } else {
-            result['success'] = false;
-            result['error'] = 'IP地址为空';
+            // IP地址以ASCII字符串形式返回，格式如 "192.168.1.100"
+            // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
+            List<int> ipBytes = payload.sublist(1);
+            
+            // 找到\0的位置
+            int nullIndex = ipBytes.indexOf(0);
+            if (nullIndex >= 0) {
+              ipBytes = ipBytes.sublist(0, nullIndex);
+            }
+            
+            // 将字节转换为ASCII字符串
+            String ipAddress = String.fromCharCodes(ipBytes);
+            
+            // 验证IP地址格式（应该包含数字和点）
+            if (ipAddress.isNotEmpty && _isValidIPFormat(ipAddress)) {
+              result['ip'] = ipAddress;
+              result['success'] = true;
+            } else {
+              result['success'] = false;
+              result['error'] = 'IP地址格式无效: $ipAddress';
+              result['rawBytes'] = payload.sublist(1).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ');
+            }
           }
         } else {
           // 如果没有IP数据，也认为连接成功
@@ -660,6 +681,31 @@ class ProductionTestCommands {
     return result;
   }
   
+  /// 验证 IP 地址格式是否有效
+  /// 简单检查：包含数字和点，且格式类似 x.x.x.x
+  static bool _isValidIPFormat(String ip) {
+    if (ip.isEmpty) return false;
+    
+    // 检查是否只包含数字和点
+    final validChars = RegExp(r'^[0-9.]+$');
+    if (!validChars.hasMatch(ip)) return false;
+    
+    // 检查是否有至少一个点
+    if (!ip.contains('.')) return false;
+    
+    // 尝试解析为 IP 地址格式
+    final parts = ip.split('.');
+    if (parts.length != 4) return false;
+    
+    for (final part in parts) {
+      if (part.isEmpty) return false;
+      final num = int.tryParse(part);
+      if (num == null || num < 0 || num > 255) return false;
+    }
+    
+    return true;
+  }
+
   /// Get WiFi option name
   static String _getWifiOptionName(int opt) {
     switch (opt) {

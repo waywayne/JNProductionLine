@@ -1336,6 +1336,28 @@ hciconfig hci0 up 2>/dev/null || true
             _logState?.error('❌ 响应超时 (${timeout.inSeconds}秒)');
             _logState?.info('   当前待处理响应数: ${_pendingResponses.length}');
             _logState?.info('   缓冲区大小: ${_buffer.length} 字节');
+            
+            // 超时时检查缓冲区是否有数据
+            if (_buffer.isNotEmpty) {
+              final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+              _logState?.warning('⚠️ 超时时缓冲区有未处理数据: $bufferHex');
+              
+              // 尝试处理缓冲区中的数据作为原始响应
+              if (_buffer.length >= 4) {
+                _logState?.info('🔄 尝试将缓冲区数据作为响应处理');
+                final bufferData = Uint8List.fromList(_buffer);
+                _buffer = Uint8List(0);
+                
+                // 返回缓冲区数据作为 payload
+                return {
+                  'payload': bufferData,
+                  'timestamp': DateTime.now(),
+                  'raw': true,
+                  'warning': '响应超时，返回缓冲区数据',
+                };
+              }
+            }
+            
             return {'error': 'Timeout', 'details': '响应超时 ${timeout.inSeconds}秒'};
           },
         );
@@ -1440,7 +1462,8 @@ hciconfig hci0 up 2>/dev/null || true
     _logState?.debug('🔍 处理缓冲区，当前长度: ${_buffer.length} 字节');
     _logState?.debug('   缓冲区内容: $bufferHex');
     
-    while (_buffer.length >= 16) { // GTP 最小长度
+    // 至少需要 4 字节才能检查前导码
+    while (_buffer.length >= 4) {
       // 查找 GTP 数据包起始标志 (Preamble: 0xD0 0xD2 0xC5 0xC2)
       int startIndex = -1;
       for (int i = 0; i <= _buffer.length - 4; i++) {
@@ -1452,24 +1475,41 @@ hciconfig hci0 up 2>/dev/null || true
       }
       
       if (startIndex == -1) {
-        // 没有找到 GTP 起始标志，可能是设备返回的原始数据（无 GTP 封装）
+        // 没有找到 GTP 起始标志
         final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-        _logState?.warning('⚠️ 缓冲区中未找到 GTP 起始标志 (D0 D2 C5 C2)');
+        _logState?.debug('🔍 缓冲区中未找到 GTP 起始标志 (D0 D2 C5 C2)');
         _logState?.debug('   缓冲区内容 [${_buffer.length} 字节]: $bufferHex');
         
-        // 尝试作为原始响应处理（设备可能不返回 GTP 封装）
-        if (_buffer.length >= 10) {
-          _logState?.info('🔄 尝试解析为原始响应数据（无 GTP 封装）');
+        // 检查是否可能是前导码的部分（数据分片接收）
+        // 前导码字节序列：D0 D2 C5 C2
+        bool mightBePreambleStart = false;
+        if (_buffer.length >= 1 && _buffer[_buffer.length - 1] == 0xD0) {
+          mightBePreambleStart = true;
+        } else if (_buffer.length >= 2 && _buffer[_buffer.length - 2] == 0xD0 && _buffer[_buffer.length - 1] == 0xD2) {
+          mightBePreambleStart = true;
+        } else if (_buffer.length >= 3 && _buffer[_buffer.length - 3] == 0xD0 && _buffer[_buffer.length - 2] == 0xD2 && _buffer[_buffer.length - 1] == 0xC5) {
+          mightBePreambleStart = true;
+        }
+        
+        if (mightBePreambleStart) {
+          // 可能是前导码的开始，等待更多数据
+          _logState?.debug('   可能是前导码的开始，等待更多数据...');
+          break;
+        }
+        
+        // 如果缓冲区太大（超过 500 字节）且仍未找到前导码，可能是数据损坏
+        // 此时尝试作为原始响应处理
+        if (_buffer.length >= 500) {
+          _logState?.warning('⚠️ 缓冲区过大 (${_buffer.length} 字节) 且未找到 GTP 起始标志');
+          _logState?.info('🔄 尝试解析为原始响应数据');
           _processRawResponse(_buffer);
           _buffer = Uint8List(0);
-        } else {
-          // 保留最后 3 个字节（可能是 Preamble 的开始）
-          if (_buffer.length > 3) {
-            _buffer = _buffer.sublist(_buffer.length - 3);
-          } else {
-            _buffer = Uint8List(0);
-          }
+          break;
         }
+        
+        // 缓冲区较小，继续等待更多数据
+        // 但如果等待时间过长（通过超时机制处理），则作为原始数据处理
+        _logState?.debug('   缓冲区较小 (${_buffer.length} 字节)，继续等待更多数据...');
         break;
       }
       
@@ -1518,35 +1558,46 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('   完整 HEX: $hexStr');
       _logState?.info('   字节数组: [${packet.join(', ')}]');
       
-      // 解析 GTP 头部
-      if (packet.length >= 16) {
+      // 解析 GTP 头部（与 GTPProtocol.parseGTPResponse 保持一致）
+      if (packet.length >= 12) {
         _logState?.info('   --- GTP 头部 ---');
-        _logState?.info('   Preamble: ${packet.sublist(0, 4).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+        _logState?.info('   Preamble (4B): ${packet.sublist(0, 4).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+        _logState?.info('   Version (1B): 0x${packet[4].toRadixString(16).padLeft(2, '0').toUpperCase()}');
         final length = packet[5] | (packet[6] << 8);
-        _logState?.info('   Length: $length (0x${length.toRadixString(16).padLeft(4, '0').toUpperCase()})');
-        final moduleId = packet[7] | (packet[8] << 8);
-        _logState?.info('   Module ID: 0x${moduleId.toRadixString(16).padLeft(4, '0').toUpperCase()}');
-        final messageId = packet[9] | (packet[10] << 8);
-        _logState?.info('   Message ID: 0x${messageId.toRadixString(16).padLeft(4, '0').toUpperCase()}');
-        final sn = packet[11] | (packet[12] << 8);
-        _logState?.info('   Sequence: $sn');
-        final result = packet[13] | (packet[14] << 8);
-        _logState?.info('   Result: $result');
+        _logState?.info('   Length (2B): $length (0x${length.toRadixString(16).padLeft(4, '0').toUpperCase()})');
+        _logState?.info('   Type (1B): 0x${packet[7].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+        _logState?.info('   FC (1B): 0x${packet[8].toRadixString(16).padLeft(2, '0').toUpperCase()}');
+        final seq = packet[9] | (packet[10] << 8);
+        _logState?.info('   Seq (2B): $seq');
+        _logState?.info('   CRC8 (1B): 0x${packet[11].toRadixString(16).padLeft(2, '0').toUpperCase()}');
         
-        if (packet.length > 16) {
-          final payloadLen = packet.length - 16 - 4; // 减去头部和 CRC
-          final payload = packet.sublist(16, 16 + payloadLen);
-          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-          _logState?.info('   Payload (${payloadLen} 字节): $payloadHex');
+        // CLI Payload 从字节 12 开始
+        if (packet.length > 12 + 4) {
+          final payloadLen = length - 12; // Length - (Version+Length+Type+FC+Seq+CRC8+CRC32)
+          if (payloadLen > 0 && packet.length >= 12 + payloadLen) {
+            final payload = packet.sublist(12, 12 + payloadLen);
+            final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+            _logState?.info('   CLI Payload (${payloadLen} 字节): $payloadHex');
+          }
         }
         
-        final crc = packet.sublist(packet.length - 4);
-        _logState?.info('   CRC: ${crc.map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+        // CRC32 在最后 4 字节
+        if (packet.length >= 4) {
+          final crc = packet.sublist(packet.length - 4);
+          _logState?.info('   CRC32 (4B): ${crc.map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ')}');
+        }
       }
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // 使用 GTP 协议解析
-      final parsedGTP = GTPProtocol.parseGTPResponse(packet);
+      // 获取 Type 字段（与串口服务保持一致，只处理 Type 0x02 和 0x03）
+      final type = packet[7];
+      if (type != 0x02 && type != 0x03) {
+        _logState?.debug('   忽略 Type 0x${type.toRadixString(16).padLeft(2, '0').toUpperCase()} 数据包');
+        return;
+      }
+      
+      // 使用 GTP 协议解析（跳过 CRC 验证，与串口服务保持一致）
+      final parsedGTP = GTPProtocol.parseGTPResponse(packet, skipCrcVerify: true);
       
       if (parsedGTP == null) {
         _logState?.error('❌ GTP 解析失败');
@@ -1558,7 +1609,19 @@ hciconfig hci0 up 2>/dev/null || true
         return;
       }
       
-      _logState?.info('✅ GTP 解析成功:');
+      // Type 0x02 (设备日志) 不包含 CLI 消息结构，只记录日志
+      if (type == 0x02) {
+        _logState?.info('📋 设备日志 (Type 0x02)');
+        final payload = parsedGTP['payload'] as Uint8List?;
+        if (payload != null && payload.isNotEmpty) {
+          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+          _logState?.info('   Payload [${payload.length} 字节]: $payloadHex');
+        }
+        return; // 设备日志不需要响应匹配
+      }
+      
+      // Type 0x03 (CLI 消息) 需要解析 CLI 结构
+      _logState?.info('✅ GTP 解析成功 (Type 0x03 CLI):');
       _logState?.info('   模块ID: 0x${parsedGTP['moduleId']?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? 'N/A'}');
       _logState?.info('   消息ID: 0x${parsedGTP['messageId']?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? 'N/A'}');
       _logState?.info('   序列号: ${parsedGTP['sn'] ?? 'N/A'}');
@@ -1617,6 +1680,9 @@ hciconfig hci0 up 2>/dev/null || true
   }
   
   /// 处理原始响应数据（无 GTP 封装）
+  /// 设备可能返回两种格式：
+  /// 1. 纯原始数据：[CMD] [数据...]
+  /// 2. CLI 消息（无 GTP 外层）：... [23 23] [CLI数据] [40 40] ...
   void _processRawResponse(Uint8List rawData) {
     try {
       _packetCount++;
@@ -1624,28 +1690,75 @@ hciconfig hci0 up 2>/dev/null || true
       final hexStr = rawData.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       _logState?.info('📦 原始响应数据 #$_packetCount [${rawData.length} 字节]: $hexStr');
       
-      // 尝试提取序列号（假设在固定位置，根据实际协议调整）
-      // 从接收到的数据看：04 00 00 9A 23 23 06 00 DE 36 01 FF 02 00 02 00 00 00 00 01 40 40...
-      // 可能格式：[CMD(1)] [SN(2)] [其他数据...]
-      int? responseSN;
-      if (rawData.length >= 3) {
-        // 尝试从第1-2字节读取序列号（小端）
-        responseSN = rawData[1] | (rawData[2] << 8);
-        _logState?.info('   提取序列号: $responseSN (从字节 1-2)');
+      Map<String, dynamic>? response;
+      
+      // 尝试查找 CLI 消息结构 (Start: 0x2323, Tail: 0x4040)
+      int cliStartIndex = -1;
+      for (int i = 0; i <= rawData.length - 2; i++) {
+        if (rawData[i] == 0x23 && rawData[i + 1] == 0x23) {
+          cliStartIndex = i;
+          break;
+        }
       }
       
-      // 构造响应对象
-      final response = {
-        'payload': rawData,
-        'timestamp': DateTime.now(),
-        'raw': true,  // 标记为原始数据
-        'sn': responseSN,
-      };
+      if (cliStartIndex >= 0 && rawData.length >= cliStartIndex + 16) {
+        _logState?.info('🔍 找到 CLI 消息起始标志 (23 23) 在位置 $cliStartIndex');
+        
+        // 提取 CLI 消息部分并解析
+        final cliData = rawData.sublist(cliStartIndex);
+        final cliResponse = GTPProtocol.parseCLIResponse(cliData);
+        
+        if (cliResponse != null && !cliResponse.containsKey('error')) {
+          _logState?.success('✅ CLI 消息解析成功');
+          _logState?.info('   Module ID: 0x${cliResponse['moduleId']?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? 'N/A'}');
+          _logState?.info('   Message ID: 0x${cliResponse['messageId']?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? 'N/A'}');
+          _logState?.info('   SN: ${cliResponse['sn'] ?? 'N/A'}');
+          _logState?.info('   Result: ${cliResponse['result'] ?? 'N/A'}');
+          
+          final payload = cliResponse['payload'] as Uint8List?;
+          if (payload != null && payload.isNotEmpty) {
+            final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+            _logState?.info('   Payload [${payload.length} 字节]: $payloadHex');
+          }
+          
+          response = {
+            'payload': cliResponse['payload'] ?? Uint8List(0),
+            'timestamp': DateTime.now(),
+            'moduleId': cliResponse['moduleId'],
+            'messageId': cliResponse['messageId'],
+            'sn': cliResponse['sn'],
+            'result': cliResponse['result'],
+            'raw': false,
+          };
+        } else {
+          _logState?.warning('⚠️ CLI 消息解析失败，使用原始数据');
+        }
+      }
+      
+      // 如果 CLI 解析失败，使用原始数据
+      if (response == null) {
+        _logState?.info('🔄 使用原始数据作为 payload');
+        
+        // 尝试从原始数据中提取序列号
+        int? responseSN;
+        if (rawData.length >= 3) {
+          responseSN = rawData[1] | (rawData[2] << 8);
+          _logState?.info('   提取序列号: $responseSN (从字节 1-2)');
+        }
+        
+        response = {
+          'payload': rawData,
+          'timestamp': DateTime.now(),
+          'raw': true,
+          'sn': responseSN,
+        };
+      }
       
       // 匹配待处理的请求
+      final responseSN = response['sn'] as int?;
       if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
         final completer = _pendingResponses[responseSN];
-        _logState?.success('✅ 原始响应匹配序列号: $responseSN');
+        _logState?.success('✅ 响应匹配序列号: $responseSN');
         if (!completer!.isCompleted) {
           completer.complete(response);
           _pendingResponses.remove(responseSN);
@@ -1654,13 +1767,13 @@ hciconfig hci0 up 2>/dev/null || true
         // 如果序列号不匹配，使用第一个待处理请求
         final firstKey = _pendingResponses.keys.first;
         final completer = _pendingResponses[firstKey];
-        _logState?.warning('⚠️ 原始响应 SN ($responseSN) 不匹配，使用第一个待处理请求: $firstKey');
+        _logState?.warning('⚠️ 响应 SN ($responseSN) 不匹配，使用第一个待处理请求: $firstKey');
         if (!completer!.isCompleted) {
           completer.complete(response);
           _pendingResponses.remove(firstKey);
         }
       } else {
-        _logState?.warning('⚠️ 收到原始响应但没有待处理的请求');
+        _logState?.warning('⚠️ 收到响应但没有待处理的请求');
       }
     } catch (e) {
       _logState?.error('❌ 原始响应处理异常: $e');

@@ -22,6 +22,10 @@ class PreUltrasoundAutoTest extends StatefulWidget {
 class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   
+  // 调试模式（失败后可跳过继续执行）
+  bool _debugMode1 = false;
+  bool _debugMode3 = false;
+  
   // 工位1状态
   bool _isAutoTesting1 = false;
   int _currentStep1 = 0;
@@ -288,8 +292,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           
           // 控制按钮
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // 调试模式开关
+              Row(
+                children: [
+                  Icon(Icons.bug_report, color: _debugMode1 ? Colors.red : Colors.grey, size: 20),
+                  const SizedBox(width: 4),
+                  Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode1 ? Colors.red : Colors.grey)),
+                  Switch(
+                    value: _debugMode1,
+                    onChanged: _isAutoTesting1 ? null : (value) => setState(() => _debugMode1 = value),
+                    activeColor: Colors.red,
+                  ),
+                ],
+              ),
+              Row(
+                children: [
               if (!_isAutoTesting1) ...[
                 // 蓝牙方案选择
                 Container(
@@ -358,6 +377,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
                     ),
+                ],
+              ),
                 ],
               ),
             ],
@@ -441,8 +462,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           
           // 控制按钮
           Row(
-            mainAxisAlignment: MainAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // 调试模式开关
+              Row(
+                children: [
+                  Icon(Icons.bug_report, color: _debugMode3 ? Colors.red : Colors.grey, size: 20),
+                  const SizedBox(width: 4),
+                  Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode3 ? Colors.red : Colors.grey)),
+                  Switch(
+                    value: _debugMode3,
+                    onChanged: _isAutoTesting3 ? null : (value) => setState(() => _debugMode3 = value),
+                    activeColor: Colors.red,
+                  ),
+                ],
+              ),
+              Row(
+                children: [
               if (!_isAutoTesting3) ...[
                 // 蓝牙方案选择
                 Container(
@@ -511,6 +547,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
                 ),
+                ],
+              ),
             ],
           ),
         ],
@@ -739,7 +777,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       if (!success) {
         logState.error('❌ 步骤${i + 1}失败: $message');
-        break;
+        if (!_debugMode1) {
+          break;
+        } else {
+          logState.warning('⚠️ 调试模式：跳过失败步骤，继续执行...');
+        }
       } else {
         logState.info('✅ 步骤${i + 1}通过: $message');
       }
@@ -1174,8 +1216,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       });
 
       if (!success) {
-        logState.error('❌ 步骤${i + 1}失败，停止测试');
-        break;
+        logState.error('❌ 步骤${i + 1}失败: $message');
+        if (!_debugMode3) {
+          break;
+        } else {
+          logState.warning('⚠️ 调试模式：跳过失败步骤，继续执行...');
+        }
+      } else {
+        logState.info('✅ 步骤${i + 1}通过: $message');
       }
     }
 
@@ -1183,7 +1231,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       _isAutoTesting3 = false;
     });
 
-    final allPassed = _stepResults3.every((s) => s.status == TestStepStatus.passed);
+    final passedCount = _stepResults3.where((s) => s.status == TestStepStatus.passed).length;
+    final totalCount = _stepResults3.length;
+    final allPassed = passedCount == totalCount;
     if (allPassed) {
       logState.info('✅ 工位3测试全部通过');
       if (mounted) {

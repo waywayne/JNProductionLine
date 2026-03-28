@@ -207,7 +207,8 @@ class GTPProtocol {
   }
   
   /// Parse GTP response
-  static Map<String, dynamic>? parseGTPResponse(Uint8List data) {
+  /// [skipCrcVerify] - 是否跳过 CRC 验证（与串口服务保持一致）
+  static Map<String, dynamic>? parseGTPResponse(Uint8List data, {bool skipCrcVerify = false}) {
     if (data.length < 16) return null;
     
     ByteData buffer = ByteData.sublistView(data);
@@ -246,15 +247,15 @@ class GTPProtocol {
     Uint8List payload = data.sublist(offset, offset + payloadLength);
     offset += payloadLength;
     
-    // CRC32
-    int receivedCRC32 = buffer.getUint32(offset, Endian.little);
-    
-    // Verify CRC32
-    List<int> dataForCRC = data.sublist(4, offset);
-    int calculatedCRC32 = calculateCRC32(dataForCRC);
-    
-    if (receivedCRC32 != calculatedCRC32) {
-      return {'error': 'CRC32 mismatch'};
+    // CRC32 验证（可选，与串口服务保持一致，串口服务跳过了 CRC 验证）
+    if (!skipCrcVerify) {
+      int receivedCRC32 = buffer.getUint32(offset, Endian.little);
+      List<int> dataForCRC = data.sublist(4, offset);
+      int calculatedCRC32 = calculateCRC32(dataForCRC);
+      
+      if (receivedCRC32 != calculatedCRC32) {
+        return {'error': 'CRC32 mismatch'};
+      }
     }
     
     // Parse CLI response if type is CLI
@@ -266,6 +267,7 @@ class GTPProtocol {
       'version': version,
       'type': type,
       'fc': fc,
+      'seq': seq,
       'payload': payload,
     };
   }
