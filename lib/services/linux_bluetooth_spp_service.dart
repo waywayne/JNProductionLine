@@ -6,6 +6,54 @@ import '../models/log_state.dart';
 import '../config/test_config.dart';
 import 'gtp_protocol.dart';
 
+/// 数据接收解析模式
+enum DataParseMode {
+  /// 模式1: Python 端 GTP 组装
+  /// Python 脚本负责缓冲和组装完整的 GTP 数据包，Dart 端直接处理
+  pythonGtpAssembly,
+  
+  /// 模式2: Dart 端 GTP 组装
+  /// Python 脚本直接透传原始数据，Dart 端负责缓冲和组装 GTP 数据包
+  dartGtpAssembly,
+  
+  /// 模式3: 原始数据直通
+  /// 不进行 GTP 组装，直接处理原始数据（用于调试或非 GTP 协议）
+  rawPassthrough,
+  
+  /// 模式4: 智能自适应
+  /// 自动检测数据格式，根据是否有 GTP 头选择处理方式
+  smartAdaptive,
+}
+
+/// 获取解析模式的显示名称
+extension DataParseModeExtension on DataParseMode {
+  String get displayName {
+    switch (this) {
+      case DataParseMode.pythonGtpAssembly:
+        return 'Python端GTP组装';
+      case DataParseMode.dartGtpAssembly:
+        return 'Dart端GTP组装';
+      case DataParseMode.rawPassthrough:
+        return '原始数据直通';
+      case DataParseMode.smartAdaptive:
+        return '智能自适应';
+    }
+  }
+  
+  String get description {
+    switch (this) {
+      case DataParseMode.pythonGtpAssembly:
+        return 'Python脚本负责缓冲和组装完整GTP包，推荐用于稳定通讯';
+      case DataParseMode.dartGtpAssembly:
+        return 'Dart端负责缓冲和组装GTP包，Python直接透传';
+      case DataParseMode.rawPassthrough:
+        return '不进行GTP组装，直接处理原始数据，用于调试';
+      case DataParseMode.smartAdaptive:
+        return '自动检测数据格式，智能选择处理方式';
+    }
+  }
+}
+
 /// Linux Bluetooth SPP Service
 /// 基于 Linux 蓝牙栈实现的 SPP 协议通信服务
 /// 支持自定义 UUID 服务发现和 RFCOMM 通道绑定
@@ -35,8 +83,21 @@ class LinuxBluetoothSppService {
   // 连接模式：true = rfcomm bind 模式，false = socket 模式
   bool _useBindMode = true;  // 默认使用 bind 模式（与第三方工具一致）
   
+  // 数据解析模式
+  DataParseMode _parseMode = DataParseMode.pythonGtpAssembly;
+  
   void setLogState(LogState logState) {
     _logState = logState;
+  }
+  
+  /// 获取当前解析模式
+  DataParseMode get parseMode => _parseMode;
+  
+  /// 设置解析模式
+  void setParseMode(DataParseMode mode) {
+    _parseMode = mode;
+    _logState?.info('📋 设置数据解析模式: ${mode.displayName}');
+    _logState?.info('   ${mode.description}');
   }
   
   /// 设置自定义服务 UUID
@@ -463,12 +524,30 @@ hciconfig hci0 up 2>/dev/null || true
       
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 选择连接模式
-      final scriptName = _useBindMode ? 'rfcomm_bind_bridge.py' : 'rfcomm_socket.py';
-      final modeDesc = _useBindMode ? 'RFCOMM Bind (与第三方工具一致)' : 'RFCOMM Socket';
+      // 根据解析模式选择 Python 脚本
+      // - pythonGtpAssembly: 使用带 GTP 组装的脚本
+      // - dartGtpAssembly/rawPassthrough/smartAdaptive: 使用原始透传脚本
+      String scriptName;
+      String modeDesc;
+      
+      if (_useBindMode) {
+        // Bind 模式
+        if (_parseMode == DataParseMode.pythonGtpAssembly) {
+          scriptName = 'rfcomm_bind_bridge.py';
+          modeDesc = 'RFCOMM Bind + Python端GTP组装';
+        } else {
+          scriptName = 'rfcomm_bind_bridge_raw.py';
+          modeDesc = 'RFCOMM Bind + 原始透传 (${_parseMode.displayName})';
+        }
+      } else {
+        // Socket 模式
+        scriptName = 'rfcomm_socket.py';
+        modeDesc = 'RFCOMM Socket';
+      }
       
       _logState?.info('⏳ 建立 RFCOMM 连接...');
       _logState?.info('   连接模式: $modeDesc');
+      _logState?.info('   解析模式: ${_parseMode.displayName}');
       
       // 查找 Python 脚本路径（多种可能的位置）
       String? scriptPath;
@@ -1434,25 +1513,125 @@ hciconfig hci0 up 2>/dev/null || true
       );
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      _logState?.info('📥 原始响应数据 [${data.length} 字节]');
+      _logState?.info('📥 原始响应数据 [${data.length} 字节] (模式: ${_parseMode.displayName})');
       _logState?.info('   HEX: $hexStr');
       _logState?.info('   ASCII: $asciiStr');
       _logState?.info('   字节数组: [${data.join(', ')}]');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // 添加到缓冲区
-      final newBuffer = Uint8List(_buffer.length + data.length);
-      newBuffer.setRange(0, _buffer.length, _buffer);
-      newBuffer.setRange(_buffer.length, newBuffer.length, data);
-      _buffer = newBuffer;
-      
-      // 处理完整数据包
-      _processBuffer();
+      // 根据解析模式处理数据
+      switch (_parseMode) {
+        case DataParseMode.pythonGtpAssembly:
+          // Python 端已组装完整 GTP 包，直接处理
+          _processBufferPythonMode(data);
+          break;
+          
+        case DataParseMode.dartGtpAssembly:
+          // Dart 端负责组装 GTP 包
+          _processBufferDartMode(data);
+          break;
+          
+        case DataParseMode.rawPassthrough:
+          // 原始数据直通，不进行 GTP 组装
+          _processRawPassthrough(data);
+          break;
+          
+        case DataParseMode.smartAdaptive:
+          // 智能自适应模式
+          _processSmartAdaptive(data);
+          break;
+      }
       
       // 广播原始数据
       _dataController.add(data);
     } catch (e) {
       _logState?.error('❌ 数据处理异常: $e');
+    }
+  }
+  
+  /// 模式1: Python 端 GTP 组装模式
+  /// Python 脚本已经组装好完整的 GTP 数据包，直接处理
+  void _processBufferPythonMode(Uint8List data) {
+    // 添加到缓冲区
+    final newBuffer = Uint8List(_buffer.length + data.length);
+    newBuffer.setRange(0, _buffer.length, _buffer);
+    newBuffer.setRange(_buffer.length, newBuffer.length, data);
+    _buffer = newBuffer;
+    
+    // 处理完整数据包（假设 Python 已组装好）
+    _processBuffer();
+  }
+  
+  /// 模式2: Dart 端 GTP 组装模式
+  /// Python 脚本直接透传原始数据，Dart 端负责缓冲和组装
+  void _processBufferDartMode(Uint8List data) {
+    // 添加到缓冲区
+    final newBuffer = Uint8List(_buffer.length + data.length);
+    newBuffer.setRange(0, _buffer.length, _buffer);
+    newBuffer.setRange(_buffer.length, newBuffer.length, data);
+    _buffer = newBuffer;
+    
+    _logState?.debug('🔧 Dart 端 GTP 组装模式，缓冲区: ${_buffer.length} 字节');
+    
+    // 处理缓冲区中的完整 GTP 数据包
+    _processBuffer();
+  }
+  
+  /// 模式3: 原始数据直通模式
+  /// 不进行 GTP 组装，直接处理原始数据
+  void _processRawPassthrough(Uint8List data) {
+    _logState?.info('🔄 原始数据直通模式，直接处理 ${data.length} 字节');
+    
+    // 直接作为原始响应处理
+    _processRawResponse(data);
+  }
+  
+  /// 模式4: 智能自适应模式
+  /// 自动检测数据格式，根据是否有 GTP 头选择处理方式
+  void _processSmartAdaptive(Uint8List data) {
+    // 添加到缓冲区
+    final newBuffer = Uint8List(_buffer.length + data.length);
+    newBuffer.setRange(0, _buffer.length, _buffer);
+    newBuffer.setRange(_buffer.length, newBuffer.length, data);
+    _buffer = newBuffer;
+    
+    _logState?.debug('🧠 智能自适应模式，缓冲区: ${_buffer.length} 字节');
+    
+    // 检查缓冲区是否有 GTP 前导码
+    bool hasGtpPreamble = false;
+    for (int i = 0; i <= _buffer.length - 4; i++) {
+      if (_buffer[i] == 0xD0 && _buffer[i + 1] == 0xD2 && 
+          _buffer[i + 2] == 0xC5 && _buffer[i + 3] == 0xC2) {
+        hasGtpPreamble = true;
+        break;
+      }
+    }
+    
+    if (hasGtpPreamble) {
+      _logState?.info('🔍 检测到 GTP 前导码，使用 GTP 组装模式');
+      _processBuffer();
+    } else {
+      // 检查是否有 CLI Tail (40 40)
+      bool hasTail = false;
+      for (int i = 0; i <= _buffer.length - 2; i++) {
+        if (_buffer[i] == 0x40 && _buffer[i + 1] == 0x40) {
+          hasTail = true;
+          break;
+        }
+      }
+      
+      if (hasTail) {
+        _logState?.info('🔍 检测到 CLI Tail (40 40) 但无 GTP 头，使用原始响应处理');
+        _processRawResponse(_buffer);
+        _buffer = Uint8List(0);
+      } else if (_buffer.length > 100) {
+        // 缓冲区过大且没有有效标志，清空并处理
+        _logState?.warning('⚠️ 缓冲区过大 (${_buffer.length} 字节) 且无有效标志，直接处理');
+        _processRawResponse(_buffer);
+        _buffer = Uint8List(0);
+      } else {
+        _logState?.debug('   等待更多数据...');
+      }
     }
   }
   

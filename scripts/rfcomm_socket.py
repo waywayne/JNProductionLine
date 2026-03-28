@@ -52,9 +52,14 @@ def socket_to_stdout(sock, keep_alive_event):
         timeout_count = 0
         empty_count = 0
         
+        # GTP 数据包缓冲区
+        buffer = bytearray()
+        GTP_PREAMBLE = bytes([0xD0, 0xD2, 0xC5, 0xC2])
+        last_data_time = time.time()
+        
         while keep_alive_event.is_set():
             try:
-                data = sock.recv(1024)
+                data = sock.recv(4096)  # 增大读取缓冲区
                 if not data:
                     empty_count += 1
                     if empty_count > 10:
@@ -64,38 +69,105 @@ def socket_to_stdout(sock, keep_alive_event):
                 
                 recv_count += 1
                 empty_count = 0  # 重置空读取计数
-                # 记录接收到的数据
-                data_hex = ' '.join(f'{b:02X}' for b in data)
-                log(f"📥 接收到 {len(data)} 字节 (第 {recv_count} 次): {data_hex[:100]}{'...' if len(data_hex) > 100 else ''}")
+                last_data_time = time.time()
                 
-                # 输出到 stdout（Dart 会读取）
-                sys.stdout.buffer.write(data)
-                sys.stdout.buffer.flush()
+                # 记录接收到的原始数据
+                data_hex = ' '.join(f'{b:02X}' for b in data)
+                log(f"📥 接收到 {len(data)} 字节 (第 {recv_count} 次): {data_hex[:150]}{'...' if len(data_hex) > 150 else ''}")
+                
+                # 添加到缓冲区
+                buffer.extend(data)
+                
+                # 处理缓冲区中的完整 GTP 数据包
+                while len(buffer) >= 4:
+                    # 查找 GTP 前导码
+                    preamble_index = buffer.find(GTP_PREAMBLE)
+                    
+                    if preamble_index == -1:
+                        # 没有找到前导码，检查是否有部分前导码在末尾
+                        if len(buffer) > 3:
+                            # 输出非 GTP 数据
+                            non_gtp_data = bytes(buffer[:-3])
+                            buffer = buffer[-3:]
+                            if non_gtp_data:
+                                non_gtp_hex = ' '.join(f'{b:02X}' for b in non_gtp_data)
+                                log(f"📤 输出非 GTP 数据 [{len(non_gtp_data)} 字节]: {non_gtp_hex[:100]}")
+                                sys.stdout.buffer.write(non_gtp_data)
+                                sys.stdout.buffer.flush()
+                        break
+                    
+                    # 跳过前导码之前的垃圾数据
+                    if preamble_index > 0:
+                        garbage = bytes(buffer[:preamble_index])
+                        garbage_hex = ' '.join(f'{b:02X}' for b in garbage)
+                        log(f"⚠️ 跳过 {preamble_index} 字节垃圾数据: {garbage_hex[:50]}")
+                        buffer = buffer[preamble_index:]
+                    
+                    # 检查是否有足够的数据读取 Length 字段
+                    if len(buffer) < 7:
+                        break
+                    
+                    # 读取 Length 字段 (offset 5-6, little endian)
+                    gtp_length = buffer[5] | (buffer[6] << 8)
+                    total_length = 4 + gtp_length
+                    
+                    log(f"🔍 GTP Length: {gtp_length}, 总长度: {total_length}, 缓冲区: {len(buffer)}")
+                    
+                    if len(buffer) < total_length:
+                        log(f"⏳ 等待更多数据 (需要: {total_length}, 当前: {len(buffer)})")
+                        break
+                    
+                    # 提取完整的 GTP 数据包
+                    gtp_packet = bytes(buffer[:total_length])
+                    buffer = buffer[total_length:]
+                    
+                    gtp_hex = ' '.join(f'{b:02X}' for b in gtp_packet)
+                    log(f"📦 完整 GTP 数据包 [{len(gtp_packet)} 字节]: {gtp_hex[:150]}{'...' if len(gtp_hex) > 150 else ''}")
+                    
+                    # 输出完整的 GTP 数据包到 stdout
+                    sys.stdout.buffer.write(gtp_packet)
+                    sys.stdout.buffer.flush()
                 
             except socket.timeout:
-                # 超时是正常的，继续循环
                 timeout_count += 1
+                # 如果缓冲区有数据且超过 500ms 没有新数据，输出缓冲区内容
+                if buffer and (time.time() - last_data_time) > 0.5:
+                    buffer_hex = ' '.join(f'{b:02X}' for b in buffer)
+                    log(f"⏱️ 超时，输出缓冲区数据 [{len(buffer)} 字节]: {buffer_hex[:100]}")
+                    sys.stdout.buffer.write(bytes(buffer))
+                    sys.stdout.buffer.flush()
+                    buffer.clear()
                 if timeout_count % 200 == 0:
                     log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
                 time.sleep(0.01)
                 continue
             except bluetooth.BluetoothError as e:
-                # 检查是否是超时错误
                 error_msg = str(e).lower()
                 if 'timed out' in error_msg or 'timeout' in error_msg:
-                    # 超时是正常的，继续循环
                     timeout_count += 1
+                    if buffer and (time.time() - last_data_time) > 0.5:
+                        buffer_hex = ' '.join(f'{b:02X}' for b in buffer)
+                        log(f"⏱️ 超时，输出缓冲区数据 [{len(buffer)} 字节]: {buffer_hex[:100]}")
+                        sys.stdout.buffer.write(bytes(buffer))
+                        sys.stdout.buffer.flush()
+                        buffer.clear()
                     if timeout_count % 200 == 0:
                         log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
                     time.sleep(0.01)
                     continue
                 else:
-                    # 其他蓝牙错误，退出
                     log(f"蓝牙读取错误: {e}")
                     break
             
     except Exception as e:
         log(f"读取异常: {e}")
+    finally:
+        # 输出剩余缓冲区数据
+        if buffer:
+            buffer_hex = ' '.join(f'{b:02X}' for b in buffer)
+            log(f"📤 输出剩余缓冲区数据 [{len(buffer)} 字节]: {buffer_hex[:100]}")
+            sys.stdout.buffer.write(bytes(buffer))
+            sys.stdout.buffer.flush()
 
 def stdin_to_socket(sock, keep_alive_event):
     """从 stdin 读取数据并发送到 socket（非阻塞）"""

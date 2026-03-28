@@ -3306,6 +3306,15 @@ class TestState extends ChangeNotifier {
 
   /// 检查 Linux 蓝牙是否已连接
   bool get isLinuxBluetoothConnected => _linuxBtService.isConnected;
+  
+  /// 获取当前数据解析模式
+  DataParseMode get linuxBluetoothParseMode => _linuxBtService.parseMode;
+  
+  /// 设置数据解析模式
+  void setLinuxBluetoothParseMode(DataParseMode mode) {
+    _linuxBtService.setParseMode(mode);
+    notifyListeners();
+  }
 
   // ========== 多种蓝牙连接方案测试 ==========
   

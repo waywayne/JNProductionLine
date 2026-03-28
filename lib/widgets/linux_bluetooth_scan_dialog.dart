@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
+import '../services/linux_bluetooth_spp_service.dart';
 
 /// Linux 蓝牙设备扫描和连接弹窗
 /// 支持扫描附近蓝牙设备、选择设备、输入服务 UUID 并建立 SPP 连接
@@ -138,7 +139,7 @@ class _LinuxBluetoothScanDialogState extends State<LinuxBluetoothScanDialog> {
       ),
       content: SizedBox(
         width: 600,
-        height: 500,
+        height: 650,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -320,6 +321,66 @@ class _LinuxBluetoothScanDialogState extends State<LinuxBluetoothScanDialog> {
                   ),
                 ),
               ],
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // 数据解析模式选择
+            Consumer<TestState>(
+              builder: (context, state, child) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '数据解析模式',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        children: DataParseMode.values.map((mode) {
+                          final isSelected = state.linuxBluetoothParseMode == mode;
+                          return RadioListTile<DataParseMode>(
+                            value: mode,
+                            groupValue: state.linuxBluetoothParseMode,
+                            onChanged: _isConnecting ? null : (value) {
+                              if (value != null) {
+                                state.setLinuxBluetoothParseMode(value);
+                              }
+                            },
+                            title: Text(
+                              mode.displayName,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                color: isSelected ? Colors.teal[700] : Colors.black87,
+                              ),
+                            ),
+                            subtitle: Text(
+                              mode.description,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            activeColor: Colors.teal[600],
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
 
             // 错误信息
