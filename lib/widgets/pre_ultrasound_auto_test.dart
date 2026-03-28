@@ -1262,7 +1262,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     final payload = response['payload'];
     if (payload is List && payload.length >= 5) {
-      final voltageBytes = payload.sublist(1, 5);
+      final voltageBytes = payload.sublist(1, 5).cast<int>();
       final byteData = ByteData.sublistView(Uint8List.fromList(voltageBytes));
       final voltage = byteData.getFloat32(0, Endian.little);
       
@@ -1858,9 +1858,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('🏁 发送产测结束命令...');
       
       // 判断所有测试是否通过（除了最后一步产测结束）
-      final passedCount = _stepResults.take(_stepResults.length - 1)
+      final passedCount = _stepResults1.take(_stepResults1.length - 1)
           .where((s) => s.status == TestStepStatus.passed).length;
-      final totalCount = _stepResults.length - 1;
+      final totalCount = _stepResults1.length - 1;
       final allPassed = passedCount == totalCount;
       
       // 0x00=产测通过, 0x01=产测失败

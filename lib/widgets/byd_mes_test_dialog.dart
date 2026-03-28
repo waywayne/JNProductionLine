@@ -48,8 +48,6 @@ class _BydMesTestDialogState extends State<BydMesTestDialog> {
     _failValueController = TextEditingController(text: '失败值');
     
     _mesService = BydMesService(
-      mesIp: _mesIpController.text,
-      clientId: _clientIdController.text,
       station: _stationController.text,
       onLog: _addLog,
     );
@@ -81,14 +79,15 @@ class _BydMesTestDialogState extends State<BydMesTestDialog> {
   }
   
   void _updateMesConfig() {
-    _mesService.updateConfig(
-      mesIp: _mesIpController.text,
-      clientId: _clientIdController.text,
+    // MES IP 和 Client ID 现在从 ProductionConfig 读取
+    // 这里只更新 station
+    _mesService = BydMesService(
       station: _stationController.text,
+      onLog: _addLog,
     );
     
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('MES 配置已更新')),
+      const SnackBar(content: Text('MES 配置已更新（IP和ClientID从通用配置读取）')),
     );
   }
   
