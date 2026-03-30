@@ -526,19 +526,15 @@ hciconfig hci0 up 2>/dev/null || true
       
       // 根据解析模式选择 Python 脚本
       // - pythonGtpAssembly: 使用带 GTP 组装的脚本
-      // - dartGtpAssembly/rawPassthrough/smartAdaptive: 使用原始透传脚本
+      // - dartGtpAssembly/rawPassthrough/smartAdaptive: 使用简单透传脚本
       String scriptName;
       String modeDesc;
       
       if (_useBindMode) {
-        // Bind 模式
-        if (_parseMode == DataParseMode.pythonGtpAssembly) {
-          scriptName = 'rfcomm_bind_bridge.py';
-          modeDesc = 'RFCOMM Bind + Python端GTP组装';
-        } else {
-          scriptName = 'rfcomm_bind_bridge_raw.py';
-          modeDesc = 'RFCOMM Bind + 原始透传 (${_parseMode.displayName})';
-        }
+        // Bind 模式 - 使用简单透传脚本（更稳定）
+        // 所有模式都使用简单透传，由 Dart 端负责 GTP 组装
+        scriptName = 'rfcomm_bind_simple.py';
+        modeDesc = 'RFCOMM Bind + 简单透传 (${_parseMode.displayName})';
       } else {
         // Socket 模式
         scriptName = 'rfcomm_socket.py';
@@ -1420,22 +1416,49 @@ hciconfig hci0 up 2>/dev/null || true
             // 超时时检查缓冲区是否有数据
             if (_buffer.isNotEmpty) {
               final bufferHex = _buffer.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-              _logState?.warning('⚠️ 超时时缓冲区有未处理数据: $bufferHex');
+              _logState?.warning('⚠️ 超时时缓冲区有未处理数据 [${_buffer.length} 字节]: $bufferHex');
               
               // 尝试处理缓冲区中的数据作为原始响应
-              if (_buffer.length >= 4) {
-                _logState?.info('🔄 尝试将缓冲区数据作为响应处理');
-                final bufferData = Uint8List.fromList(_buffer);
-                _buffer = Uint8List(0);
-                
-                // 返回缓冲区数据作为 payload
-                return {
-                  'payload': bufferData,
-                  'timestamp': DateTime.now(),
-                  'raw': true,
-                  'warning': '响应超时，返回缓冲区数据',
-                };
+              final bufferData = Uint8List.fromList(_buffer);
+              _buffer = Uint8List(0);
+              
+              // 尝试解析为 GTP 响应
+              if (bufferData.length >= 12) {
+                // 检查是否有 GTP 前导码
+                bool hasGtpPreamble = false;
+                for (int i = 0; i <= bufferData.length - 4; i++) {
+                  if (bufferData[i] == 0xD0 && bufferData[i + 1] == 0xD2 && 
+                      bufferData[i + 2] == 0xC5 && bufferData[i + 3] == 0xC2) {
+                    hasGtpPreamble = true;
+                    // 尝试解析 GTP
+                    final parsedGTP = GTPProtocol.parseGTPResponse(bufferData.sublist(i), skipCrcVerify: true);
+                    if (parsedGTP != null && !parsedGTP.containsKey('error')) {
+                      _logState?.info('🔄 超时但成功解析缓冲区中的 GTP 数据');
+                      return {
+                        'rawBytes': bufferData,
+                        'payload': parsedGTP['payload'] ?? Uint8List(0),
+                        'timestamp': DateTime.now(),
+                        'moduleId': parsedGTP['moduleId'],
+                        'messageId': parsedGTP['messageId'],
+                        'sn': parsedGTP['sn'],
+                        'result': parsedGTP['result'],
+                        'warning': '响应超时，但成功解析缓冲区数据',
+                      };
+                    }
+                    break;
+                  }
+                }
               }
+              
+              // 无法解析为 GTP，返回原始数据
+              _logState?.info('🔄 返回缓冲区原始数据');
+              return {
+                'rawBytes': bufferData,
+                'payload': bufferData,
+                'timestamp': DateTime.now(),
+                'raw': true,
+                'warning': '响应超时，返回缓冲区原始数据',
+              };
             }
             
             return {'error': 'Timeout', 'details': '响应超时 ${timeout.inSeconds}秒'};
@@ -1520,14 +1543,11 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('   字节数组: [${data.join(', ')}]');
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // 根据解析模式处理数据
+      // 所有模式都使用 Dart 端 GTP 组装（Python 脚本现在是简单透传）
       switch (_parseMode) {
         case DataParseMode.pythonGtpAssembly:
-          // Python 端已组装完整 GTP 包，直接处理
-          _processBufferPythonMode(data);
-          break;
-          
         case DataParseMode.dartGtpAssembly:
+        case DataParseMode.smartAdaptive:
           // Dart 端负责组装 GTP 包
           _processBufferDartMode(data);
           break;
@@ -1535,11 +1555,6 @@ hciconfig hci0 up 2>/dev/null || true
         case DataParseMode.rawPassthrough:
           // 原始数据直通，不进行 GTP 组装
           _processRawPassthrough(data);
-          break;
-          
-        case DataParseMode.smartAdaptive:
-          // 智能自适应模式
-          _processSmartAdaptive(data);
           break;
       }
       

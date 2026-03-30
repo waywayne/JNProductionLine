@@ -3307,6 +3307,9 @@ class TestState extends ChangeNotifier {
   /// 检查 Linux 蓝牙是否已连接
   bool get isLinuxBluetoothConnected => _linuxBtService.isConnected;
   
+  /// 获取 Linux 蓝牙 SPP 服务实例（用于直接访问数据流等）
+  LinuxBluetoothSppService get linuxBluetoothSppService => _linuxBtService;
+  
   /// 获取当前数据解析模式
   DataParseMode get linuxBluetoothParseMode => _linuxBtService.parseMode;
   

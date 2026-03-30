@@ -82,19 +82,20 @@ def device_to_stdout(device_fd, keep_alive_event):
     buffer = bytearray()
     GTP_PREAMBLE = bytes([0xD0, 0xD2, 0xC5, 0xC2])
     last_data_time = time.time()
+    last_activity_time = time.time()  # 最后活动时间（包括发送）
     
     try:
         while keep_alive_event.is_set():
             # 使用 select 检查是否有数据
-            readable, _, _ = select.select([device_fd], [], [], 0.1)  # 缩短超时以更快响应
+            readable, _, _ = select.select([device_fd], [], [], 0.05)  # 50ms 超时，更快响应
             
             if readable:
                 try:
                     data = os.read(device_fd, 4096)  # 增大读取缓冲区
                     if not data:
                         empty_read_count += 1
-                        # 连续多次空读取才认为连接关闭
-                        if empty_read_count > 10:
+                        # 连续多次空读取才认为连接关闭（增加阈值）
+                        if empty_read_count > 100:  # 增加到 100 次（约 5 秒）
                             log("设备连接已关闭（读取端）")
                             break
                         continue
@@ -103,6 +104,7 @@ def device_to_stdout(device_fd, keep_alive_event):
                     timeout_count = 0  # 重置超时计数
                     empty_read_count = 0  # 重置空读取计数
                     last_data_time = time.time()
+                    last_activity_time = time.time()
                     
                     # 记录接收到的原始数据
                     data_hex = ' '.join(f'{b:02X}' for b in data)
@@ -173,16 +175,21 @@ def device_to_stdout(device_fd, keep_alive_event):
                         break
             else:
                 timeout_count += 1
+                empty_read_count += 1  # 无数据也计入空读取
                 
-                # 如果缓冲区有数据且超过 500ms 没有新数据，输出缓冲区内容
-                if buffer and (time.time() - last_data_time) > 0.5:
+                # 如果缓冲区有数据且超过 300ms 没有新数据，输出缓冲区内容
+                if buffer and (time.time() - last_data_time) > 0.3:
                     buffer_hex = ' '.join(f'{b:02X}' for b in buffer)
                     log(f"⏱️ 超时，输出缓冲区数据 [{len(buffer)} 字节]: {buffer_hex[:100]}")
                     sys.stdout.buffer.write(bytes(buffer))
                     sys.stdout.buffer.flush()
                     buffer.clear()
                 
-                if timeout_count % 200 == 0:
+                # 重置空读取计数（只要还在活动中）
+                if (time.time() - last_activity_time) < 30:  # 30 秒内有活动
+                    empty_read_count = 0
+                
+                if timeout_count % 400 == 0:
                     log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
             
     except Exception as e:
@@ -195,26 +202,34 @@ def device_to_stdout(device_fd, keep_alive_event):
             sys.stdout.buffer.write(bytes(buffer))
             sys.stdout.buffer.flush()
 
-def stdin_to_device(device_fd, keep_alive_event):
+def stdin_to_device(device_fd, keep_alive_event, activity_callback=None):
     """从 stdin 读取数据并发送到设备"""
     log("📤 开始监听 stdin 数据...")
+    send_count = 0
     
     try:
         while keep_alive_event.is_set():
             # 使用 select 检查 stdin 是否有数据
-            readable, _, _ = select.select([sys.stdin.buffer], [], [], 0.5)
+            readable, _, _ = select.select([sys.stdin.buffer], [], [], 0.1)
             
             if readable:
                 try:
                     data = sys.stdin.buffer.read(1024)
                     if not data:
-                        log("stdin 已关闭")
+                        # stdin 关闭，但不立即退出，等待响应
+                        log("stdin 已关闭，等待设备响应...")
+                        time.sleep(2)  # 等待 2 秒让设备响应
                         break
                     
+                    send_count += 1
                     data_len = len(data)
                     data_hex = ' '.join(f'{b:02X}' for b in data)
-                    log(f"📨 准备发送 {data_len} 字节")
+                    log(f"📨 准备发送 {data_len} 字节 (第 {send_count} 次)")
                     log(f"   数据: {data_hex}")
+                    
+                    # 通知活动
+                    if activity_callback:
+                        activity_callback()
                     
                     # 发送数据
                     sent = 0
@@ -227,7 +242,7 @@ def stdin_to_device(device_fd, keep_alive_event):
                     log(f"✅ 数据发送完成: {data_len} 字节")
                     
                     # 发送后延迟，确保设备有足够时间处理
-                    time.sleep(0.3)  # 300ms 延迟
+                    time.sleep(0.1)  # 100ms 延迟
                     
                 except OSError as e:
                     if e.errno == 11:  # EAGAIN
@@ -238,6 +253,10 @@ def stdin_to_device(device_fd, keep_alive_event):
             
     except Exception as e:
         log(f"写入异常: {e}")
+    finally:
+        # 发送完成后，等待一段时间让读取线程接收响应
+        log("📤 发送线程结束，等待响应...")
+        time.sleep(1)
 
 def main():
     if len(sys.argv) != 3:
@@ -281,18 +300,30 @@ def main():
     
     # 5. 启动双向数据传输
     try:
-        # 设备 -> stdout（后台线程）
-        read_thread = threading.Thread(target=device_to_stdout, args=(device_fd, keep_alive_event), daemon=True)
+        # 设备 -> stdout（后台线程，非 daemon，确保能完成接收）
+        read_thread = threading.Thread(target=device_to_stdout, args=(device_fd, keep_alive_event), daemon=False)
         read_thread.start()
         
         # stdin -> 设备（主线程）
         stdin_to_device(device_fd, keep_alive_event)
+        
+        # 发送完成后，等待读取线程完成（最多等待 5 秒）
+        log("⏳ 等待读取线程完成...")
+        read_thread.join(timeout=5)
         
     except KeyboardInterrupt:
         log("收到中断信号")
     except Exception as e:
         log(f"运行异常: {e}")
     finally:
+        # 停止 keep_alive 事件
+        keep_alive_event.clear()
+        
+        # 等待读取线程结束
+        if read_thread.is_alive():
+            log("⏳ 等待读取线程结束...")
+            read_thread.join(timeout=2)
+        
         # 5. 清理
         log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         log("清理资源...")
