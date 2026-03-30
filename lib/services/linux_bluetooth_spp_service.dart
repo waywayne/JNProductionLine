@@ -1359,8 +1359,9 @@ hciconfig hci0 up 2>/dev/null || true
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         _logState?.info('📦 GTP 数据包结构:');
         final fullPacketHex = gtpPacket.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-        _logState?.info('   完整 HEX: [$fullPacketHex]');
-        _logState?.info('   总长度: ${gtpPacket.length} 字节');
+        _logState?.info('   📦 原始字节 [${gtpPacket.length}]: $fullPacketHex');
+        final payloadHex = command.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+        _logState?.info('   📄 Payload [${command.length}]: $payloadHex');
         
         // 解析 GTP 头部结构
         if (gtpPacket.length >= 12) {
@@ -1821,6 +1822,7 @@ hciconfig hci0 up 2>/dev/null || true
       }
       
       final response = {
+        'rawBytes': packet,  // 完整原始字节（不解析）
         'payload': payload ?? Uint8List(0),
         'timestamp': DateTime.now(),
         'moduleId': parsedGTP['moduleId'],
@@ -1901,6 +1903,7 @@ hciconfig hci0 up 2>/dev/null || true
           }
           
           response = {
+            'rawBytes': rawData,  // 完整原始字节（不解析）
             'payload': cliResponse['payload'] ?? Uint8List(0),
             'timestamp': DateTime.now(),
             'moduleId': cliResponse['moduleId'],
@@ -1926,6 +1929,7 @@ hciconfig hci0 up 2>/dev/null || true
         }
         
         response = {
+          'rawBytes': rawData,  // 完整原始字节（不解析）
           'payload': rawData,
           'timestamp': DateTime.now(),
           'raw': true,

@@ -3603,8 +3603,7 @@ class TestState extends ChangeNotifier {
     
     final cmdHex = commandBytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
     _logState?.info('📦 命令详情:', type: LogType.debug);
-    _logState?.info('   Payload: [$cmdHex]', type: LogType.debug);
-    _logState?.info('   长度: ${commandBytes.length} 字节', type: LogType.debug);
+    _logState?.info('   📄 Payload [${commandBytes.length}]: $cmdHex', type: LogType.debug);
     _logState?.info('   超时: ${timeout.inSeconds} 秒', type: LogType.debug);
     if (moduleId != null) {
       _logState?.info('   Module ID: 0x${moduleId.toRadixString(16).toUpperCase().padLeft(2, '0')}', type: LogType.debug);
@@ -3634,12 +3633,20 @@ class TestState extends ChangeNotifier {
       }
     } else {
       _logState?.success('✅ 收到响应', type: LogType.debug);
+      // 打印完整原始字节（不解析）
+      if (response.containsKey('rawBytes')) {
+        final rawBytes = response['rawBytes'];
+        if (rawBytes is Uint8List) {
+          final rawHex = rawBytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+          _logState?.info('   📦 原始字节 [${rawBytes.length}]: $rawHex', type: LogType.debug);
+        }
+      }
+      // 打印解析后的 payload
       if (response.containsKey('payload')) {
         final payload = response['payload'];
         if (payload is Uint8List) {
           final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-          _logState?.info('   Payload: [$payloadHex]', type: LogType.debug);
-          _logState?.info('   长度: ${payload.length} 字节', type: LogType.debug);
+          _logState?.info('   📄 Payload [${payload.length}]: $payloadHex', type: LogType.debug);
         }
       }
       if (response.containsKey('moduleId')) {
