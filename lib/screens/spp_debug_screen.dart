@@ -292,7 +292,7 @@ class _SppDebugScreenState extends State<SppDebugScreen> {
       
       final success = await state.connectLinuxBluetoothDevice(
         deviceAddress: macAddress,
-        deviceName: null,
+        deviceName: 'SPP Device',
         channel: 5,
         uuid: '00001101-0000-1000-8000-00805F9B34FB',
       );
