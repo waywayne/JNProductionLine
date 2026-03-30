@@ -6,6 +6,7 @@ import '../models/log_state.dart';
 import '../services/product_sn_api.dart';
 import '../services/production_test_commands.dart';
 import '../services/byd_mes_service.dart';
+import '../services/linux_bluetooth_spp_service.dart';
 import '../config/wifi_config.dart';
 import '../config/production_config.dart';
 import 'sn_input_dialog.dart';
@@ -350,6 +351,34 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                           onChanged: (value) {
                             if (value != null) {
                               setState(() => _selectedMethod1 = value);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // 数据解析模式选择
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.teal[300]!),
+                        borderRadius: BorderRadius.circular(8),
+                        color: Colors.teal[50],
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<DataParseMode>(
+                          value: state.linuxBluetoothParseMode,
+                          isDense: true,
+                          icon: Icon(Icons.settings_input_component, size: 16, color: Colors.teal[600]),
+                          items: DataParseMode.values.map((mode) {
+                            return DropdownMenuItem(
+                              value: mode,
+                              child: Text(mode.displayName, style: TextStyle(fontSize: 11, color: Colors.teal[700])),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              state.setLinuxBluetoothParseMode(value);
                             }
                           },
                         ),
