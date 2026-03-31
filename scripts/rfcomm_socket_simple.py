@@ -38,18 +38,17 @@ def log(msg):
 
 
 def cleanup_rfcomm_resources():
-    """彻底清理 RFCOMM 资源，释放内核内存
+    """清理 RFCOMM 资源（与产测一致：只 pkill + rfcomm release）
     
     步骤：
       1. pkill 旧的桥接进程和 cat 进程
       2. rfcomm release all
-      3. hciconfig hci0 reset — 重置蓝牙适配器，强制释放所有内核 RFCOMM 资源
-      4. hciconfig hci0 up — 重新启用适配器
-      5. hciconfig hci0 piscan — 恢复可发现+可连接
+      3. 等待 500ms
     绝不 bluetoothctl disconnect/connect
+    绝不 hciconfig reset（产测不用）
     """
     my_pid = os.getpid()
-    log(f"🧹 彻底清理 RFCOMM 资源 (本进程 PID: {my_pid})...")
+    log(f"🧹 清理 RFCOMM 资源 (本进程 PID: {my_pid})...")
     
     # 1. 杀掉旧的桥接进程（排除自己）
     try:
@@ -69,13 +68,11 @@ def cleanup_rfcomm_resources():
     except Exception as e:
         log(f"   pgrep 失败: {e}")
 
-    # 2. 杀掉残留 cat /dev/rfcomm 进程
+    # 2. 杀掉残留 cat 进程
     try:
-        subprocess.run(['pkill', '-9', '-f', 'cat /dev/rfcomm'], capture_output=True, timeout=3)
+        subprocess.run(['pkill', '-9', 'cat'], capture_output=True, timeout=3)
     except Exception:
         pass
-
-    time.sleep(0.3)
 
     # 3. 释放所有 rfcomm 绑定
     try:
@@ -84,20 +81,8 @@ def cleanup_rfcomm_resources():
     except Exception:
         pass
 
-    # 4. 重置蓝牙适配器 — 这是唯一能强制释放内核 RFCOMM 资源的方法
-    log("   🔄 重置蓝牙适配器 hci0 ...")
-    try:
-        subprocess.run(['sudo', 'hciconfig', 'hci0', 'reset'], capture_output=True, timeout=5)
-        time.sleep(1)
-        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'], capture_output=True, timeout=5)
-        time.sleep(0.5)
-        subprocess.run(['sudo', 'hciconfig', 'hci0', 'piscan'], capture_output=True, timeout=5)
-        log("   ✅ 蓝牙适配器已重置")
-    except Exception as e:
-        log(f"   ⚠️ hciconfig reset 失败: {e}")
-
-    # 5. 等待适配器就绪
-    time.sleep(1)
+    # 4. 等待资源释放
+    time.sleep(0.5)
     log("🧹 清理完成")
 
 

@@ -1,17 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import '../models/log_state.dart';
 import 'gtp_protocol.dart';
 
-/// 方案二: rfcomm bind + 直接 Dart 读写 /dev/rfcomm0
-/// 不依赖 Python 脚本，使用系统 rfcomm bind 建立连接
-/// 然后 Dart 直接读写设备文件进行数据收发
+/// 方案二: rfcomm bind + Python rfcomm_bind_bridge.py 桥接
+/// 与超声前整机产测完全一致的连接方式：
+///   1. pkill -9 cat + rfcomm release 0 清理（不用 hciconfig reset）
+///   2. sudo rfcomm bind 0 <MAC> <CH>
+///   3. Python rfcomm_bind_bridge.py 用 os.open(O_RDWR|O_NONBLOCK) 打开 /dev/rfcomm0
+///   4. Dart 通过 stdin/stdout 与 Python 桥接进程通信
 class RfcommBindService {
-  RandomAccessFile? _rfcommFile;  // 单 fd 双向通信（与 v2 服务一致）
-  bool _isReading = false;
+  Process? _bridgeProcess;
   StreamSubscription<List<int>>? _readSubscription;
-  Timer? _readTimer;
 
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   final StreamController<String> _logController = StreamController<String>.broadcast();
@@ -36,9 +38,6 @@ class RfcommBindService {
   // 统计信息
   int _totalBytesReceived = 0;
   int _totalBytesSent = 0;
-
-  // 设备文件路径
-  static const String _devicePath = '/dev/rfcomm0';
 
   void setLogState(LogState? logState) {
     _logState = logState;
@@ -83,50 +82,27 @@ class RfcommBindService {
     }
   }
 
-  /// 彻底清理 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
-  /// 通过 hciconfig hci0 reset 强制重置蓝牙适配器释放所有内核资源
-  Future<void> _cleanupRfcommResources() async {
-    _log('🧹 彻底清理 RFCOMM 资源...');
-    
-    // 1. 强杀旧的 Python 桥接进程
-    try {
-      await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
-    } catch (_) {}
-    
-    // 2. 强杀残留的 cat /dev/rfcomm 进程
-    try {
-      await Process.run('pkill', ['-9', '-f', 'cat /dev/rfcomm']);
-    } catch (_) {}
-    
-    await Future.delayed(const Duration(milliseconds: 300));
-    
-    // 3. 释放所有 rfcomm 绑定
-    try {
-      await Process.run('rfcomm', ['release', 'all']);
-    } catch (_) {}
-    try {
-      await Process.run('sudo', ['rfcomm', 'release', 'all']);
-    } catch (_) {}
-    
-    // 4. 重置蓝牙适配器 — 唯一能强制释放内核 RFCOMM 资源的方法
-    _log('   🔄 重置蓝牙适配器 hci0...');
-    try {
-      await Process.run('sudo', ['hciconfig', 'hci0', 'reset']);
-      await Future.delayed(const Duration(seconds: 1));
-      await Process.run('sudo', ['hciconfig', 'hci0', 'up']);
-      await Future.delayed(const Duration(milliseconds: 500));
-      await Process.run('sudo', ['hciconfig', 'hci0', 'piscan']);
-      _log('   ✅ 蓝牙适配器已重置');
-    } catch (e) {
-      _log('   ⚠️ hciconfig reset 失败: $e');
+  /// 获取 Python 脚本路径
+  String? _getScriptPath() {
+    final executablePath = Platform.resolvedExecutable;
+    final executableDir = File(executablePath).parent.path;
+
+    final possiblePaths = [
+      '$executableDir/scripts/rfcomm_bind_bridge.py',
+      'scripts/rfcomm_bind_bridge.py',
+      '/opt/jn-production-line/scripts/rfcomm_bind_bridge.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_bind_bridge.py',
+    ];
+
+    for (final path in possiblePaths) {
+      if (File(path).existsSync()) {
+        return path;
+      }
     }
-    
-    // 5. 等待适配器就绪
-    await Future.delayed(const Duration(seconds: 1));
-    _log('🧹 清理完成');
+    return null;
   }
 
-  /// 连接设备
+  /// 连接设备（与超声前整机产测完全一致）
   Future<bool> connect(String macAddress, {String? deviceName, int channel = 5}) async {
     if (_isConnected) {
       _log('⚠️ 已连接，先断开...');
@@ -143,69 +119,78 @@ class RfcommBindService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     try {
-      // 1. 彻底清理僵尸 RFCOMM 资源（释放内核内存，解决 Errno 12）
-      await _cleanupRfcommResources();
+      // 1. 清理旧连接（与产测一致：只 pkill + rfcomm release，不用 hciconfig reset）
+      _log('🧹 清理旧的 RFCOMM 连接...');
+      try {
+        await Process.run('pkill', ['-9', 'cat']);
+      } catch (_) {}
+      try {
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_bridge.py']);
+      } catch (_) {}
+      try {
+        await Process.run('rfcomm', ['release', '0']);
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // 2. 执行 rfcomm bind
-      _log('📎 执行: sudo rfcomm bind 0 $macAddress $channel');
-      final bindResult = await Process.run(
-        'sudo',
-        ['rfcomm', 'bind', '0', macAddress, channel.toString()],
+      // 2. 查找 Python 脚本
+      final scriptPath = _getScriptPath();
+      if (scriptPath == null) {
+        _logError('rfcomm_bind_bridge.py 脚本不存在');
+        return false;
+      }
+      _log('📜 脚本: $scriptPath');
+
+      // 3. 启动 Python 桥接进程（与产测一致）
+      _log('🚀 启动 rfcomm_bind_bridge.py...');
+      final process = await Process.start(
+        'python3',
+        ['-u', scriptPath, macAddress, channel.toString()],
+        environment: {'PYTHONUNBUFFERED': '1'},
       );
 
-      if (bindResult.exitCode != 0) {
-        final stderr = bindResult.stderr.toString().trim();
-        _logError('rfcomm bind 失败 (退出码: ${bindResult.exitCode}): $stderr');
-        return false;
-      }
+      _bridgeProcess = process;
 
-      _log('📎 rfcomm bind 成功');
+      // 4. 监听 stderr（Python 日志）
+      process.stderr.transform(const SystemEncoding().decoder).listen((line) {
+        _log('[Python] $line');
+      });
 
-      // 3. 等待设备文件就绪
-      _log('⏳ 等待设备文件 $_devicePath ...');
-      bool deviceReady = false;
-      for (int i = 0; i < 20; i++) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (await File(_devicePath).exists()) {
-          deviceReady = true;
-          break;
-        }
-      }
+      // 5. 监听 stdout（数据流）
+      _readSubscription = process.stdout.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            final bytes = Uint8List.fromList(data);
+            _onDataReceived(bytes);
+          }
+        },
+        onError: (error) {
+          _logError('数据接收错误: $error');
+          if (_isConnected) disconnect();
+        },
+        onDone: () {
+          _log('⚠️ Python 桥接数据流结束');
+          if (_isConnected) disconnect();
+        },
+      );
 
-      if (!deviceReady) {
-        _logError('设备文件 $_devicePath 未创建（超时 10s）');
-        try {
-          await Process.run('sudo', ['rfcomm', 'release', '0']);
-        } catch (_) {}
-        return false;
-      }
+      // 6. 监听进程退出
+      process.exitCode.then((code) {
+        _log('⚠️ rfcomm_bind_bridge.py 进程退出 (退出码: $code)');
+        if (_isConnected) disconnect();
+      });
 
-      _log('📁 设备文件已就绪: $_devicePath');
-
-      // 4. 打开设备文件（append 模式 = O_RDWR，支持双向读写）
-      _log('📂 打开设备文件...');
-      try {
-        _rfcommFile = await File(_devicePath).open(mode: FileMode.append)
-            .timeout(const Duration(seconds: 10), onTimeout: () {
-          throw TimeoutException('打开设备文件超时');
-        });
-        _log('✅ 设备文件已打开（单 fd 双向通信）');
-      } catch (e) {
-        _logError('打开设备文件失败: $e');
-        try {
-          await Process.run('sudo', ['rfcomm', 'release', '0']);
-        } catch (_) {}
-        return false;
-      }
-
-      // 5. 启动异步读取循环（与 v2 服务一致）
-      _log('📖 启动数据读取循环...');
-      _startReadLoop();
+      // 7. 等待连接建立
+      await Future.delayed(const Duration(seconds: 2));
 
       _currentDeviceAddress = macAddress;
       _currentDeviceName = deviceName;
       _currentChannel = channel;
       _isConnected = true;
+      _sequenceNumber = 0;
+      _gtpBuffer.clear();
+      _packetCount = 0;
+      _fragmentCount = 0;
+      _pendingResponses.clear();
 
       _logSuccess('连接成功 (rfcomm bind 模式)');
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -215,48 +200,6 @@ class RfcommBindService {
       _logError('连接失败: $e');
       await disconnect();
       return false;
-    }
-  }
-
-  /// 启动异步读取循环（与 linux_bluetooth_spp_service_v2 一致）
-  void _startReadLoop() {
-    if (_rfcommFile == null) return;
-    _isReading = true;
-    _readLoopAsync();
-  }
-
-  /// 异步读取循环
-  Future<void> _readLoopAsync() async {
-    const bufferSize = 1024;
-    final buffer = Uint8List(bufferSize);
-
-    try {
-      while (_isReading && _rfcommFile != null) {
-        try {
-          final bytesRead = await _rfcommFile!.readInto(buffer);
-
-          if (bytesRead > 0) {
-            final data = Uint8List.fromList(buffer.sublist(0, bytesRead));
-            _onDataReceived(data);
-          } else {
-            _log('⚠️ 读取到 EOF，连接已断开');
-            break;
-          }
-        } catch (e) {
-          if (_isReading) {
-            _logError('读取数据时出错: $e');
-            break;
-          }
-        }
-      }
-    } catch (e) {
-      _logError('读取循环异常: $e');
-    } finally {
-      _isReading = false;
-      if (_isConnected) {
-        _log('⚠️ 读取循环已停止');
-        _isConnected = false;
-      }
     }
   }
 
@@ -374,9 +317,9 @@ class RfcommBindService {
     }
   }
 
-  /// 发送原始数据（与 v2 服务一致，使用 _rfcommFile writeFrom）
+  /// 发送原始数据（通过 Python 桥接进程的 stdin）
   Future<bool> sendRawData(Uint8List data) async {
-    if (!_isConnected || _rfcommFile == null) {
+    if (!_isConnected || _bridgeProcess == null) {
       _logError('未连接，无法发送');
       return false;
     }
@@ -385,19 +328,14 @@ class RfcommBindService {
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       _log('📤 发送 [${data.length}字节]: $hexStr');
 
-      await _rfcommFile!.writeFrom(data);
-      await _rfcommFile!.flush();
+      _bridgeProcess!.stdin.add(data);
+      await _bridgeProcess!.stdin.flush();
 
       _totalBytesSent += data.length;
       _logSuccess('发送完成');
       return true;
     } catch (e) {
       _logError('发送失败: $e');
-      if (e.toString().contains('Bad file descriptor') || 
-          e.toString().contains('Input/output error')) {
-        _log('⚠️ 设备连接已断开');
-        _isConnected = false;
-      }
       return false;
     }
   }
@@ -492,28 +430,26 @@ class RfcommBindService {
   Future<void> disconnect() async {
     _log('🔌 断开连接...');
 
-    _isReading = false;
-
     _readSubscription?.cancel();
     _readSubscription = null;
 
-    _readTimer?.cancel();
-    _readTimer = null;
-
-    // 关闭设备文件
-    if (_rfcommFile != null) {
+    // 关闭 Python 桥接进程
+    if (_bridgeProcess != null) {
       try {
-        _rfcommFile!.closeSync();
-        _log('📂 设备文件已关闭');
+        _bridgeProcess!.stdin.close();
       } catch (_) {}
-      _rfcommFile = null;
+      try {
+        _bridgeProcess!.kill(ProcessSignal.sigterm);
+        await _bridgeProcess!.exitCode.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            _bridgeProcess?.kill(ProcessSignal.sigkill);
+            return -1;
+          },
+        );
+      } catch (_) {}
+      _bridgeProcess = null;
     }
-
-    // 释放 rfcomm 绑定
-    try {
-      await Process.run('sudo', ['rfcomm', 'release', '0']);
-      _log('📎 rfcomm 绑定已释放');
-    } catch (_) {}
 
     // 清理待处理的响应
     for (final completer in _pendingResponses.values) {

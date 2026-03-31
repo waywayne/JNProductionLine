@@ -101,11 +101,11 @@ class NativeRfcommService {
     }
   }
   
-  /// 彻底清理 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
-  /// 通过 hciconfig hci0 reset 强制重置蓝牙适配器释放所有内核资源
+  /// 清理 RFCOMM 资源（与产测一致：只 pkill + rfcomm release）
   /// 绝不 bluetoothctl disconnect/connect
+  /// 绝不 hciconfig reset（产测不用）
   Future<void> _cleanupRfcommResources() async {
-    _log('🧹 彻底清理 RFCOMM 资源...');
+    _log('🧹 清理 RFCOMM 资源...');
     
     // 1. 强杀旧的 Python 桥接进程
     try {
@@ -114,34 +114,16 @@ class NativeRfcommService {
     
     // 2. 强杀残留的 cat /dev/rfcomm 进程
     try {
-      await Process.run('pkill', ['-9', '-f', 'cat /dev/rfcomm']);
+      await Process.run('pkill', ['-9', 'cat']);
     } catch (_) {}
-    
-    await Future.delayed(const Duration(milliseconds: 300));
     
     // 3. 释放所有 rfcomm 绑定
     try {
       await Process.run('rfcomm', ['release', 'all']);
     } catch (_) {}
-    try {
-      await Process.run('sudo', ['rfcomm', 'release', 'all']);
-    } catch (_) {}
     
-    // 4. 重置蓝牙适配器 — 唯一能强制释放内核 RFCOMM 资源的方法
-    _log('   🔄 重置蓝牙适配器 hci0...');
-    try {
-      await Process.run('sudo', ['hciconfig', 'hci0', 'reset']);
-      await Future.delayed(const Duration(seconds: 1));
-      await Process.run('sudo', ['hciconfig', 'hci0', 'up']);
-      await Future.delayed(const Duration(milliseconds: 500));
-      await Process.run('sudo', ['hciconfig', 'hci0', 'piscan']);
-      _log('   ✅ 蓝牙适配器已重置');
-    } catch (e) {
-      _log('   ⚠️ hciconfig reset 失败: $e');
-    }
-    
-    // 5. 等待适配器就绪
-    await Future.delayed(const Duration(seconds: 1));
+    // 4. 等待资源释放
+    await Future.delayed(const Duration(milliseconds: 500));
     _log('🧹 清理完成');
   }
 

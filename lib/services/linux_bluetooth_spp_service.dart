@@ -483,10 +483,10 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('⏳ 连接到 $deviceAddress 通道 $targetChannel...');
       
-      // 彻底清理 RFCOMM 资源（释放内核内存，解决 Errno 12）
-      // 通过 hciconfig hci0 reset 强制重置蓝牙适配器
+      // 清理 RFCOMM 资源（与产测一致：只 pkill + rfcomm release）
       // ⚠️ 绝不 bluetoothctl disconnect（会拆 ACL → Errno 112）
-      _logState?.debug('🧹 彻底清理 RFCOMM 资源...');
+      // ⚠️ 绝不 hciconfig reset（产测不用）
+      _logState?.debug('🧹 清理 RFCOMM 资源...');
       if (_socketProcess != null) {
         try {
           _socketProcess!.kill(ProcessSignal.sigkill);
@@ -497,25 +497,11 @@ hciconfig hci0 up 2>/dev/null || true
       }
       // 强杀所有旧的 Python 桥接和 cat 进程
       try { await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']); } catch (_) {}
-      try { await Process.run('pkill', ['-9', '-f', 'cat /dev/rfcomm']); } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 300));
+      try { await Process.run('pkill', ['-9', 'cat']); } catch (_) {}
       // 释放所有 rfcomm 绑定
       try { await Process.run('rfcomm', ['release', 'all']); } catch (_) {}
-      try { await Process.run('sudo', ['rfcomm', 'release', 'all']); } catch (_) {}
-      // 重置蓝牙适配器 — 唯一能强制释放内核 RFCOMM 资源的方法
-      _logState?.debug('   🔄 重置蓝牙适配器 hci0...');
-      try {
-        await Process.run('sudo', ['hciconfig', 'hci0', 'reset']);
-        await Future.delayed(const Duration(seconds: 1));
-        await Process.run('sudo', ['hciconfig', 'hci0', 'up']);
-        await Future.delayed(const Duration(milliseconds: 500));
-        await Process.run('sudo', ['hciconfig', 'hci0', 'piscan']);
-        _logState?.debug('   ✅ 蓝牙适配器已重置');
-      } catch (e) {
-        _logState?.debug('   ⚠️ hciconfig reset 失败: $e');
-      }
-      // 等待适配器就绪
-      await Future.delayed(const Duration(seconds: 1));
+      // 等待资源释放
+      await Future.delayed(const Duration(milliseconds: 500));
       _logState?.debug('🧹 清理完成');
       
       // 仅在 bind 模式下清理 rfcomm 设备文件
