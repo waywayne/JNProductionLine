@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../screens/gpib_test_screen.dart';
 import '../screens/production_config_screen.dart';
 import '../screens/sn_records_screen.dart';
-import '../screens/spp_debug_screen.dart';
 import '../screens/native_spp_debug_screen.dart';
 import 'byd_mes_test_dialog.dart';
 
@@ -70,18 +69,8 @@ class MenuBarWidget extends StatelessWidget {
             },
           ),
           _MenuButton(
-            title: 'SPP 调试',
+            title: 'SPP 通讯',
             icon: Icons.bluetooth,
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const SppDebugScreen()),
-              );
-            },
-          ),
-          _MenuButton(
-            title: 'SPP 调试 (纯Dart)',
-            icon: Icons.code,
             onPressed: () {
               Navigator.push(
                 context,

@@ -140,24 +140,11 @@ class NativeRfcommService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     try {
-      // 1. 杀掉所有可能残留的 rfcomm 桥接进程
-      _log('🧹 清理残留桥接进程...');
-      try {
-        await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
-      } catch (_) {}
-      try {
-        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
-      } catch (_) {}
-      
-      // 2. 释放 rfcomm 绑定
-      _log('🧹 释放 rfcomm 绑定...');
-      try {
-        await Process.run('rfcomm', ['release', 'all']);
-      } catch (_) {}
-      
-      // ⚠️ 不要调用 bluetoothctl disconnect！会导致 Errno 112 (Host is down)
-      // 因为 pairAndConnectDevice 已不再调用 bluetoothctl connect，所以无需断开
-      // Python RFCOMM socket.connect() 会自行建立 ACL+RFCOMM 连接
+      // ⚠️ 不做任何 cleanup（不 pkill、不 rfcomm release、不 bluetoothctl）
+      // pkill -9 会强杀 Python 进程导致 socket 未正常关闭，内核 RFCOMM 资源泄漏 → Errno 12
+      // rfcomm release all 会释放系统蓝牙连接 → 断开用户手动连接的设备
+      // bluetoothctl disconnect 会拆掉 ACL 链路 → Errno 112
+      // 正确做法：上面 disconnect() 已经正常终止旧进程，socket 会自动释放
       
       // 启动 Python socket 桥接脚本
       final scriptPath = _getScriptPath();
@@ -224,8 +211,8 @@ class NativeRfcommService {
         processExited = true;
       });
       
-      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败）
-      for (int i = 0; i < 120; i++) {
+      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败，最多 15s）
+      for (int i = 0; i < 30; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) {
           _logSuccess('Python 桥接连接已就绪');
@@ -502,18 +489,22 @@ class NativeRfcommService {
     _stderrSubscription?.cancel();
     _stderrSubscription = null;
     
-    // 关闭桥接进程
+    // 关闭桥接进程 — 先 SIGTERM 让 Python 正常关闭 socket，避免内核资源泄漏
     if (_bridgeProcess != null) {
       try {
-        _bridgeProcess!.stdin.close();
+        _bridgeProcess!.stdin.close();  // 关闭 stdin，Python 会检测到并退出
       } catch (e) {
         // 忽略
       }
       
-      // 等待进程退出，超时则强制杀掉
+      try {
+        _bridgeProcess!.kill(ProcessSignal.sigterm);  // SIGTERM 正常退出
+      } catch (_) {}
+      
+      // 等待进程退出，超时才 SIGKILL
       try {
         await _bridgeProcess!.exitCode.timeout(
-          const Duration(seconds: 1),
+          const Duration(seconds: 3),
           onTimeout: () {
             try { _bridgeProcess?.kill(ProcessSignal.sigkill); } catch (_) {}
             return -1;
@@ -523,14 +514,8 @@ class NativeRfcommService {
         try { _bridgeProcess?.kill(ProcessSignal.sigkill); } catch (_) {}
       }
       _bridgeProcess = null;
-    }
-    // 杀掉所有可能残留的桥接进程
-    try {
-      await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
-    } catch (_) {}
-    try {
-      await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
-    } catch (_) {
+      // 等待内核释放 RFCOMM 资源
+      await Future.delayed(const Duration(milliseconds: 500));
     }
     
     // 清理待处理的响应

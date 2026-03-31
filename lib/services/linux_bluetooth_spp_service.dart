@@ -483,33 +483,26 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('⏳ 连接到 $deviceAddress 通道 $targetChannel...');
       
-      // 清理旧的 Python 桥接进程（不清理系统 rfcomm 绑定，避免影响系统蓝牙）
+      // ⚠️ 不做任何系统级 cleanup（不 pkill、不 rfcomm release、不 bluetoothctl）
+      // pkill -9 强杀导致 socket 未正常关闭 → 内核 RFCOMM 资源泄漏 → Errno 12
+      // rfcomm release all → 断开系统蓝牙已建立的连接
+      // bluetoothctl disconnect → 拆掉 ACL 链路 → Errno 112
+      // 正确做法：disconnect() 通过 SIGTERM 正常终止旧进程，socket 自动释放
       _logState?.debug('🧹 清理旧的桥接进程...');
       if (_socketProcess != null) {
         try {
-          _socketProcess!.kill(ProcessSignal.sigkill);
+          _socketProcess!.kill(ProcessSignal.sigterm);  // SIGTERM 让 Python 正常退出并关闭 socket
+          await _socketProcess!.exitCode.timeout(const Duration(seconds: 3), onTimeout: () {
+            _socketProcess?.kill(ProcessSignal.sigkill);  // 超时才 SIGKILL
+            return -1;
+          });
         } catch (e) {
           // 忽略
         }
         _socketProcess = null;
+        // 等待内核释放 RFCOMM 资源
+        await Future.delayed(const Duration(milliseconds: 500));
       }
-      // 杀掉所有可能残留的 rfcomm_socket_simple.py 进程（防止占用蓝牙资源）
-      try {
-        await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
-      } catch (_) {}
-      try {
-        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
-      } catch (_) {}
-      
-      // 释放 rfcomm 绑定
-      _logState?.debug('   释放 rfcomm 绑定...');
-      try {
-        await Process.run('rfcomm', ['release', 'all']);
-      } catch (_) {}
-      
-      // ⚠️ 不要调用 bluetoothctl disconnect！会导致 Errno 112 (Host is down)
-      // pairAndConnectDevice 已不再调用 bluetoothctl connect，所以无需断开
-      // Python RFCOMM socket.connect() 会自行建立 ACL+RFCOMM 连接
       
       // 仅在 bind 模式下清理 rfcomm 设备文件
       if (_useBindMode) {
@@ -646,9 +639,9 @@ hciconfig hci0 up 2>/dev/null || true
           }
         });
         
-        // 等待连接建立（检测 Python 输出的成功消息，或进程退出表示失败）
+        // 等待连接建立（检测 Python 输出的成功消息，或进程退出表示失败，最多 15s）
         _logState?.info('⏳ 等待 socket 连接建立...');
-        for (int i = 0; i < 120; i++) {
+        for (int i = 0; i < 30; i++) {
           await Future.delayed(const Duration(milliseconds: 500));
           if (connectionReady) {
             _logState?.success('✅ Python 桥接连接已就绪');
@@ -941,9 +934,9 @@ hciconfig hci0 up 2>/dev/null || true
         if (_isConnected) disconnect();
       });
       
-      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败）
+      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败，最多 15s）
       _logState?.info('⏳ 等待 RFCOMM 连接建立...');
-      for (int i = 0; i < 120; i++) {
+      for (int i = 0; i < 30; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) {
           _logState?.success('✅ Python 桥接连接已就绪');
@@ -1269,21 +1262,24 @@ hciconfig hci0 up 2>/dev/null || true
         await _subscription?.cancel();
         _subscription = null;
         
-        // 杀掉 Python 进程
+        // 正常终止 Python 进程（SIGTERM 让 Python 关闭 socket，释放内核 RFCOMM 资源）
         if (_socketProcess != null) {
           try {
-            _socketProcess!.kill(ProcessSignal.sigkill);
+            _socketProcess!.stdin.close();  // 关闭 stdin
+          } catch (_) {}
+          try {
+            _socketProcess!.kill(ProcessSignal.sigterm);  // SIGTERM 正常退出
+          } catch (_) {}
+          try {
+            await _socketProcess!.exitCode.timeout(const Duration(seconds: 3), onTimeout: () {
+              _socketProcess?.kill(ProcessSignal.sigkill);
+              return -1;
+            });
           } catch (_) {}
           _socketProcess = null;
           _logState?.debug('   Python 进程已终止');
+          await Future.delayed(const Duration(milliseconds: 500));
         }
-        // 杀掉所有可能残留的桥接进程
-        try {
-          await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
-        } catch (_) {}
-        try {
-          await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
-        } catch (_) {}
         
         _currentDeviceAddress = null;
         _currentDeviceName = null;

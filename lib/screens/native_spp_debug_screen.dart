@@ -19,7 +19,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
   final NativeRfcommService _rfcommService = NativeRfcommService();
   
   final TextEditingController _addressController = TextEditingController();
-  final TextEditingController _channelController = TextEditingController(text: '1');
+  final TextEditingController _channelController = TextEditingController(text: '5');
   final TextEditingController _payloadController = TextEditingController();
   final TextEditingController _moduleIdController = TextEditingController(text: '0006');
   final TextEditingController _messageIdController = TextEditingController(text: 'FF01');
@@ -312,7 +312,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('SPP 调试 (纯 Dart)'),
+        title: const Text('SPP 通讯 (GTP over SPP)'),
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
         actions: [
@@ -406,7 +406,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                   children: [
                     Icon(Icons.code, size: 14, color: Colors.deepPurple),
                     SizedBox(width: 4),
-                    Text('纯 Dart 模式', style: TextStyle(fontSize: 11, color: Colors.deepPurple)),
+                    Text('GTP over SPP', style: TextStyle(fontSize: 11, color: Colors.deepPurple)),
                   ],
                 ),
               ),
@@ -733,7 +733,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
               ),
               const Spacer(),
               Text(
-                '直接读写 /dev/rfcomm0，不依赖 Python',
+                'BR/EDR SPP 通讯，GTP 封装',
                 style: TextStyle(fontSize: 10, color: Colors.grey[600]),
               ),
             ],
