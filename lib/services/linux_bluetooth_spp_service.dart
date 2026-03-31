@@ -483,26 +483,31 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('⏳ 连接到 $deviceAddress 通道 $targetChannel...');
       
-      // ⚠️ 不做任何系统级 cleanup（不 pkill、不 rfcomm release、不 bluetoothctl）
-      // pkill -9 强杀导致 socket 未正常关闭 → 内核 RFCOMM 资源泄漏 → Errno 12
-      // rfcomm release all → 断开系统蓝牙已建立的连接
-      // bluetoothctl disconnect → 拆掉 ACL 链路 → Errno 112
-      // 正确做法：disconnect() 通过 SIGTERM 正常终止旧进程，socket 自动释放
-      _logState?.debug('🧹 清理旧的桥接进程...');
+      // 清理僵尸 RFCOMM 资源（释放内核内存，解决 Errno 12）
+      // ⚠️ 只 pkill 旧进程 + rfcomm release，绝不 bluetoothctl disconnect（会拆 ACL → Errno 112）
+      _logState?.debug('🧹 清理 RFCOMM 资源...');
       if (_socketProcess != null) {
         try {
-          _socketProcess!.kill(ProcessSignal.sigterm);  // SIGTERM 让 Python 正常退出并关闭 socket
+          _socketProcess!.kill(ProcessSignal.sigterm);
           await _socketProcess!.exitCode.timeout(const Duration(seconds: 3), onTimeout: () {
-            _socketProcess?.kill(ProcessSignal.sigkill);  // 超时才 SIGKILL
+            _socketProcess?.kill(ProcessSignal.sigkill);
             return -1;
           });
         } catch (e) {
           // 忽略
         }
         _socketProcess = null;
-        // 等待内核释放 RFCOMM 资源
-        await Future.delayed(const Duration(milliseconds: 500));
       }
+      // 杀掉所有旧的 Python 桥接和 cat 进程
+      try { await Process.run('pkill', ['-TERM', '-f', 'rfcomm_socket_simple.py']); } catch (_) {}
+      try { await Process.run('pkill', ['-TERM', '-f', 'cat /dev/rfcomm']); } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 500));
+      // 释放所有 rfcomm 绑定
+      try { await Process.run('rfcomm', ['release', 'all']); } catch (_) {}
+      try { await Process.run('sudo', ['rfcomm', 'release', 'all']); } catch (_) {}
+      // 等待内核回收
+      await Future.delayed(const Duration(seconds: 1));
+      _logState?.debug('🧹 清理完成');
       
       // 仅在 bind 模式下清理 rfcomm 设备文件
       if (_useBindMode) {

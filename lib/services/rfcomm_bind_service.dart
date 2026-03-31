@@ -82,6 +82,43 @@ class RfcommBindService {
     }
   }
 
+  /// 清理僵尸 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
+  /// ⚠️ 只做安全清理，绝不 bluetoothctl disconnect
+  Future<void> _cleanupRfcommResources() async {
+    _log('🧹 清理 RFCOMM 资源...');
+    
+    // 1. 杀掉旧的 Python 桥接进程（释放它们持有的 socket fd）
+    try {
+      final result = await Process.run('pkill', ['-TERM', '-f', 'rfcomm_socket_simple.py']);
+      if (result.exitCode == 0) {
+        _log('   已终止旧的 Python 桥接进程');
+      }
+    } catch (_) {}
+    
+    // 2. 杀掉可能残留的 cat /dev/rfcomm 进程
+    try {
+      final result = await Process.run('pkill', ['-TERM', '-f', 'cat /dev/rfcomm']);
+      if (result.exitCode == 0) {
+        _log('   已终止旧的 cat 进程');
+      }
+    } catch (_) {}
+    
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    // 3. 释放所有 rfcomm 绑定（安全操作，只影响 /dev/rfcommX）
+    try {
+      await Process.run('rfcomm', ['release', 'all']);
+      _log('   rfcomm release all 完成');
+    } catch (_) {}
+    try {
+      await Process.run('sudo', ['rfcomm', 'release', 'all']);
+    } catch (_) {}
+    
+    // 4. 等待内核回收资源
+    await Future.delayed(const Duration(seconds: 1));
+    _log('🧹 清理完成');
+  }
+
   /// 连接设备
   Future<bool> connect(String macAddress, {String? deviceName, int channel = 5}) async {
     if (_isConnected) {
@@ -99,12 +136,8 @@ class RfcommBindService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     try {
-      // 1. 释放旧的 rfcomm0 绑定
-      _log('🧹 释放旧的 rfcomm 绑定...');
-      try {
-        await Process.run('sudo', ['rfcomm', 'release', '0']);
-      } catch (_) {}
-      await Future.delayed(const Duration(milliseconds: 300));
+      // 1. 彻底清理僵尸 RFCOMM 资源（释放内核内存，解决 Errno 12）
+      await _cleanupRfcommResources();
 
       // 2. 执行 rfcomm bind
       _log('📎 执行: sudo rfcomm bind 0 $macAddress $channel');

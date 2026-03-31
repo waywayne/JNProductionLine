@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RFCOMM Socket 桥接脚本 — 最小化设计，完全参考 bluetooth_spp_test.py
+RFCOMM Socket 桥接脚本
 
 数据流：
   Dart stdin  →  Python  →  BT socket (发送到设备)
   BT socket   →  Python  →  Dart stdout (接收设备数据)
 
 关键原则：
-  - 不做任何 cleanup（不 pkill、不 rfcomm release、不 bluetoothctl）
-  - 只用 PyBluez BluetoothSocket，与 bluetooth_spp_test.py 完全一致
-  - 单通道连接，不扫描（由 Dart 侧指定正确通道）
+  - 连接前清理僵尸 RFCOMM 资源（pkill 旧 python 桥接、rfcomm release all）
+  - 绝不 bluetoothctl disconnect（会拆 ACL 链路 → Errno 112）
+  - 绝不 bluetoothctl connect（会冲突 → Errno 52）
   - socket 关闭时自动释放内核资源
 """
 
@@ -22,6 +22,7 @@ import threading
 import select
 import signal
 import atexit
+import subprocess
 
 try:
     import bluetooth
@@ -34,6 +35,49 @@ def log(msg):
     """日志输出到 stderr（不影响 stdout 二进制数据通道）"""
     ts = time.strftime('%H:%M:%S')
     print(f"[{ts}] [RFCOMM-BRIDGE] {msg}", file=sys.stderr, flush=True)
+
+
+def cleanup_rfcomm_resources():
+    """清理僵尸 RFCOMM 资源，释放内核内存
+    
+    ⚠️ 只做安全清理：
+      - pkill 旧的 rfcomm_socket_simple.py 进程（释放它们持有的 socket fd）
+      - rfcomm release all（释放 /dev/rfcommX 绑定）
+      - 绝不 bluetoothctl disconnect（会拆 ACL → Errno 112）
+      - 绝不 bluetoothctl connect（会冲突 → Errno 52）
+    """
+    my_pid = os.getpid()
+    log(f"🧹 清理 RFCOMM 资源 (本进程 PID: {my_pid})...")
+    
+    # 1. 杀掉旧的 rfcomm_socket_simple.py 进程（排除自己）
+    try:
+        result = subprocess.run(
+            ['pgrep', '-f', 'rfcomm_socket_simple.py'],
+            capture_output=True, text=True, timeout=3
+        )
+        if result.stdout.strip():
+            for pid_str in result.stdout.strip().split('\n'):
+                pid = int(pid_str.strip())
+                if pid != my_pid:
+                    log(f"   杀掉旧桥接进程 PID={pid}")
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+            time.sleep(0.5)  # 等待 socket 关闭
+    except Exception as e:
+        log(f"   pgrep 失败: {e}")
+
+    # 2. 释放所有 rfcomm 绑定（安全操作，只影响 /dev/rfcommX）
+    try:
+        subprocess.run(['rfcomm', 'release', 'all'], capture_output=True, timeout=3)
+        log("   rfcomm release all 完成")
+    except Exception as e:
+        log(f"   rfcomm release 失败: {e}")
+
+    # 3. 等待内核回收资源
+    time.sleep(1)
+    log("🧹 清理完成")
 
 
 def connect_raw_socket(mac, channel, timeout=5):
@@ -190,7 +234,9 @@ def main():
     log(f"PyBluez: {'可用' if HAS_PYBLUEZ else '不可用'}")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    # 直接连接 — 不做任何清理，与 bluetooth_spp_test.py 一致
+    # 连接前清理僵尸 RFCOMM 资源（释放内核内存）
+    cleanup_rfcomm_resources()
+
     try:
         sock = connect_rfcomm(mac, ch)
     except Exception as e:

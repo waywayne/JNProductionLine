@@ -101,6 +101,37 @@ class NativeRfcommService {
     }
   }
   
+  /// 清理僵尸 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
+  /// ⚠️ 只做安全清理：pkill 旧 python 桥接 + rfcomm release all
+  /// 绝不 bluetoothctl disconnect（会拆 ACL → Errno 112）
+  Future<void> _cleanupRfcommResources() async {
+    _log('🧹 清理 RFCOMM 资源...');
+    
+    // 1. 杀掉旧的 Python 桥接进程（释放它们持有的 socket fd）
+    try {
+      final result = await Process.run('pkill', ['-TERM', '-f', 'rfcomm_socket_simple.py']);
+      if (result.exitCode == 0) {
+        _log('   已终止旧的 Python 桥接进程');
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+    } catch (_) {}
+    
+    // 2. 杀掉可能残留的 cat /dev/rfcomm 进程
+    try {
+      await Process.run('pkill', ['-TERM', '-f', 'cat /dev/rfcomm']);
+    } catch (_) {}
+    
+    // 3. 释放所有 rfcomm 绑定（安全操作，只影响 /dev/rfcommX）
+    try {
+      await Process.run('rfcomm', ['release', 'all']);
+      _log('   rfcomm release all 完成');
+    } catch (_) {}
+    
+    // 4. 等待内核回收资源
+    await Future.delayed(const Duration(seconds: 1));
+    _log('🧹 清理完成');
+  }
+
   /// 获取 Python 脚本路径
   String _getScriptPath() {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
@@ -140,11 +171,9 @@ class NativeRfcommService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     try {
-      // ⚠️ 不做任何 cleanup（不 pkill、不 rfcomm release、不 bluetoothctl）
-      // pkill -9 会强杀 Python 进程导致 socket 未正常关闭，内核 RFCOMM 资源泄漏 → Errno 12
-      // rfcomm release all 会释放系统蓝牙连接 → 断开用户手动连接的设备
-      // bluetoothctl disconnect 会拆掉 ACL 链路 → Errno 112
-      // 正确做法：上面 disconnect() 已经正常终止旧进程，socket 会自动释放
+      // 清理僵尸 RFCOMM 资源（释放内核内存，解决 Errno 12）
+      // ⚠️ 只 pkill 旧 python 桥接 + rfcomm release，绝不 bluetoothctl disconnect
+      await _cleanupRfcommResources();
       
       // 启动 Python socket 桥接脚本
       final scriptPath = _getScriptPath();
