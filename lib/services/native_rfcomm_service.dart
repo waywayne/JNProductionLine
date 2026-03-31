@@ -10,7 +10,7 @@ import 'gtp_protocol.dart';
 class NativeRfcommService {
   Process? _bridgeProcess;
   StreamSubscription<List<int>>? _stdoutSubscription;
-  StreamSubscription<List<int>>? _stderrSubscription;
+  StreamSubscription<String>? _stderrSubscription;
   
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   final StreamController<String> _logController = StreamController<String>.broadcast();
@@ -103,9 +103,13 @@ class NativeRfcommService {
   
   /// 获取 Python 脚本路径
   String _getScriptPath() {
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
     // 尝试多个可能的路径
     final candidates = [
+      '$executableDir/scripts/rfcomm_socket_simple.py',
       '${Directory.current.path}/scripts/rfcomm_socket_simple.py',
+      '/opt/jn-production-line/scripts/rfcomm_socket_simple.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket_simple.py',
       '${Platform.resolvedExecutable.contains('/') ? File(Platform.resolvedExecutable).parent.parent.path : '.'}/data/flutter_assets/scripts/rfcomm_socket_simple.py',
     ];
     
@@ -172,32 +176,40 @@ class NativeRfcommService {
         },
       );
       
-      // 监听 stderr（日志）
-      _stderrSubscription = _bridgeProcess!.stderr.listen(
-        (data) {
-          final msg = String.fromCharCodes(data).trim();
-          if (msg.isNotEmpty) {
-            for (final line in msg.split('\n')) {
-              if (line.trim().isNotEmpty) {
-                _log('🐍 $line');
+      // 监听 stderr（日志）- 使用 UTF-8 解码
+      _stderrSubscription = _bridgeProcess!.stderr
+          .transform(const SystemEncoding().decoder)
+          .listen((msg) {
+            if (msg.trim().isNotEmpty) {
+              for (final line in msg.split('\n')) {
+                if (line.trim().isNotEmpty) {
+                  _log('🐍 $line');
+                }
               }
             }
-          }
-        },
-      );
+          });
       
-      // 等待连接建立（通过 stderr 日志判断）
+      // 等待连接建立，同时监测进程是否提前退出
       _log('⏳ 等待 socket 连接建立...');
+      bool processExited = false;
+      int? processExitCode;
+      _bridgeProcess!.exitCode.then((code) {
+        processExitCode = code;
+        processExited = true;
+      });
       
-      // 等待一段时间让 Python 进程建立连接
-      await Future.delayed(const Duration(seconds: 3));
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (processExited) {
+          _logError('桥接进程已退出 (退出码: $processExitCode)，连接失败');
+          _bridgeProcess = null;
+          return false;
+        }
+      }
       
-      // 检查进程是否还活着
-      final exitCode = _bridgeProcess?.exitCode;
-      if (exitCode != null) {
-        // 进程已退出，说明连接失败
+      if (processExited) {
         _logError('桥接进程已退出，连接失败');
-        await disconnect();
+        _bridgeProcess = null;
         return false;
       }
       

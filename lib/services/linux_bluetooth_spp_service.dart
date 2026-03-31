@@ -635,8 +635,12 @@ hciconfig hci0 up 2>/dev/null || true
           cancelOnError: false,  // 不要因为错误就取消订阅
         );
         
-        // 监听进程退出
+        // 等待连接建立，同时监测进程是否提前退出
+        bool processExited = false;
+        int? exitCode;
         process.exitCode.then((code) {
+          exitCode = code;
+          processExited = true;
           _logState?.warning('⚠️ RFCOMM Socket 进程已退出 (退出码: $code)');
           if (_isConnected) {
             disconnect();
@@ -644,7 +648,22 @@ hciconfig hci0 up 2>/dev/null || true
         });
         
         // 等待连接建立（Python 脚本需要时间连接）
-        await Future.delayed(const Duration(seconds: 2));
+        _logState?.info('⏳ 等待 socket 连接建立...');
+        for (int i = 0; i < 20; i++) {
+          await Future.delayed(const Duration(milliseconds: 200));
+          if (processExited) {
+            _logState?.error('❌ 桥接进程已退出 (退出码: $exitCode)，连接失败');
+            _socketProcess = null;
+            return false;
+          }
+        }
+        
+        // 再次检查进程是否还活着
+        if (processExited) {
+          _logState?.error('❌ 桥接进程已退出，连接失败');
+          _socketProcess = null;
+          return false;
+        }
         
         // 连接成功
         _currentDeviceAddress = deviceAddress;

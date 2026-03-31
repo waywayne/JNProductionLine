@@ -31,43 +31,59 @@ def log(message):
     print(f"[{timestamp}] [RFCOMM-SOCKET-SIMPLE] {message}", file=sys.stderr, flush=True)
 
 def create_rfcomm_socket(mac_address, channel):
-    """创建 RFCOMM socket 连接"""
+    """创建 RFCOMM socket 连接，优先 PyBluez，失败后回退到原始 socket"""
+    sock = None
+    
+    # 方法1: PyBluez
     if HAS_PYBLUEZ:
-        return _create_pybluez_socket(mac_address, channel)
-    else:
-        return _create_raw_socket(mac_address, channel)
+        sock = _create_pybluez_socket(mac_address, channel)
+    
+    # 方法2: 原始 socket（PyBluez 不可用或失败时）
+    if sock is None:
+        sock = _create_raw_socket(mac_address, channel)
+    
+    return sock
 
 def _create_pybluez_socket(mac_address, channel):
     """使用 PyBluez 创建连接"""
     try:
-        log(f"使用 PyBluez 连接: {mac_address} CH{channel}")
+        log(f"尝试 PyBluez 连接: {mac_address} CH{channel}")
         sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-        sock.settimeout(10)
+        # 注意：不要在 connect 之前调用 settimeout，某些 BlueZ 版本会导致 EBADFD (Errno 77)
         sock.connect((mac_address, channel))
+        # 连接成功后再设置超时
         sock.settimeout(0.1)
         log(f"✅ PyBluez RFCOMM 连接成功")
         return sock
     except Exception as e:
-        log(f"❌ PyBluez 连接失败: {e}")
+        log(f"⚠️ PyBluez 连接失败: {e}，将尝试原始 socket")
+        try:
+            sock.close()
+        except:
+            pass
         return None
 
 def _create_raw_socket(mac_address, channel):
     """使用原始 socket 创建 RFCOMM 连接（不需要 PyBluez）"""
+    AF_BLUETOOTH = 31
+    BTPROTO_RFCOMM = 3
+    sock = None
+    
     try:
-        log(f"使用原始 socket 连接: {mac_address} CH{channel}")
-        
-        # AF_BLUETOOTH = 31, BTPROTO_RFCOMM = 3
-        AF_BLUETOOTH = 31
-        BTPROTO_RFCOMM = 3
-        
+        log(f"尝试原始 socket 连接: {mac_address} CH{channel}")
         sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
-        sock.settimeout(10)
+        # 不在 connect 前设置 timeout，避免 EBADFD
         sock.connect((mac_address, channel))
         sock.settimeout(0.1)
         log(f"✅ 原始 socket RFCOMM 连接成功")
         return sock
     except Exception as e:
         log(f"❌ 原始 socket 连接失败: {e}")
+        try:
+            if sock:
+                sock.close()
+        except:
+            pass
         return None
 
 def socket_to_stdout(sock, keep_alive_event):
@@ -97,17 +113,24 @@ def socket_to_stdout(sock, keep_alive_event):
             except socket.timeout:
                 # socket 超时是正常的（非阻塞模式），继续等待
                 continue
-            except (OSError, IOError) as e:
+            except Exception as e:
+                # PyBluez 的 BluetoothError 不继承自 socket.timeout，
+                # 需要通过错误消息判断是否为超时
                 error_msg = str(e).lower()
                 if 'timed out' in error_msg or 'timeout' in error_msg:
                     continue
+                elif 'resource temporarily unavailable' in error_msg:
+                    # EAGAIN - 非阻塞模式下无数据可读
+                    continue
                 else:
-                    log(f"❌ BT socket 读取错误: {e}")
+                    log(f"❌ BT socket 读取错误: {type(e).__name__}: {e}")
                     keep_alive_event.clear()
                     break
                     
     except Exception as e:
-        log(f"❌ 读取线程异常: {e}")
+        log(f"❌ 读取线程异常: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
         keep_alive_event.clear()
     finally:
         log(f"📊 读取线程结束，共接收 {recv_count} 次，{total_bytes} 字节")
@@ -160,13 +183,17 @@ def stdin_to_socket(sock, keep_alive_event):
                 except socket.timeout:
                     time.sleep(0.01)
                     continue
-                except (OSError, IOError) as e:
+                except Exception as e:
+                    # PyBluez BluetoothError 超时也需要处理
                     error_msg = str(e).lower()
                     if 'timed out' in error_msg or 'timeout' in error_msg:
                         time.sleep(0.01)
                         continue
+                    elif 'resource temporarily unavailable' in error_msg:
+                        time.sleep(0.01)
+                        continue
                     else:
-                        log(f"❌ BT socket 发送错误: {e}")
+                        log(f"❌ BT socket 发送错误: {type(e).__name__}: {e}")
                         keep_alive_event.clear()
                         return
             
