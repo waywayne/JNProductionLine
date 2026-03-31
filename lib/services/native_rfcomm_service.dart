@@ -16,6 +16,8 @@ class NativeRfcommService {
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   final StreamController<String> _logController = StreamController<String>.broadcast();
   
+  bool _isDisposed = false;
+  
   String? _currentDeviceAddress;
   String? _currentDeviceName;
   int? _currentChannel;
@@ -77,21 +79,27 @@ class NativeRfcommService {
     final timestamp = DateTime.now().toString().substring(11, 19);
     final logMessage = '[$timestamp] $message';
     _logState?.info(logMessage);
-    _logController.add(logMessage);
+    if (!_isDisposed && !_logController.isClosed) {
+      _logController.add(logMessage);
+    }
   }
   
   void _logError(String message) {
     final timestamp = DateTime.now().toString().substring(11, 19);
     final logMessage = '[$timestamp] ❌ $message';
     _logState?.error(logMessage);
-    _logController.add(logMessage);
+    if (!_isDisposed && !_logController.isClosed) {
+      _logController.add(logMessage);
+    }
   }
   
   void _logSuccess(String message) {
     final timestamp = DateTime.now().toString().substring(11, 19);
     final logMessage = '[$timestamp] ✅ $message';
     _logState?.success(logMessage);
-    _logController.add(logMessage);
+    if (!_isDisposed && !_logController.isClosed) {
+      _logController.add(logMessage);
+    }
   }
   
   /// 使用 rfcomm bind 绑定设备
@@ -225,7 +233,9 @@ class NativeRfcommService {
     _log('📥 接收 #$_fragmentCount [${data.length}字节]: $hexStr');
     
     // 广播原始数据
-    _dataController.add(data);
+    if (!_isDisposed && !_dataController.isClosed) {
+      _dataController.add(data);
+    }
     
     // 添加到 GTP 缓冲区
     _gtpBuffer.addAll(data);
@@ -503,6 +513,7 @@ class NativeRfcommService {
   
   /// 释放资源
   void dispose() {
+    _isDisposed = true;
     disconnect();
     _dataController.close();
     _logController.close();
