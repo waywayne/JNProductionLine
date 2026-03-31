@@ -5,13 +5,12 @@ import '../models/log_state.dart';
 import 'gtp_protocol.dart';
 
 /// 纯 Dart 实现的 RFCOMM 服务
-/// 直接读写 /dev/rfcomm0 设备文件，不依赖 Python 脚本
-/// 类似第三方 SPP 调试工具的实现方式
+/// 使用 Python bluetooth socket 进行 SPP 通信（不使用 rfcomm bind）
+/// 不会断开系统蓝牙设置中的连接
 class NativeRfcommService {
-  IOSink? _deviceSink;
-  StreamSubscription<List<int>>? _readSubscription;
-  Timer? _readTimer;
-  File? _deviceFile;
+  Process? _bridgeProcess;
+  StreamSubscription<List<int>>? _stdoutSubscription;
+  StreamSubscription<List<int>>? _stderrSubscription;
   
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
   final StreamController<String> _logController = StreamController<String>.broadcast();
@@ -102,53 +101,22 @@ class NativeRfcommService {
     }
   }
   
-  /// 使用 rfcomm bind 绑定设备
-  Future<bool> _bindRfcomm(String macAddress, int channel) async {
-    try {
-      // 1. 先释放旧的绑定
-      _log('🔧 释放旧的 RFCOMM 绑定...');
-      await Process.run('sudo', ['rfcomm', 'release', '0']);
-      await Future.delayed(const Duration(milliseconds: 300));
-      
-      // 2. 绑定新设备
-      _log('🔧 绑定 RFCOMM: MAC=$macAddress, Channel=$channel');
-      final result = await Process.run(
-        'sudo',
-        ['rfcomm', 'bind', '0', macAddress, channel.toString()],
-      );
-      
-      if (result.exitCode != 0) {
-        _logError('RFCOMM 绑定失败: ${result.stderr}');
-        return false;
+  /// 获取 Python 脚本路径
+  String _getScriptPath() {
+    // 尝试多个可能的路径
+    final candidates = [
+      '${Directory.current.path}/scripts/rfcomm_socket_simple.py',
+      '${Platform.resolvedExecutable.contains('/') ? File(Platform.resolvedExecutable).parent.parent.path : '.'}/data/flutter_assets/scripts/rfcomm_socket_simple.py',
+    ];
+    
+    for (final path in candidates) {
+      if (File(path).existsSync()) {
+        return path;
       }
-      
-      // 3. 等待设备文件出现
-      const devicePath = '/dev/rfcomm0';
-      for (int i = 0; i < 20; i++) {
-        if (await File(devicePath).exists()) {
-          _logSuccess('设备文件已创建: $devicePath');
-          await Future.delayed(const Duration(milliseconds: 500));
-          return true;
-        }
-        await Future.delayed(const Duration(milliseconds: 250));
-      }
-      
-      _logError('设备文件未出现: $devicePath');
-      return false;
-    } catch (e) {
-      _logError('RFCOMM 绑定异常: $e');
-      return false;
     }
-  }
-  
-  /// 释放 RFCOMM 绑定
-  Future<void> _releaseRfcomm() async {
-    try {
-      await Process.run('sudo', ['rfcomm', 'release', '0']);
-      _log('🔧 RFCOMM 绑定已释放');
-    } catch (e) {
-      _logError('释放 RFCOMM 失败: $e');
-    }
+    
+    // 默认路径
+    return '${Directory.current.path}/scripts/rfcomm_socket_simple.py';
   }
   
   /// 连接设备
@@ -159,7 +127,7 @@ class NativeRfcommService {
     }
     
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _log('🔗 开始连接 (纯 Dart 模式)');
+    _log('🔗 开始连接 (Socket 模式，不使用 rfcomm bind)');
     _log('   MAC: $macAddress');
     _log('   Channel: $channel');
     if (deviceName != null) {
@@ -168,29 +136,77 @@ class NativeRfcommService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     try {
-      // 1. 绑定 RFCOMM
-      if (!await _bindRfcomm(macAddress, channel)) {
+      // 启动 Python socket 桥接脚本
+      final scriptPath = _getScriptPath();
+      _log('📜 脚本: $scriptPath');
+      
+      if (!File(scriptPath).existsSync()) {
+        _logError('脚本文件不存在: $scriptPath');
         return false;
       }
       
-      // 2. 打开设备文件
-      const devicePath = '/dev/rfcomm0';
-      _log('📂 打开设备文件: $devicePath');
+      _bridgeProcess = await Process.start(
+        'python3',
+        [scriptPath, macAddress, channel.toString()],
+        environment: {'PYTHONUNBUFFERED': '1'},
+      );
       
-      _deviceFile = File(devicePath);
+      _log('🚀 桥接进程已启动 (PID: ${_bridgeProcess!.pid})');
       
-      // 打开写入流
-      _deviceSink = _deviceFile!.openWrite(mode: FileMode.writeOnlyAppend);
+      // 监听 stdout（设备数据）
+      _stdoutSubscription = _bridgeProcess!.stdout.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            _onDataReceived(Uint8List.fromList(data));
+          }
+        },
+        onError: (error) {
+          _logError('stdout 错误: $error');
+        },
+        onDone: () {
+          _log('📭 stdout 流结束');
+          if (_isConnected) {
+            _isConnected = false;
+            _log('⚠️ 桥接进程已退出，连接断开');
+          }
+        },
+      );
+      
+      // 监听 stderr（日志）
+      _stderrSubscription = _bridgeProcess!.stderr.listen(
+        (data) {
+          final msg = String.fromCharCodes(data).trim();
+          if (msg.isNotEmpty) {
+            for (final line in msg.split('\n')) {
+              if (line.trim().isNotEmpty) {
+                _log('🐍 $line');
+              }
+            }
+          }
+        },
+      );
+      
+      // 等待连接建立（通过 stderr 日志判断）
+      _log('⏳ 等待 socket 连接建立...');
+      
+      // 等待一段时间让 Python 进程建立连接
+      await Future.delayed(const Duration(seconds: 3));
+      
+      // 检查进程是否还活着
+      final exitCode = _bridgeProcess?.exitCode;
+      if (exitCode != null) {
+        // 进程已退出，说明连接失败
+        _logError('桥接进程已退出，连接失败');
+        await disconnect();
+        return false;
+      }
       
       _currentDeviceAddress = macAddress;
       _currentDeviceName = deviceName;
       _currentChannel = channel;
       _isConnected = true;
       
-      // 3. 启动读取流
-      _startReadStream();
-      
-      _logSuccess('连接成功');
+      _logSuccess('连接成功 (Socket 模式)');
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       return true;
@@ -199,29 +215,6 @@ class NativeRfcommService {
       await disconnect();
       return false;
     }
-  }
-  
-  /// 启动读取流
-  void _startReadStream() {
-    _readSubscription?.cancel();
-    
-    // 使用文件流读取数据
-    _readSubscription = _deviceFile!.openRead().listen(
-      (data) {
-        if (data.isNotEmpty) {
-          _onDataReceived(Uint8List.fromList(data));
-        }
-      },
-      onError: (error) {
-        _logError('读取错误: $error');
-      },
-      onDone: () {
-        _log('📭 读取流结束');
-      },
-      cancelOnError: false,
-    );
-    
-    _log('🎧 开始监听数据...');
   }
   
   /// 处理接收到的数据
@@ -258,7 +251,6 @@ class NativeRfcommService {
       }
       
       if (preambleIndex == -1) {
-        // 没有找到前导码
         if (_gtpBuffer.length > 500) {
           _log('⚠️ 缓冲区过大 (${_gtpBuffer.length}字节) 且未找到 GTP 前导码，清空');
           _gtpBuffer.clear();
@@ -267,13 +259,11 @@ class NativeRfcommService {
         break;
       }
       
-      // 跳过前导码之前的数据
       if (preambleIndex > 0) {
         _log('⚠️ 跳过 $preambleIndex 字节垃圾数据');
         _gtpBuffer.removeRange(0, preambleIndex);
       }
       
-      // 检查是否有足够的数据读取 Length 字段
       if (_gtpBuffer.length < 7) break;
       
       // 读取 Length 字段 (offset 5-6, little endian)
@@ -285,13 +275,11 @@ class NativeRfcommService {
         break;
       }
       
-      // 提取完整的 GTP 数据包
       final gtpPacket = Uint8List.fromList(_gtpBuffer.sublist(0, totalLength));
       _gtpBuffer.removeRange(0, totalLength);
       _packetCount++;
       _fragmentCount = 0;
       
-      // 处理完整数据包
       _processGtpPacket(gtpPacket);
     }
   }
@@ -301,7 +289,6 @@ class NativeRfcommService {
     final hexStr = packet.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
     _logSuccess('📦 GTP #$_packetCount [${packet.length}字节]: $hexStr');
     
-    // 解析 GTP 响应
     final parsedGTP = GTPProtocol.parseGTPResponse(packet, skipCrcVerify: true);
     
     if (parsedGTP == null || parsedGTP.containsKey('error')) {
@@ -309,7 +296,6 @@ class NativeRfcommService {
       return;
     }
     
-    // 显示解析结果
     if (parsedGTP.containsKey('moduleId')) {
       _log('   ModuleID=0x${(parsedGTP['moduleId'] as int).toRadixString(16).padLeft(4, '0').toUpperCase()}, '
            'MessageID=0x${(parsedGTP['messageId'] as int).toRadixString(16).padLeft(4, '0').toUpperCase()}, '
@@ -321,7 +307,7 @@ class NativeRfcommService {
     if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
       final completer = _pendingResponses[responseSN];
       if (!completer!.isCompleted) {
-        final response = {
+        completer.complete({
           'rawBytes': packet,
           'payload': parsedGTP['payload'] ?? Uint8List(0),
           'timestamp': DateTime.now(),
@@ -329,17 +315,15 @@ class NativeRfcommService {
           'messageId': parsedGTP['messageId'],
           'sn': parsedGTP['sn'],
           'result': parsedGTP['result'],
-        };
-        completer.complete(response);
+        });
         _pendingResponses.remove(responseSN);
         _logSuccess('响应匹配 SN: $responseSN');
       }
     } else if (_pendingResponses.isNotEmpty) {
-      // 使用第一个待处理请求
       final firstKey = _pendingResponses.keys.first;
       final completer = _pendingResponses[firstKey];
       if (!completer!.isCompleted) {
-        final response = {
+        completer.complete({
           'rawBytes': packet,
           'payload': parsedGTP['payload'] ?? Uint8List(0),
           'timestamp': DateTime.now(),
@@ -347,8 +331,7 @@ class NativeRfcommService {
           'messageId': parsedGTP['messageId'],
           'sn': parsedGTP['sn'],
           'result': parsedGTP['result'],
-        };
-        completer.complete(response);
+        });
         _pendingResponses.remove(firstKey);
         _log('⚠️ 响应 SN 不匹配，使用第一个待处理请求');
       }
@@ -357,7 +340,7 @@ class NativeRfcommService {
   
   /// 发送原始数据
   Future<bool> sendRawData(Uint8List data) async {
-    if (!_isConnected || _deviceSink == null) {
+    if (!_isConnected || _bridgeProcess == null) {
       _logError('未连接，无法发送');
       return false;
     }
@@ -366,8 +349,8 @@ class NativeRfcommService {
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       _log('📤 发送 [${data.length}字节]: $hexStr');
       
-      _deviceSink!.add(data);
-      await _deviceSink!.flush();
+      _bridgeProcess!.stdin.add(data);
+      await _bridgeProcess!.stdin.flush();
       
       _totalBytesSent += data.length;
       _logSuccess('发送完成');
@@ -390,11 +373,9 @@ class NativeRfcommService {
       return {'error': 'Not connected'};
     }
     
-    // 生成序列号
     _sequenceNumber = (_sequenceNumber + 1) % 65536;
     final seqNum = _sequenceNumber;
     
-    // 构建 GTP 数据包
     final gtpPacket = GTPProtocol.buildGTPPacket(
       payload,
       moduleId: moduleId ?? 0x0006,
@@ -412,17 +393,14 @@ class NativeRfcommService {
     _log('   完整包: $hexStr');
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
-    // 创建响应 Completer
     final completer = Completer<Map<String, dynamic>?>();
     _pendingResponses[seqNum] = completer;
     
-    // 发送数据
     if (!await sendRawData(gtpPacket)) {
       _pendingResponses.remove(seqNum);
       return {'error': 'Send failed'};
     }
     
-    // 等待响应
     try {
       final response = await completer.future.timeout(
         timeout,
@@ -430,7 +408,6 @@ class NativeRfcommService {
           _pendingResponses.remove(seqNum);
           _logError('响应超时 (${timeout.inSeconds}秒)');
           
-          // 检查缓冲区是否有数据
           if (_gtpBuffer.isNotEmpty) {
             final bufferData = Uint8List.fromList(_gtpBuffer);
             _gtpBuffer.clear();
@@ -476,21 +453,34 @@ class NativeRfcommService {
   Future<void> disconnect() async {
     _log('🔌 断开连接...');
     
-    _readSubscription?.cancel();
-    _readSubscription = null;
+    _stdoutSubscription?.cancel();
+    _stdoutSubscription = null;
     
-    _readTimer?.cancel();
-    _readTimer = null;
+    _stderrSubscription?.cancel();
+    _stderrSubscription = null;
     
-    try {
-      await _deviceSink?.close();
-    } catch (e) {
-      // 忽略关闭错误
+    // 关闭桥接进程
+    if (_bridgeProcess != null) {
+      try {
+        _bridgeProcess!.stdin.close();
+      } catch (e) {
+        // 忽略
+      }
+      
+      // 等待进程退出
+      try {
+        await _bridgeProcess!.exitCode.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            _bridgeProcess?.kill();
+            return -1;
+          },
+        );
+      } catch (e) {
+        _bridgeProcess?.kill();
+      }
+      _bridgeProcess = null;
     }
-    _deviceSink = null;
-    _deviceFile = null;
-    
-    await _releaseRfcomm();
     
     // 清理待处理的响应
     for (final completer in _pendingResponses.values) {

@@ -81,7 +81,8 @@ class LinuxBluetoothSppService {
   String _serviceUuid = defaultSppUuid;
   
   // 连接模式：true = rfcomm bind 模式，false = socket 模式
-  bool _useBindMode = true;  // 默认使用 bind 模式（与第三方工具一致）
+  // 默认使用 socket 模式，避免 rfcomm bind 导致系统蓝牙设置中的连接断开
+  bool _useBindMode = false;
   
   // 数据解析模式
   DataParseMode _parseMode = DataParseMode.pythonGtpAssembly;
@@ -502,27 +503,36 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _logState?.info('⏳ 连接到 $deviceAddress 通道 $targetChannel...');
       
-      // 清理旧连接
-      _logState?.debug('🧹 清理旧的 RFCOMM 连接...');
-      await Process.run('pkill', ['-9', 'cat']).catchError((_) => null);
-      await Process.run('pkill', ['-9', 'rfcomm']).catchError((_) => null);
-      await Future.delayed(const Duration(milliseconds: 200));
-      
-      await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
-      await Future.delayed(const Duration(milliseconds: 200));
-      
-      // 删除可能存在的设备文件
-      final deviceFile = File(devicePath);
-      if (await deviceFile.exists()) {
+      // 清理旧的 Python 桥接进程（不清理系统 rfcomm 绑定，避免影响系统蓝牙）
+      _logState?.debug('🧹 清理旧的桥接进程...');
+      if (_socketProcess != null) {
         try {
-          await deviceFile.delete();
-          _logState?.debug('   已删除旧设备文件');
+          _socketProcess!.kill();
         } catch (e) {
-          _logState?.debug('   删除设备文件失败: $e');
+          // 忽略
         }
+        _socketProcess = null;
       }
+      await Future.delayed(const Duration(milliseconds: 200));
       
-      await Future.delayed(const Duration(milliseconds: 300));
+      // 仅在 bind 模式下清理 rfcomm
+      if (_useBindMode) {
+        _logState?.debug('   清理旧的 RFCOMM 绑定...');
+        await Process.run('pkill', ['-9', 'cat']).catchError((_) => null);
+        await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
+        await Future.delayed(const Duration(milliseconds: 200));
+        
+        final deviceFile = File(devicePath);
+        if (await deviceFile.exists()) {
+          try {
+            await deviceFile.delete();
+            _logState?.debug('   已删除旧设备文件');
+          } catch (e) {
+            _logState?.debug('   删除设备文件失败: $e');
+          }
+        }
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
       
       // 根据解析模式选择 Python 脚本
       // - pythonGtpAssembly: 使用带 GTP 组装的脚本
@@ -533,12 +543,14 @@ hciconfig hci0 up 2>/dev/null || true
       if (_useBindMode) {
         // Bind 模式 - 使用简单透传脚本（更稳定）
         // 所有模式都使用简单透传，由 Dart 端负责 GTP 组装
+        // ⚠️ 注意：rfcomm bind 会断开系统蓝牙设置中的连接
         scriptName = 'rfcomm_bind_simple.py';
         modeDesc = 'RFCOMM Bind + 简单透传 (${_parseMode.displayName})';
       } else {
-        // Socket 模式
-        scriptName = 'rfcomm_socket.py';
-        modeDesc = 'RFCOMM Socket';
+        // Socket 模式 - 使用简单透传 socket 脚本
+        // ✅ 不会断开系统蓝牙设置中的连接
+        scriptName = 'rfcomm_socket_simple.py';
+        modeDesc = 'RFCOMM Socket 简单透传';
       }
       
       _logState?.info('⏳ 建立 RFCOMM 连接...');
@@ -855,10 +867,10 @@ hciconfig hci0 up 2>/dev/null || true
     final executableDir = File(executablePath).parent.path;
     
     final possiblePaths = [
-      '$executableDir/scripts/rfcomm_socket.py',
-      'scripts/rfcomm_socket.py',
-      '/opt/jn-production-line/scripts/rfcomm_socket.py',
-      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket.py',
+      '$executableDir/scripts/rfcomm_socket_simple.py',
+      'scripts/rfcomm_socket_simple.py',
+      '/opt/jn-production-line/scripts/rfcomm_socket_simple.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket_simple.py',
     ];
     
     for (final path in possiblePaths) {
@@ -869,7 +881,7 @@ hciconfig hci0 up 2>/dev/null || true
     }
     
     if (scriptPath == null) {
-      _logState?.error('❌ rfcomm_socket.py 脚本不存在');
+      _logState?.error('❌ rfcomm_socket_simple.py 脚本不存在');
       return false;
     }
     
