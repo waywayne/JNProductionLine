@@ -36,25 +36,57 @@ def log(msg):
     print(f"[{ts}] [RFCOMM-BRIDGE] {msg}", file=sys.stderr, flush=True)
 
 
-def connect_rfcomm(mac, channel, timeout=5):
-    """连接 RFCOMM — 与 bluetooth_spp_test.py _connect_to_channel 完全一致"""
-    if HAS_PYBLUEZ:
-        log(f"使用 PyBluez 连接 {mac} CH{channel} (超时 {timeout}s)")
-        sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-        sock.settimeout(timeout)
-        sock.connect((mac, channel))
-        log(f"✅ 连接成功: {mac} CH{channel}")
-        return sock
-
-    # PyBluez 不可用，使用原始 AF_BLUETOOTH socket
-    log(f"PyBluez 不可用，使用原始 socket 连接 {mac} CH{channel}")
+def connect_raw_socket(mac, channel, timeout=5):
+    """使用原始 AF_BLUETOOTH socket 连接（不依赖 PyBluez）"""
     AF_BLUETOOTH = 31
     BTPROTO_RFCOMM = 3
+    log(f"使用原始 AF_BLUETOOTH socket 连接 {mac} CH{channel} (超时 {timeout}s)")
     sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
     sock.settimeout(timeout)
     sock.connect((mac, channel))
-    log(f"✅ 连接成功: {mac} CH{channel}")
+    log(f"✅ 原始 socket 连接成功: {mac} CH{channel}")
     return sock
+
+
+def connect_rfcomm(mac, channel, timeout=5, max_retries=3):
+    """连接 RFCOMM — 先尝试 PyBluez，失败则回退到原始 AF_BLUETOOTH socket"""
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
+        # 尝试 PyBluez
+        if HAS_PYBLUEZ:
+            try:
+                log(f"[尝试 {attempt}/{max_retries}] PyBluez 连接 {mac} CH{channel} (超时 {timeout}s)")
+                sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+                sock.settimeout(timeout)
+                sock.connect((mac, channel))
+                log(f"✅ PyBluez 连接成功: {mac} CH{channel}")
+                return sock
+            except Exception as e:
+                last_error = e
+                log(f"⚠️ PyBluez 第 {attempt} 次失败: {e}")
+                try:
+                    sock.close()
+                except:
+                    pass
+                # Errno 77 (EBADFD) — PyBluez fd 异常，直接回退到原始 socket
+                if 'Errno 77' in str(e) or 'bad state' in str(e).lower():
+                    log("🔄 检测到 Errno 77 (EBADFD)，回退到原始 AF_BLUETOOTH socket")
+                    break
+                time.sleep(0.5)
+
+        # 尝试原始 AF_BLUETOOTH socket
+        try:
+            return connect_raw_socket(mac, channel, timeout)
+        except Exception as e2:
+            last_error = e2
+            log(f"⚠️ 原始 socket 第 {attempt} 次失败: {e2}")
+            time.sleep(0.5)
+
+    # 所有尝试失败，最后再试一次原始 socket
+    if last_error:
+        log(f"🔄 所有 PyBluez 尝试失败，最终回退原始 socket")
+        return connect_raw_socket(mac, channel, timeout)
 
 
 def bt_to_stdout(sock, alive):

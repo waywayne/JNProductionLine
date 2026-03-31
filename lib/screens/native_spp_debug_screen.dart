@@ -3,11 +3,16 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/native_rfcomm_service.dart';
+import '../services/rfcomm_bind_service.dart';
 import '../services/gtp_protocol.dart';
 
-/// 纯 Dart 实现的 SPP 调试页面
-/// 不依赖 Python 脚本，直接读写 /dev/rfcomm0 设备文件
-/// 类似第三方 SPP 调试工具的实现方式
+/// SPP 连接方案
+enum SppScheme {
+  pythonBridge,  // 方案一: Python PyBluez 桥接
+  rfcommBind,    // 方案二: rfcomm bind + Dart 直接读写
+}
+
+/// SPP 通讯页面 — 支持两种连接方案切换
 class NativeSppDebugScreen extends StatefulWidget {
   const NativeSppDebugScreen({super.key});
 
@@ -16,7 +21,12 @@ class NativeSppDebugScreen extends StatefulWidget {
 }
 
 class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
-  final NativeRfcommService _rfcommService = NativeRfcommService();
+  // 两套服务
+  final NativeRfcommService _pythonService = NativeRfcommService();
+  final RfcommBindService _bindService = RfcommBindService();
+
+  // 当前方案
+  SppScheme _currentScheme = SppScheme.pythonBridge;
   
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _channelController = TextEditingController(text: '5');
@@ -33,6 +43,32 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
   
   StreamSubscription<Uint8List>? _dataSubscription;
   StreamSubscription<String>? _logSubscription;
+
+  // 当前活跃服务的快捷访问
+  bool get _isConnected => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.isConnected
+      : _bindService.isConnected;
+  String? get _currentDeviceAddress => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.currentDeviceAddress
+      : _bindService.currentDeviceAddress;
+  int? get _currentChannel => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.currentChannel
+      : _bindService.currentChannel;
+  int get _bufferSize => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.bufferSize
+      : _bindService.bufferSize;
+  int get _fragmentCount => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.fragmentCount
+      : _bindService.fragmentCount;
+  int get _packetCount => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.packetCount
+      : _bindService.packetCount;
+  int get _totalBytesReceived => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.totalBytesReceived
+      : _bindService.totalBytesReceived;
+  int get _totalBytesSent => _currentScheme == SppScheme.pythonBridge
+      ? _pythonService.totalBytesSent
+      : _bindService.totalBytesSent;
   
   @override
   void initState() {
@@ -44,7 +80,8 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
   void dispose() {
     _dataSubscription?.cancel();
     _logSubscription?.cancel();
-    _rfcommService.dispose();
+    _pythonService.dispose();
+    _bindService.dispose();
     _addressController.dispose();
     _channelController.dispose();
     _payloadController.dispose();
@@ -55,8 +92,17 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
   }
   
   void _subscribeToStreams() {
-    // 订阅数据流
-    _dataSubscription = _rfcommService.dataStream.listen((data) {
+    _dataSubscription?.cancel();
+    _logSubscription?.cancel();
+
+    final dataStream = _currentScheme == SppScheme.pythonBridge
+        ? _pythonService.dataStream
+        : _bindService.dataStream;
+    final logStream = _currentScheme == SppScheme.pythonBridge
+        ? _pythonService.logStream
+        : _bindService.logStream;
+
+    _dataSubscription = dataStream.listen((data) {
       if (!_showRawData) return;
       
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
@@ -68,8 +114,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
       ));
     });
     
-    // 订阅日志流
-    _logSubscription = _rfcommService.logStream.listen((log) {
+    _logSubscription = logStream.listen((log) {
       _MessageType type = _MessageType.info;
       if (log.contains('❌')) {
         type = _MessageType.error;
@@ -87,6 +132,35 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
         timestamp: DateTime.now(),
       ));
     });
+  }
+
+  /// 切换方案
+  Future<void> _switchScheme(SppScheme scheme) async {
+    if (scheme == _currentScheme) return;
+
+    // 如果当前已连接，先断开
+    if (_isConnected) {
+      _addMessage(_LogMessage(
+        type: _MessageType.info,
+        content: '⚠️ 切换方案前断开当前连接...',
+        timestamp: DateTime.now(),
+      ));
+      await _doDisconnect();
+    }
+
+    setState(() {
+      _currentScheme = scheme;
+    });
+
+    // 重新订阅新服务的流
+    _subscribeToStreams();
+
+    final schemeName = scheme == SppScheme.pythonBridge ? 'Python 桥接' : 'rfcomm bind';
+    _addMessage(_LogMessage(
+      type: _MessageType.success,
+      content: '✅ 已切换到方案: $schemeName',
+      timestamp: DateTime.now(),
+    ));
   }
   
   void _addMessage(_LogMessage message) {
@@ -182,7 +256,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
       return;
     }
     
-    final channel = int.tryParse(_channelController.text.trim()) ?? 1;
+    final channel = int.tryParse(_channelController.text.trim()) ?? 5;
     
     setState(() => _isConnecting = true);
     
@@ -196,7 +270,12 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
         ));
       }
       
-      final success = await _rfcommService.connect(macAddress, channel: channel);
+      bool success;
+      if (_currentScheme == SppScheme.pythonBridge) {
+        success = await _pythonService.connect(macAddress, channel: channel);
+      } else {
+        success = await _bindService.connect(macAddress, channel: channel);
+      }
       
       if (!success) {
         _showError('连接失败');
@@ -207,10 +286,19 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
       setState(() => _isConnecting = false);
     }
   }
+
+  /// 断开连接（内部方法，不更新 UI）
+  Future<void> _doDisconnect() async {
+    if (_currentScheme == SppScheme.pythonBridge) {
+      await _pythonService.disconnect();
+    } else {
+      await _bindService.disconnect();
+    }
+  }
   
   /// 断开连接
   Future<void> _disconnect() async {
-    await _rfcommService.disconnect();
+    await _doDisconnect();
     setState(() {});
   }
   
@@ -231,7 +319,11 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
     setState(() => _isSending = true);
     
     try {
-      await _rfcommService.sendRawData(data);
+      if (_currentScheme == SppScheme.pythonBridge) {
+        await _pythonService.sendRawData(data);
+      } else {
+        await _bindService.sendRawData(data);
+      }
     } catch (e) {
       _showError('发送异常: $e');
     } finally {
@@ -259,12 +351,18 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
     setState(() => _isSending = true);
     
     try {
-      final response = await _rfcommService.sendCommandAndWaitResponse(
-        payload,
-        moduleId: moduleId,
-        messageId: messageId,
-        timeout: const Duration(seconds: 5),
-      );
+      final Map<String, dynamic>? response;
+      if (_currentScheme == SppScheme.pythonBridge) {
+        response = await _pythonService.sendCommandAndWaitResponse(
+          payload, moduleId: moduleId, messageId: messageId,
+          timeout: const Duration(seconds: 5),
+        );
+      } else {
+        response = await _bindService.sendCommandAndWaitResponse(
+          payload, moduleId: moduleId, messageId: messageId,
+          timeout: const Duration(seconds: 5),
+        );
+      }
       
       if (response == null) {
         _addMessage(_LogMessage(
@@ -310,16 +408,43 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isPython = _currentScheme == SppScheme.pythonBridge;
     return Scaffold(
       appBar: AppBar(
         title: const Text('SPP 通讯 (GTP over SPP)'),
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: isPython ? Colors.deepPurple : Colors.teal,
         foregroundColor: Colors.white,
         actions: [
+          // 方案切换按钮
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildSchemeButton(
+                  label: 'Python',
+                  icon: Icons.terminal,
+                  isActive: isPython,
+                  onTap: () => _switchScheme(SppScheme.pythonBridge),
+                ),
+                _buildSchemeButton(
+                  label: 'Bind',
+                  icon: Icons.usb,
+                  isActive: !isPython,
+                  onTap: () => _switchScheme(SppScheme.rfcommBind),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
           // 统计信息
           Container(
-            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.2),
               borderRadius: BorderRadius.circular(4),
@@ -328,10 +453,10 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.arrow_downward, size: 14, color: Colors.green[300]),
-                Text(' ${_rfcommService.totalBytesReceived}B ',
+                Text(' ${_totalBytesReceived}B ',
                     style: const TextStyle(fontSize: 11)),
                 Icon(Icons.arrow_upward, size: 14, color: Colors.cyan[300]),
-                Text(' ${_rfcommService.totalBytesSent}B',
+                Text(' ${_totalBytesSent}B',
                     style: const TextStyle(fontSize: 11)),
               ],
             ),
@@ -339,7 +464,11 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
-              _rfcommService.resetStats();
+              if (_currentScheme == SppScheme.pythonBridge) {
+                _pythonService.resetStats();
+              } else {
+                _bindService.resetStats();
+              }
               setState(() {});
             },
             tooltip: '重置统计',
@@ -358,8 +487,45 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
     );
   }
   
+  Widget _buildSchemeButton({
+    required String label,
+    required IconData icon,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: _isConnected ? null : onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive ? Colors.white.withOpacity(0.25) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: isActive ? Colors.white : Colors.white54),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                color: isActive ? Colors.white : Colors.white54,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildConnectionSection() {
-    final isConnected = _rfcommService.isConnected;
+    final isConnected = _isConnected;
+    final isPython = _currentScheme == SppScheme.pythonBridge;
+    final schemeColor = isPython ? Colors.deepPurple : Colors.teal;
+    final schemeLabel = isPython ? 'Python 桥接' : 'rfcomm bind';
     
     return Container(
       padding: const EdgeInsets.all(12),
@@ -388,7 +554,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
               if (isConnected) ...[
                 const SizedBox(width: 8),
                 Text(
-                  '${_rfcommService.currentDeviceAddress} (CH${_rfcommService.currentChannel})',
+                  '${_currentDeviceAddress} (CH${_currentChannel})',
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                 ),
               ],
@@ -397,16 +563,16 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple.withOpacity(0.1),
+                  color: schemeColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: Colors.deepPurple.withOpacity(0.3)),
+                  border: Border.all(color: schemeColor.withOpacity(0.3)),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.code, size: 14, color: Colors.deepPurple),
-                    SizedBox(width: 4),
-                    Text('GTP over SPP', style: TextStyle(fontSize: 11, color: Colors.deepPurple)),
+                    Icon(isPython ? Icons.terminal : Icons.usb, size: 14, color: schemeColor),
+                    const SizedBox(width: 4),
+                    Text(schemeLabel, style: TextStyle(fontSize: 11, color: schemeColor)),
                   ],
                 ),
               ),
@@ -474,7 +640,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                       : const Icon(Icons.link, size: 18),
                   label: Text(_isConnecting ? '连接中...' : '连接'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple,
+                    backgroundColor: schemeColor,
                     foregroundColor: Colors.white,
                   ),
                 ),
@@ -505,15 +671,15 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: _rfcommService.bufferSize > 0
+                    color: _bufferSize > 0
                         ? Colors.orange.withOpacity(0.3)
                         : Colors.green.withOpacity(0.3),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    '缓冲区: ${_rfcommService.bufferSize}B',
+                    '缓冲区: ${_bufferSize}B',
                     style: TextStyle(
-                      color: _rfcommService.bufferSize > 0
+                      color: _bufferSize > 0
                           ? Colors.orange[300]
                           : Colors.green[300],
                       fontSize: 11,
@@ -522,7 +688,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                 ),
                 const SizedBox(width: 8),
                 // 分片计数
-                if (_rfcommService.fragmentCount > 0)
+                if (_fragmentCount > 0)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
@@ -530,7 +696,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      '分片: ${_rfcommService.fragmentCount}',
+                      '分片: ${_fragmentCount}',
                       style: TextStyle(color: Colors.blue[300], fontSize: 11),
                     ),
                   ),
@@ -543,7 +709,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    'GTP: ${_rfcommService.packetCount}',
+                    'GTP: ${_packetCount}',
                     style: TextStyle(color: Colors.purple[300], fontSize: 11),
                   ),
                 ),
@@ -564,12 +730,16 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                 IconButton(
                   icon: Icon(
                     Icons.memory,
-                    color: _rfcommService.bufferSize > 0 ? Colors.orange[300] : Colors.white38,
+                    color: _bufferSize > 0 ? Colors.orange[300] : Colors.white38,
                     size: 18,
                   ),
-                  onPressed: _rfcommService.bufferSize > 0
+                  onPressed: _bufferSize > 0
                       ? () {
-                          _rfcommService.clearBuffer();
+                          if (_currentScheme == SppScheme.pythonBridge) {
+                            _pythonService.clearBuffer();
+                          } else {
+                            _bindService.clearBuffer();
+                          }
                           setState(() {});
                         }
                       : null,
@@ -691,7 +861,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
   }
   
   Widget _buildSendSection() {
-    final isConnected = _rfcommService.isConnected;
+    final isConnected = _isConnected;
     
     return Container(
       padding: const EdgeInsets.all(12),
@@ -782,7 +952,7 @@ class _NativeSppDebugScreenState extends State<NativeSppDebugScreen> {
                     : const Icon(Icons.send, size: 18),
                 label: Text(_isSending ? '发送中...' : '发送 GTP'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
+                  backgroundColor: _currentScheme == SppScheme.pythonBridge ? Colors.deepPurple : Colors.teal,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
