@@ -182,10 +182,10 @@ class RfcommBindService {
 
       _log('📁 设备文件已就绪: $_devicePath');
 
-      // 4. 打开设备文件（readWrite 模式，与 v2 服务一致）
-      _log('📂 打开设备文件 (readWrite 模式)...');
+      // 4. 打开设备文件（append 模式 = O_RDWR，支持双向读写）
+      _log('📂 打开设备文件...');
       try {
-        _rfcommFile = await File(_devicePath).open(mode: FileMode.readWrite)
+        _rfcommFile = await File(_devicePath).open(mode: FileMode.append)
             .timeout(const Duration(seconds: 10), onTimeout: () {
           throw TimeoutException('打开设备文件超时');
         });

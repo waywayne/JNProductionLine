@@ -115,8 +115,8 @@ class LinuxBluetoothSppServiceV2 {
         final file = File(devicePath);
         
         try {
-          // 使用 readWrite 模式打开单个 fd
-          _rfcommFile = await file.open(mode: FileMode.readWrite)
+          // 使用 append 模式打开单个 fd（O_RDWR，支持双向读写）
+          _rfcommFile = await file.open(mode: FileMode.append)
               .timeout(const Duration(seconds: 5), onTimeout: () {
             throw TimeoutException('打开设备文件超时');
           });
