@@ -17,6 +17,7 @@ import time
 import threading
 import select
 import signal
+import atexit
 
 # 尝试导入 bluetooth 模块
 try:
@@ -30,19 +31,30 @@ def log(message):
     timestamp = time.strftime('%H:%M:%S')
     print(f"[{timestamp}] [RFCOMM-SOCKET-SIMPLE] {message}", file=sys.stderr, flush=True)
 
-def create_rfcomm_socket(mac_address, channel):
-    """创建 RFCOMM socket 连接，优先 PyBluez，失败后回退到原始 socket"""
-    sock = None
+def create_rfcomm_socket(mac_address, channel, max_retries=3):
+    """创建 RFCOMM socket 连接，优先 PyBluez，失败后回退到原始 socket，带重试"""
     
-    # 方法1: PyBluez
-    if HAS_PYBLUEZ:
-        sock = _create_pybluez_socket(mac_address, channel)
+    for attempt in range(max_retries):
+        if attempt > 0:
+            log(f"🔄 第 {attempt + 1}/{max_retries} 次重试连接...")
+            time.sleep(1.0 + attempt)  # 递增等待，让系统释放资源
+        
+        sock = None
+        
+        # 方法1: PyBluez
+        if HAS_PYBLUEZ:
+            sock = _create_pybluez_socket(mac_address, channel)
+        
+        # 方法2: 原始 socket（PyBluez 不可用或失败时）
+        if sock is None:
+            sock = _create_raw_socket(mac_address, channel)
+        
+        if sock is not None:
+            return sock
+        
+        log(f"⚠️ 连接尝试 {attempt + 1}/{max_retries} 失败")
     
-    # 方法2: 原始 socket（PyBluez 不可用或失败时）
-    if sock is None:
-        sock = _create_raw_socket(mac_address, channel)
-    
-    return sock
+    return None
 
 def _create_pybluez_socket(mac_address, channel):
     """使用 PyBluez 创建连接"""
@@ -223,8 +235,17 @@ def main():
     # 创建 socket 连接
     sock = create_rfcomm_socket(mac_address, channel)
     if not sock:
-        log("❌ 连接失败")
+        log("❌ 所有连接尝试均失败")
         sys.exit(1)
+    
+    # 注册 atexit 确保 socket 在任何退出情况下都会关闭
+    def cleanup_socket():
+        try:
+            sock.close()
+            log("🧹 atexit: socket 已关闭")
+        except:
+            pass
+    atexit.register(cleanup_socket)
     
     # 创建 keep_alive 事件（任一线程出错时停止所有线程）
     keep_alive_event = threading.Event()

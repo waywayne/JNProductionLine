@@ -140,6 +140,17 @@ class NativeRfcommService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     try {
+      // 杀掉所有可能残留的 rfcomm 桥接进程（防止占用蓝牙 socket 资源）
+      _log('🧹 清理残留桥接进程...');
+      try {
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
+      } catch (_) {}
+      try {
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
+      } catch (_) {}
+      // 等待系统释放蓝牙 socket 资源
+      await Future.delayed(const Duration(milliseconds: 500));
+      
       // 启动 Python socket 桥接脚本
       final scriptPath = _getScriptPath();
       _log('📜 脚本: $scriptPath');
@@ -198,8 +209,9 @@ class NativeRfcommService {
         processExited = true;
       });
       
-      for (int i = 0; i < 20; i++) {
-        await Future.delayed(const Duration(milliseconds: 200));
+      // Python 脚本有最多 3 次重试，每次间隔递增，最长可能需要 ~15 秒
+      for (int i = 0; i < 40; i++) {
+        await Future.delayed(const Duration(milliseconds: 300));
         if (processExited) {
           _logError('桥接进程已退出 (退出码: $processExitCode)，连接失败');
           _bridgeProcess = null;
@@ -479,19 +491,27 @@ class NativeRfcommService {
         // 忽略
       }
       
-      // 等待进程退出
+      // 等待进程退出，超时则强制杀掉
       try {
         await _bridgeProcess!.exitCode.timeout(
-          const Duration(seconds: 2),
+          const Duration(seconds: 1),
           onTimeout: () {
-            _bridgeProcess?.kill();
+            try { _bridgeProcess?.kill(ProcessSignal.sigkill); } catch (_) {}
             return -1;
           },
         );
       } catch (e) {
-        _bridgeProcess?.kill();
+        try { _bridgeProcess?.kill(ProcessSignal.sigkill); } catch (_) {}
       }
       _bridgeProcess = null;
+    }
+    // 杀掉所有可能残留的桥接进程
+    try {
+      await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
+    } catch (_) {}
+    try {
+      await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
+    } catch (_) {
     }
     
     // 清理待处理的响应

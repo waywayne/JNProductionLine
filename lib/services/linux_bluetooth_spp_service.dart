@@ -507,13 +507,21 @@ hciconfig hci0 up 2>/dev/null || true
       _logState?.debug('🧹 清理旧的桥接进程...');
       if (_socketProcess != null) {
         try {
-          _socketProcess!.kill();
+          _socketProcess!.kill(ProcessSignal.sigkill);
         } catch (e) {
           // 忽略
         }
         _socketProcess = null;
       }
-      await Future.delayed(const Duration(milliseconds: 200));
+      // 杀掉所有可能残留的 rfcomm_socket_simple.py 进程（防止占用蓝牙资源）
+      try {
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
+      } catch (_) {}
+      try {
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
+      } catch (_) {}
+      // 等待系统释放蓝牙 socket 资源
+      await Future.delayed(const Duration(milliseconds: 500));
       
       // 仅在 bind 模式下清理 rfcomm
       if (_useBindMode) {
@@ -647,10 +655,10 @@ hciconfig hci0 up 2>/dev/null || true
           }
         });
         
-        // 等待连接建立（Python 脚本需要时间连接）
+        // 等待连接建立（Python 脚本有最多 3 次重试，需要更长时间）
         _logState?.info('⏳ 等待 socket 连接建立...');
-        for (int i = 0; i < 20; i++) {
-          await Future.delayed(const Duration(milliseconds: 200));
+        for (int i = 0; i < 40; i++) {
+          await Future.delayed(const Duration(milliseconds: 300));
           if (processExited) {
             _logState?.error('❌ 桥接进程已退出 (退出码: $exitCode)，连接失败');
             _socketProcess = null;
@@ -1257,10 +1265,19 @@ hciconfig hci0 up 2>/dev/null || true
         
         // 杀掉 Python 进程
         if (_socketProcess != null) {
-          _socketProcess!.kill();
+          try {
+            _socketProcess!.kill(ProcessSignal.sigkill);
+          } catch (_) {}
           _socketProcess = null;
           _logState?.debug('   Python 进程已终止');
         }
+        // 杀掉所有可能残留的桥接进程
+        try {
+          await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
+        } catch (_) {}
+        try {
+          await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
+        } catch (_) {}
         
         _currentDeviceAddress = null;
         _currentDeviceName = null;
