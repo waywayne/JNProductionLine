@@ -38,18 +38,20 @@ def log(msg):
 
 
 def cleanup_rfcomm_resources():
-    """清理僵尸 RFCOMM 资源，释放内核内存
+    """彻底清理 RFCOMM 资源，释放内核内存
     
-    ⚠️ 只做安全清理：
-      - pkill 旧的 rfcomm_socket_simple.py 进程（释放它们持有的 socket fd）
-      - rfcomm release all（释放 /dev/rfcommX 绑定）
-      - 绝不 bluetoothctl disconnect（会拆 ACL → Errno 112）
-      - 绝不 bluetoothctl connect（会冲突 → Errno 52）
+    步骤：
+      1. pkill 旧的桥接进程和 cat 进程
+      2. rfcomm release all
+      3. hciconfig hci0 reset — 重置蓝牙适配器，强制释放所有内核 RFCOMM 资源
+      4. hciconfig hci0 up — 重新启用适配器
+      5. hciconfig hci0 piscan — 恢复可发现+可连接
+    绝不 bluetoothctl disconnect/connect
     """
     my_pid = os.getpid()
-    log(f"🧹 清理 RFCOMM 资源 (本进程 PID: {my_pid})...")
+    log(f"🧹 彻底清理 RFCOMM 资源 (本进程 PID: {my_pid})...")
     
-    # 1. 杀掉旧的 rfcomm_socket_simple.py 进程（排除自己）
+    # 1. 杀掉旧的桥接进程（排除自己）
     try:
         result = subprocess.run(
             ['pgrep', '-f', 'rfcomm_socket_simple.py'],
@@ -57,25 +59,44 @@ def cleanup_rfcomm_resources():
         )
         if result.stdout.strip():
             for pid_str in result.stdout.strip().split('\n'):
-                pid = int(pid_str.strip())
-                if pid != my_pid:
-                    log(f"   杀掉旧桥接进程 PID={pid}")
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
-            time.sleep(0.5)  # 等待 socket 关闭
+                try:
+                    pid = int(pid_str.strip())
+                    if pid != my_pid:
+                        log(f"   杀掉旧桥接进程 PID={pid}")
+                        os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, ValueError):
+                    pass
     except Exception as e:
         log(f"   pgrep 失败: {e}")
 
-    # 2. 释放所有 rfcomm 绑定（安全操作，只影响 /dev/rfcommX）
+    # 2. 杀掉残留 cat /dev/rfcomm 进程
+    try:
+        subprocess.run(['pkill', '-9', '-f', 'cat /dev/rfcomm'], capture_output=True, timeout=3)
+    except Exception:
+        pass
+
+    time.sleep(0.3)
+
+    # 3. 释放所有 rfcomm 绑定
     try:
         subprocess.run(['rfcomm', 'release', 'all'], capture_output=True, timeout=3)
         log("   rfcomm release all 完成")
-    except Exception as e:
-        log(f"   rfcomm release 失败: {e}")
+    except Exception:
+        pass
 
-    # 3. 等待内核回收资源
+    # 4. 重置蓝牙适配器 — 这是唯一能强制释放内核 RFCOMM 资源的方法
+    log("   🔄 重置蓝牙适配器 hci0 ...")
+    try:
+        subprocess.run(['sudo', 'hciconfig', 'hci0', 'reset'], capture_output=True, timeout=5)
+        time.sleep(1)
+        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'], capture_output=True, timeout=5)
+        time.sleep(0.5)
+        subprocess.run(['sudo', 'hciconfig', 'hci0', 'piscan'], capture_output=True, timeout=5)
+        log("   ✅ 蓝牙适配器已重置")
+    except Exception as e:
+        log(f"   ⚠️ hciconfig reset 失败: {e}")
+
+    # 5. 等待适配器就绪
     time.sleep(1)
     log("🧹 清理完成")
 

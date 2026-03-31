@@ -101,33 +101,46 @@ class NativeRfcommService {
     }
   }
   
-  /// 清理僵尸 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
-  /// ⚠️ 只做安全清理：pkill 旧 python 桥接 + rfcomm release all
-  /// 绝不 bluetoothctl disconnect（会拆 ACL → Errno 112）
+  /// 彻底清理 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
+  /// 通过 hciconfig hci0 reset 强制重置蓝牙适配器释放所有内核资源
+  /// 绝不 bluetoothctl disconnect/connect
   Future<void> _cleanupRfcommResources() async {
-    _log('🧹 清理 RFCOMM 资源...');
+    _log('🧹 彻底清理 RFCOMM 资源...');
     
-    // 1. 杀掉旧的 Python 桥接进程（释放它们持有的 socket fd）
+    // 1. 强杀旧的 Python 桥接进程
     try {
-      final result = await Process.run('pkill', ['-TERM', '-f', 'rfcomm_socket_simple.py']);
-      if (result.exitCode == 0) {
-        _log('   已终止旧的 Python 桥接进程');
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
+      await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
     } catch (_) {}
     
-    // 2. 杀掉可能残留的 cat /dev/rfcomm 进程
+    // 2. 强杀残留的 cat /dev/rfcomm 进程
     try {
-      await Process.run('pkill', ['-TERM', '-f', 'cat /dev/rfcomm']);
+      await Process.run('pkill', ['-9', '-f', 'cat /dev/rfcomm']);
     } catch (_) {}
     
-    // 3. 释放所有 rfcomm 绑定（安全操作，只影响 /dev/rfcommX）
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    // 3. 释放所有 rfcomm 绑定
     try {
       await Process.run('rfcomm', ['release', 'all']);
-      _log('   rfcomm release all 完成');
+    } catch (_) {}
+    try {
+      await Process.run('sudo', ['rfcomm', 'release', 'all']);
     } catch (_) {}
     
-    // 4. 等待内核回收资源
+    // 4. 重置蓝牙适配器 — 唯一能强制释放内核 RFCOMM 资源的方法
+    _log('   🔄 重置蓝牙适配器 hci0...');
+    try {
+      await Process.run('sudo', ['hciconfig', 'hci0', 'reset']);
+      await Future.delayed(const Duration(seconds: 1));
+      await Process.run('sudo', ['hciconfig', 'hci0', 'up']);
+      await Future.delayed(const Duration(milliseconds: 500));
+      await Process.run('sudo', ['hciconfig', 'hci0', 'piscan']);
+      _log('   ✅ 蓝牙适配器已重置');
+    } catch (e) {
+      _log('   ⚠️ hciconfig reset 失败: $e');
+    }
+    
+    // 5. 等待适配器就绪
     await Future.delayed(const Duration(seconds: 1));
     _log('🧹 清理完成');
   }

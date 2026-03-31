@@ -8,7 +8,6 @@ import 'gtp_protocol.dart';
 /// 不依赖 Python 脚本，使用系统 rfcomm bind 建立连接
 /// 然后 Dart 直接读写设备文件进行数据收发
 class RfcommBindService {
-  RandomAccessFile? _deviceFile;
   StreamSubscription<List<int>>? _readSubscription;
   Timer? _readTimer;
 
@@ -82,39 +81,45 @@ class RfcommBindService {
     }
   }
 
-  /// 清理僵尸 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
-  /// ⚠️ 只做安全清理，绝不 bluetoothctl disconnect
+  /// 彻底清理 RFCOMM 资源（解决 Errno 12 Cannot allocate memory）
+  /// 通过 hciconfig hci0 reset 强制重置蓝牙适配器释放所有内核资源
   Future<void> _cleanupRfcommResources() async {
-    _log('🧹 清理 RFCOMM 资源...');
+    _log('🧹 彻底清理 RFCOMM 资源...');
     
-    // 1. 杀掉旧的 Python 桥接进程（释放它们持有的 socket fd）
+    // 1. 强杀旧的 Python 桥接进程
     try {
-      final result = await Process.run('pkill', ['-TERM', '-f', 'rfcomm_socket_simple.py']);
-      if (result.exitCode == 0) {
-        _log('   已终止旧的 Python 桥接进程');
-      }
+      await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
     } catch (_) {}
     
-    // 2. 杀掉可能残留的 cat /dev/rfcomm 进程
+    // 2. 强杀残留的 cat /dev/rfcomm 进程
     try {
-      final result = await Process.run('pkill', ['-TERM', '-f', 'cat /dev/rfcomm']);
-      if (result.exitCode == 0) {
-        _log('   已终止旧的 cat 进程');
-      }
+      await Process.run('pkill', ['-9', '-f', 'cat /dev/rfcomm']);
     } catch (_) {}
     
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future.delayed(const Duration(milliseconds: 300));
     
-    // 3. 释放所有 rfcomm 绑定（安全操作，只影响 /dev/rfcommX）
+    // 3. 释放所有 rfcomm 绑定
     try {
       await Process.run('rfcomm', ['release', 'all']);
-      _log('   rfcomm release all 完成');
     } catch (_) {}
     try {
       await Process.run('sudo', ['rfcomm', 'release', 'all']);
     } catch (_) {}
     
-    // 4. 等待内核回收资源
+    // 4. 重置蓝牙适配器 — 唯一能强制释放内核 RFCOMM 资源的方法
+    _log('   🔄 重置蓝牙适配器 hci0...');
+    try {
+      await Process.run('sudo', ['hciconfig', 'hci0', 'reset']);
+      await Future.delayed(const Duration(seconds: 1));
+      await Process.run('sudo', ['hciconfig', 'hci0', 'up']);
+      await Future.delayed(const Duration(milliseconds: 500));
+      await Process.run('sudo', ['hciconfig', 'hci0', 'piscan']);
+      _log('   ✅ 蓝牙适配器已重置');
+    } catch (e) {
+      _log('   ⚠️ hciconfig reset 失败: $e');
+    }
+    
+    // 5. 等待适配器就绪
     await Future.delayed(const Duration(seconds: 1));
     _log('🧹 清理完成');
   }
@@ -175,19 +180,31 @@ class RfcommBindService {
 
       _log('📁 设备文件已就绪: $_devicePath');
 
-      // 4. 打开设备文件进行读写
-      _log('📂 打开设备文件...');
+      // 4. 使用 socat 打开设备文件进行双向读写
+      //    socat 能正确处理设备文件的打开/读写，比 Dart File.open 可靠
+      _log('📂 启动 socat 双向通道...');
       try {
-        _deviceFile = await File(_devicePath).open(mode: FileMode.writeOnlyAppend);
+        _socatProcess = await Process.start(
+          'socat',
+          ['-', '$_devicePath,raw,echo=0,nonblock'],
+        );
+        _log('🚀 socat 已启动 (PID: ${_socatProcess!.pid})');
       } catch (e) {
-        _logError('打开设备文件失败: $e');
+        _logError('启动 socat 失败: $e，尝试 cat 方式...');
+        // socat 不可用时回退到 cat 读 + tee 写
         try {
-          await Process.run('sudo', ['rfcomm', 'release', '0']);
-        } catch (_) {}
-        return false;
+          _catProcess = await Process.start('cat', [_devicePath]);
+          _log('🚀 cat 读取已启动 (PID: ${_catProcess!.pid})');
+        } catch (e2) {
+          _logError('启动 cat 也失败: $e2');
+          try {
+            await Process.run('sudo', ['rfcomm', 'release', '0']);
+          } catch (_) {}
+          return false;
+        }
       }
 
-      // 5. 启动读取循环（使用 Process cat 读取设备文件）
+      // 5. 启动数据读取
       _log('📖 启动数据读取...');
       _startReadLoop();
 
@@ -208,50 +225,49 @@ class RfcommBindService {
   }
 
   Process? _catProcess;
+  Process? _socatProcess;
 
-  /// 启动读取循环 — 使用 cat /dev/rfcomm0 读取数据
+  /// 启动读取循环
   void _startReadLoop() {
-    // 使用 cat 命令持续读取设备文件
-    Process.start('cat', [_devicePath]).then((process) {
-      _catProcess = process;
+    // 优先使用 socat（双向），否则用 cat（只读）
+    final readProcess = _socatProcess ?? _catProcess;
+    if (readProcess == null) {
+      _logError('没有可用的读取进程');
+      return;
+    }
 
-      // 监听 stdout 获取蓝牙数据
-      _readSubscription = process.stdout.listen(
-        (data) {
-          final bytes = Uint8List.fromList(data);
-          _onDataReceived(bytes);
-        },
-        onError: (error) {
-          _logError('读取错误: $error');
-          if (_isConnected) {
-            _isConnected = false;
-            _log('⚠️ 连接已断开 (读取错误)');
-          }
-        },
-        onDone: () {
-          _log('📖 读取流结束');
-          if (_isConnected) {
-            _isConnected = false;
-            _log('⚠️ 连接已断开 (流结束)');
-          }
-        },
-      );
-
-      // 监听 stderr
-      process.stderr.transform(const SystemEncoding().decoder).listen((line) {
-        _log('🔸 [cat stderr] $line');
-      });
-
-      // 监听进程退出
-      process.exitCode.then((code) {
-        _log('📖 cat 进程退出 (退出码: $code)');
-        _catProcess = null;
+    _readSubscription = readProcess.stdout.listen(
+      (data) {
+        final bytes = Uint8List.fromList(data);
+        _onDataReceived(bytes);
+      },
+      onError: (error) {
+        _logError('读取错误: $error');
         if (_isConnected) {
           _isConnected = false;
+          _log('⚠️ 连接已断开 (读取错误)');
         }
-      });
-    }).catchError((e) {
-      _logError('启动 cat 进程失败: $e');
+      },
+      onDone: () {
+        _log('📖 读取流结束');
+        if (_isConnected) {
+          _isConnected = false;
+          _log('⚠️ 连接已断开 (流结束)');
+        }
+      },
+    );
+
+    readProcess.stderr.transform(const SystemEncoding().decoder).listen((line) {
+      if (line.trim().isNotEmpty) {
+        _log('🔸 [stderr] $line');
+      }
+    });
+
+    readProcess.exitCode.then((code) {
+      _log('📖 读取进程退出 (退出码: $code)');
+      if (_isConnected) {
+        _isConnected = false;
+      }
     });
   }
 
@@ -371,8 +387,15 @@ class RfcommBindService {
 
   /// 发送原始数据
   Future<bool> sendRawData(Uint8List data) async {
-    if (!_isConnected || _deviceFile == null) {
+    if (!_isConnected) {
       _logError('未连接，无法发送');
+      return false;
+    }
+
+    // 优先通过 socat stdin 发送（双向通道）
+    final writeProcess = _socatProcess;
+    if (writeProcess == null) {
+      _logError('没有可用的写入通道（socat 未启动）');
       return false;
     }
 
@@ -380,8 +403,8 @@ class RfcommBindService {
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       _log('📤 发送 [${data.length}字节]: $hexStr');
 
-      _deviceFile!.writeFromSync(data);
-      _deviceFile!.flushSync();
+      writeProcess.stdin.add(data);
+      await writeProcess.stdin.flush();
 
       _totalBytesSent += data.length;
       _logSuccess('发送完成');
@@ -488,12 +511,19 @@ class RfcommBindService {
     _readTimer?.cancel();
     _readTimer = null;
 
-    // 关闭设备文件
-    if (_deviceFile != null) {
+    // 关闭 socat 进程
+    if (_socatProcess != null) {
       try {
-        _deviceFile!.closeSync();
+        _socatProcess!.stdin.close();
       } catch (_) {}
-      _deviceFile = null;
+      try {
+        _socatProcess!.kill(ProcessSignal.sigterm);
+        await _socatProcess!.exitCode.timeout(const Duration(seconds: 2), onTimeout: () {
+          _socatProcess?.kill(ProcessSignal.sigkill);
+          return -1;
+        });
+      } catch (_) {}
+      _socatProcess = null;
     }
 
     // 关闭 cat 进程
