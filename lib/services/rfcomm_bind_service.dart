@@ -8,6 +8,8 @@ import 'gtp_protocol.dart';
 /// 不依赖 Python 脚本，使用系统 rfcomm bind 建立连接
 /// 然后 Dart 直接读写设备文件进行数据收发
 class RfcommBindService {
+  RandomAccessFile? _rfcommFile;  // 单 fd 双向通信（与 v2 服务一致）
+  bool _isReading = false;
   StreamSubscription<List<int>>? _readSubscription;
   Timer? _readTimer;
 
@@ -180,32 +182,24 @@ class RfcommBindService {
 
       _log('📁 设备文件已就绪: $_devicePath');
 
-      // 4. 使用 socat 打开设备文件进行双向读写
-      //    socat 能正确处理设备文件的打开/读写，比 Dart File.open 可靠
-      _log('📂 启动 socat 双向通道...');
+      // 4. 打开设备文件（readWrite 模式，与 v2 服务一致）
+      _log('📂 打开设备文件 (readWrite 模式)...');
       try {
-        _socatProcess = await Process.start(
-          'socat',
-          ['-', '$_devicePath,raw,echo=0,nonblock'],
-        );
-        _log('🚀 socat 已启动 (PID: ${_socatProcess!.pid})');
+        _rfcommFile = await File(_devicePath).open(mode: FileMode.readWrite)
+            .timeout(const Duration(seconds: 10), onTimeout: () {
+          throw TimeoutException('打开设备文件超时');
+        });
+        _log('✅ 设备文件已打开（单 fd 双向通信）');
       } catch (e) {
-        _logError('启动 socat 失败: $e，尝试 cat 方式...');
-        // socat 不可用时回退到 cat 读 + tee 写
+        _logError('打开设备文件失败: $e');
         try {
-          _catProcess = await Process.start('cat', [_devicePath]);
-          _log('🚀 cat 读取已启动 (PID: ${_catProcess!.pid})');
-        } catch (e2) {
-          _logError('启动 cat 也失败: $e2');
-          try {
-            await Process.run('sudo', ['rfcomm', 'release', '0']);
-          } catch (_) {}
-          return false;
-        }
+          await Process.run('sudo', ['rfcomm', 'release', '0']);
+        } catch (_) {}
+        return false;
       }
 
-      // 5. 启动数据读取
-      _log('📖 启动数据读取...');
+      // 5. 启动异步读取循环（与 v2 服务一致）
+      _log('📖 启动数据读取循环...');
       _startReadLoop();
 
       _currentDeviceAddress = macAddress;
@@ -224,51 +218,46 @@ class RfcommBindService {
     }
   }
 
-  Process? _catProcess;
-  Process? _socatProcess;
-
-  /// 启动读取循环
+  /// 启动异步读取循环（与 linux_bluetooth_spp_service_v2 一致）
   void _startReadLoop() {
-    // 优先使用 socat（双向），否则用 cat（只读）
-    final readProcess = _socatProcess ?? _catProcess;
-    if (readProcess == null) {
-      _logError('没有可用的读取进程');
-      return;
-    }
+    if (_rfcommFile == null) return;
+    _isReading = true;
+    _readLoopAsync();
+  }
 
-    _readSubscription = readProcess.stdout.listen(
-      (data) {
-        final bytes = Uint8List.fromList(data);
-        _onDataReceived(bytes);
-      },
-      onError: (error) {
-        _logError('读取错误: $error');
-        if (_isConnected) {
-          _isConnected = false;
-          _log('⚠️ 连接已断开 (读取错误)');
-        }
-      },
-      onDone: () {
-        _log('📖 读取流结束');
-        if (_isConnected) {
-          _isConnected = false;
-          _log('⚠️ 连接已断开 (流结束)');
-        }
-      },
-    );
+  /// 异步读取循环
+  Future<void> _readLoopAsync() async {
+    const bufferSize = 1024;
+    final buffer = Uint8List(bufferSize);
 
-    readProcess.stderr.transform(const SystemEncoding().decoder).listen((line) {
-      if (line.trim().isNotEmpty) {
-        _log('🔸 [stderr] $line');
+    try {
+      while (_isReading && _rfcommFile != null) {
+        try {
+          final bytesRead = await _rfcommFile!.readInto(buffer);
+
+          if (bytesRead > 0) {
+            final data = Uint8List.fromList(buffer.sublist(0, bytesRead));
+            _onDataReceived(data);
+          } else {
+            _log('⚠️ 读取到 EOF，连接已断开');
+            break;
+          }
+        } catch (e) {
+          if (_isReading) {
+            _logError('读取数据时出错: $e');
+            break;
+          }
+        }
       }
-    });
-
-    readProcess.exitCode.then((code) {
-      _log('📖 读取进程退出 (退出码: $code)');
+    } catch (e) {
+      _logError('读取循环异常: $e');
+    } finally {
+      _isReading = false;
       if (_isConnected) {
+        _log('⚠️ 读取循环已停止');
         _isConnected = false;
       }
-    });
+    }
   }
 
   /// 处理接收到的数据
@@ -385,17 +374,10 @@ class RfcommBindService {
     }
   }
 
-  /// 发送原始数据
+  /// 发送原始数据（与 v2 服务一致，使用 _rfcommFile writeFrom）
   Future<bool> sendRawData(Uint8List data) async {
-    if (!_isConnected) {
+    if (!_isConnected || _rfcommFile == null) {
       _logError('未连接，无法发送');
-      return false;
-    }
-
-    // 优先通过 socat stdin 发送（双向通道）
-    final writeProcess = _socatProcess;
-    if (writeProcess == null) {
-      _logError('没有可用的写入通道（socat 未启动）');
       return false;
     }
 
@@ -403,14 +385,19 @@ class RfcommBindService {
       final hexStr = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
       _log('📤 发送 [${data.length}字节]: $hexStr');
 
-      writeProcess.stdin.add(data);
-      await writeProcess.stdin.flush();
+      await _rfcommFile!.writeFrom(data);
+      await _rfcommFile!.flush();
 
       _totalBytesSent += data.length;
       _logSuccess('发送完成');
       return true;
     } catch (e) {
       _logError('发送失败: $e');
+      if (e.toString().contains('Bad file descriptor') || 
+          e.toString().contains('Input/output error')) {
+        _log('⚠️ 设备连接已断开');
+        _isConnected = false;
+      }
       return false;
     }
   }
@@ -505,37 +492,21 @@ class RfcommBindService {
   Future<void> disconnect() async {
     _log('🔌 断开连接...');
 
+    _isReading = false;
+
     _readSubscription?.cancel();
     _readSubscription = null;
 
     _readTimer?.cancel();
     _readTimer = null;
 
-    // 关闭 socat 进程
-    if (_socatProcess != null) {
+    // 关闭设备文件
+    if (_rfcommFile != null) {
       try {
-        _socatProcess!.stdin.close();
+        _rfcommFile!.closeSync();
+        _log('📂 设备文件已关闭');
       } catch (_) {}
-      try {
-        _socatProcess!.kill(ProcessSignal.sigterm);
-        await _socatProcess!.exitCode.timeout(const Duration(seconds: 2), onTimeout: () {
-          _socatProcess?.kill(ProcessSignal.sigkill);
-          return -1;
-        });
-      } catch (_) {}
-      _socatProcess = null;
-    }
-
-    // 关闭 cat 进程
-    if (_catProcess != null) {
-      try {
-        _catProcess!.kill(ProcessSignal.sigterm);
-        await _catProcess!.exitCode.timeout(const Duration(seconds: 2), onTimeout: () {
-          _catProcess?.kill(ProcessSignal.sigkill);
-          return -1;
-        });
-      } catch (_) {}
-      _catProcess = null;
+      _rfcommFile = null;
     }
 
     // 释放 rfcomm 绑定
