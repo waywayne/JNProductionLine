@@ -306,31 +306,11 @@ hciconfig hci0 up 2>/dev/null || true
           _logState?.info('   Bonded: yes');
         }
         
-        // 尝试建立蓝牙基础连接（某些设备需要）
-        _logState?.info('   尝试建立蓝牙连接...');
-        final connectScript = '''
-(
-  echo "connect $deviceAddress"
-  sleep 3
-) | bluetoothctl
-''';
-        
-        final connectResult = await Process.run('bash', ['-c', connectScript]);
-        _logState?.debug('   连接输出: ${connectResult.stdout}');
-        
-        // 检查连接状态
-        await Future.delayed(const Duration(seconds: 1));
-        final statusResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
-        final statusOutput = statusResult.stdout.toString();
-        
-        if (statusOutput.contains('Connected: yes')) {
-          _logState?.success('✅ 蓝牙基础连接已建立');
-        } else {
-          _logState?.warning('⚠️ 蓝牙基础连接未建立，但可能不影响 RFCOMM');
-        }
-        
-        // 等待设备准备好
-        await Future.delayed(const Duration(seconds: 1));
+        // ⚠️ 不要调用 bluetoothctl connect！
+        // bluetoothctl connect 会建立 BlueZ 管理的 ACL+GATT 连接，
+        // 这会与 Python RFCOMM socket 冲突，导致 Errno 52 (Invalid exchange)。
+        // Python 脚本会自行建立 RFCOMM 连接（包含 ACL 层），无需预先连接。
+        _logState?.info('   ✅ 设备已配对和信任，跳过 bluetoothctl connect（避免与 RFCOMM socket 冲突）');
         
         return true;
       } else {
@@ -520,15 +500,25 @@ hciconfig hci0 up 2>/dev/null || true
       try {
         await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
       } catch (_) {}
-      // 等待系统释放蓝牙 socket 资源
-      await Future.delayed(const Duration(milliseconds: 500));
       
-      // 仅在 bind 模式下清理 rfcomm
+      // 释放 rfcomm 绑定
+      _logState?.debug('   释放 rfcomm 绑定...');
+      try {
+        await Process.run('rfcomm', ['release', 'all']);
+      } catch (_) {}
+      
+      // 断开 BlueZ 层面的 ACL 连接（关键！否则 RFCOMM socket 会得到 Errno 52 Invalid exchange）
+      _logState?.debug('   断开 BlueZ 连接: $deviceAddress');
+      try {
+        await Process.run('bash', ['-c', 'echo "disconnect $deviceAddress" | bluetoothctl']);
+      } catch (_) {}
+      // 等待 BlueZ 释放 L2CAP/ACL 资源
+      await Future.delayed(const Duration(seconds: 1));
+      
+      // 仅在 bind 模式下清理 rfcomm 设备文件
       if (_useBindMode) {
         _logState?.debug('   清理旧的 RFCOMM 绑定...');
         await Process.run('pkill', ['-9', 'cat']).catchError((_) => null);
-        await Process.run('rfcomm', ['release', '0']).catchError((_) => null);
-        await Future.delayed(const Duration(milliseconds: 200));
         
         final deviceFile = File(devicePath);
         if (await deviceFile.exists()) {
@@ -611,16 +601,22 @@ hciconfig hci0 up 2>/dev/null || true
         // 保存进程引用（必须在监听前保存）
         _socketProcess = process;
         
-        // 立即监听 stderr（日志输出）
+        // 监测连接状态
+        bool connectionReady = false;
+        
+        // 立即监听 stderr（日志输出 + 连接状态检测）
         process.stderr.transform(const SystemEncoding().decoder).listen((line) {
           _logState?.debug('   [Python] $line');
+          // Python 脚本在连接成功后输出此消息
+          if (line.contains('连接已建立') || line.contains('连接成功')) {
+            connectionReady = true;
+          }
         });
         
         // 立即监听 stdout（接收数据）
         _subscription = process.stdout.listen(
           (data) {
             if (data.isNotEmpty) {
-              // 打印从 Python 进程接收到的原始字节
               final rawHex = data.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
               _logState?.debug('🔵 从 Python stdout 接收 [${data.length} 字节]: $rawHex');
               
@@ -634,13 +630,12 @@ hciconfig hci0 up 2>/dev/null || true
             }
           },
           onDone: () {
-            // stdout 关闭通常意味着 Python 进程退出
             _logState?.warning('⚠️ Socket 数据流结束');
             if (_isConnected) {
               disconnect();
             }
           },
-          cancelOnError: false,  // 不要因为错误就取消订阅
+          cancelOnError: false,
         );
         
         // 等待连接建立，同时监测进程是否提前退出
@@ -655,10 +650,14 @@ hciconfig hci0 up 2>/dev/null || true
           }
         });
         
-        // 等待连接建立（Python 脚本有最多 3 次重试，需要更长时间）
+        // 等待连接建立（检测 Python 输出的成功消息，或进程退出表示失败）
         _logState?.info('⏳ 等待 socket 连接建立...');
-        for (int i = 0; i < 40; i++) {
-          await Future.delayed(const Duration(milliseconds: 300));
+        for (int i = 0; i < 120; i++) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (connectionReady) {
+            _logState?.success('✅ Python 桥接连接已就绪');
+            break;
+          }
           if (processExited) {
             _logState?.error('❌ 桥接进程已退出 (退出码: $exitCode)，连接失败');
             _socketProcess = null;
@@ -723,26 +722,9 @@ hciconfig hci0 up 2>/dev/null || true
       // 确保蓝牙开启
       await ensureBluetoothPower();
       
-      // 直接尝试建立蓝牙连接（不扫描不配对）
-      _logState?.info('   尝试直接连接蓝牙...');
-      final connectScript = '''
-(
-  echo "connect $deviceAddress"
-  sleep 3
-) | bluetoothctl
-''';
-      final connectResult = await Process.run('bash', ['-c', connectScript]);
-      _logState?.debug('   连接输出: ${connectResult.stdout}');
-      
-      // 检查连接状态
-      final statusResult = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
-      final statusOutput = statusResult.stdout.toString();
-      
-      if (statusOutput.contains('Connected: yes')) {
-        _logState?.success('✅ 蓝牙基础连接已建立');
-      } else {
-        _logState?.warning('⚠️ 蓝牙基础连接未建立，继续尝试 RFCOMM...');
-      }
+      // ⚠️ 不调用 bluetoothctl connect — Python RFCOMM socket 会自行建立 ACL 连接
+      // bluetoothctl connect 会与 RFCOMM socket 冲突导致 Errno 52
+      _logState?.info('   跳过 bluetoothctl connect（Python 脚本自行建立 RFCOMM 连接）');
       
       // 启动 RFCOMM Socket
       return await _startRfcommSocket(deviceAddress, deviceName: deviceName, channel: channel ?? 5);
@@ -924,9 +906,15 @@ hciconfig hci0 up 2>/dev/null || true
       
       _socketProcess = process;
       
-      // 监听 stderr
+      // 监测连接状态
+      bool connectionReady = false;
+      
+      // 监听 stderr（日志 + 连接状态检测）
       process.stderr.transform(const SystemEncoding().decoder).listen((line) {
         _logState?.debug('   [Python] $line');
+        if (line.contains('连接已建立') || line.contains('连接成功')) {
+          connectionReady = true;
+        }
       });
       
       // 监听 stdout
@@ -948,13 +936,35 @@ hciconfig hci0 up 2>/dev/null || true
         },
       );
       
+      bool processExited = false;
+      int? exitCode;
       process.exitCode.then((code) {
+        exitCode = code;
+        processExited = true;
         _logState?.warning('⚠️ RFCOMM Socket 进程退出 (退出码: $code)');
         if (_isConnected) disconnect();
       });
       
-      // 等待连接建立
-      await Future.delayed(const Duration(seconds: 2));
+      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败）
+      _logState?.info('⏳ 等待 RFCOMM 连接建立...');
+      for (int i = 0; i < 120; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (connectionReady) {
+          _logState?.success('✅ Python 桥接连接已就绪');
+          break;
+        }
+        if (processExited) {
+          _logState?.error('❌ 桥接进程已退出 (退出码: $exitCode)，连接失败');
+          _socketProcess = null;
+          return false;
+        }
+      }
+      
+      if (processExited) {
+        _logState?.error('❌ 桥接进程已退出，连接失败');
+        _socketProcess = null;
+        return false;
+      }
       
       _currentDeviceAddress = deviceAddress;
       _currentDeviceName = deviceName;

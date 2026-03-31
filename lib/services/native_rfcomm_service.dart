@@ -140,7 +140,7 @@ class NativeRfcommService {
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     
     try {
-      // 杀掉所有可能残留的 rfcomm 桥接进程（防止占用蓝牙 socket 资源）
+      // 1. 杀掉所有可能残留的 rfcomm 桥接进程
       _log('🧹 清理残留桥接进程...');
       try {
         await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
@@ -148,8 +148,20 @@ class NativeRfcommService {
       try {
         await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_simple.py']);
       } catch (_) {}
-      // 等待系统释放蓝牙 socket 资源
-      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 2. 释放 rfcomm 绑定
+      _log('🧹 释放 rfcomm 绑定...');
+      try {
+        await Process.run('rfcomm', ['release', 'all']);
+      } catch (_) {}
+      
+      // 3. 断开 BlueZ 层面的连接（关键！否则 RFCOMM socket 会得到 Errno 52）
+      _log('🧹 断开 BlueZ 连接: $macAddress');
+      try {
+        await Process.run('bash', ['-c', 'echo "disconnect $macAddress" | bluetoothctl']);
+      } catch (_) {}
+      // 等待 BlueZ 释放 L2CAP/ACL 资源
+      await Future.delayed(const Duration(seconds: 1));
       
       // 启动 Python socket 桥接脚本
       final scriptPath = _getScriptPath();
@@ -187,7 +199,10 @@ class NativeRfcommService {
         },
       );
       
-      // 监听 stderr（日志）- 使用 UTF-8 解码
+      // 监测连接状态
+      bool connectionReady = false;
+      
+      // 监听 stderr（日志 + 连接状态检测）- 使用 UTF-8 解码
       _stderrSubscription = _bridgeProcess!.stderr
           .transform(const SystemEncoding().decoder)
           .listen((msg) {
@@ -195,6 +210,10 @@ class NativeRfcommService {
               for (final line in msg.split('\n')) {
                 if (line.trim().isNotEmpty) {
                   _log('🐍 $line');
+                  // Python 脚本在连接成功后输出此消息
+                  if (line.contains('连接已建立') || line.contains('连接成功')) {
+                    connectionReady = true;
+                  }
                 }
               }
             }
@@ -209,9 +228,13 @@ class NativeRfcommService {
         processExited = true;
       });
       
-      // Python 脚本有最多 3 次重试，每次间隔递增，最长可能需要 ~15 秒
-      for (int i = 0; i < 40; i++) {
-        await Future.delayed(const Duration(milliseconds: 300));
+      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败）
+      for (int i = 0; i < 120; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (connectionReady) {
+          _logSuccess('Python 桥接连接已就绪');
+          break;
+        }
         if (processExited) {
           _logError('桥接进程已退出 (退出码: $processExitCode)，连接失败');
           _bridgeProcess = null;
