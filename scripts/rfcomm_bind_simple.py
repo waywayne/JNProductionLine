@@ -129,9 +129,8 @@ def stdin_to_device(device_fd, keep_alive_event):
                 try:
                     data = sys.stdin.buffer.read(4096)
                     if not data:
-                        log("stdin 已关闭")
-                        # 不立即退出，等待响应
-                        time.sleep(3)
+                        log("stdin 已关闭（Dart 进程退出）")
+                        keep_alive_event.clear()
                         break
                     
                     send_count += 1

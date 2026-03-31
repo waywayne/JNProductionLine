@@ -4,6 +4,10 @@
 RFCOMM Socket 简单桥接脚本
 使用 Python bluetooth socket 连接，完全透传原始数据到 stdin/stdout
 不进行任何 GTP 组装，不使用 rfcomm bind（不会断开系统蓝牙连接）
+
+数据流：
+  Dart stdin  →  Python  →  BT socket (发送到设备)
+  BT socket   →  Python  →  Dart stdout (接收设备数据)
 """
 
 import sys
@@ -12,6 +16,7 @@ import socket
 import time
 import threading
 import select
+import signal
 
 # 尝试导入 bluetooth 模块
 try:
@@ -21,7 +26,7 @@ except ImportError:
     HAS_PYBLUEZ = False
 
 def log(message):
-    """输出日志到 stderr"""
+    """输出日志到 stderr（不影响二进制数据通道）"""
     timestamp = time.strftime('%H:%M:%S')
     print(f"[{timestamp}] [RFCOMM-SOCKET-SIMPLE] {message}", file=sys.stderr, flush=True)
 
@@ -49,7 +54,6 @@ def _create_pybluez_socket(mac_address, channel):
 def _create_raw_socket(mac_address, channel):
     """使用原始 socket 创建 RFCOMM 连接（不需要 PyBluez）"""
     try:
-        import struct
         log(f"使用原始 socket 连接: {mac_address} CH{channel}")
         
         # AF_BLUETOOTH = 31, BTPROTO_RFCOMM = 3
@@ -58,14 +62,7 @@ def _create_raw_socket(mac_address, channel):
         
         sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
         sock.settimeout(10)
-        
-        # 将 MAC 地址转换为 bytes
-        addr_bytes = bytes(reversed([int(x, 16) for x in mac_address.split(':')]))
-        
-        # struct sockaddr_rc: sa_family(2) + btaddr(6) + channel(1)
-        # 使用 connect 需要传入 (mac, channel) 元组
         sock.connect((mac_address, channel))
-        
         sock.settimeout(0.1)
         log(f"✅ 原始 socket RFCOMM 连接成功")
         return sock
@@ -74,55 +71,49 @@ def _create_raw_socket(mac_address, channel):
         return None
 
 def socket_to_stdout(sock, keep_alive_event):
-    """从 socket 读取数据并直接输出到 stdout（完全透传）"""
-    log("🎧 开始监听 Socket 数据（完全透传）...")
+    """从 BT socket 读取数据并立即输出到 stdout（完全透传，零延迟）"""
     recv_count = 0
     total_bytes = 0
-    timeout_count = 0
     
     try:
         while keep_alive_event.is_set():
             try:
                 data = sock.recv(4096)
                 if not data:
-                    log("Socket 连接已关闭")
+                    log("BT socket 连接已关闭（读取端）")
+                    keep_alive_event.clear()
                     break
                 
                 recv_count += 1
                 total_bytes += len(data)
-                timeout_count = 0
                 
                 data_hex = ' '.join(f'{b:02X}' for b in data)
-                log(f"📥 接收 #{recv_count} [{len(data)}字节] (累计:{total_bytes}): {data_hex[:120]}{'...' if len(data_hex) > 120 else ''}")
+                log(f"📥 BT→stdout #{recv_count} [{len(data)}B] (累计:{total_bytes}B): {data_hex[:150]}{'...' if len(data_hex) > 150 else ''}")
                 
-                # 直接输出到 stdout，不做任何处理
+                # 立即输出到 stdout，不做任何缓冲或延迟
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
                 
             except socket.timeout:
-                timeout_count += 1
-                if timeout_count % 200 == 0:
-                    log(f"⏳ 持续监听中... (已接收: {recv_count} 次, {total_bytes} 字节)")
-                time.sleep(0.01)
+                # socket 超时是正常的（非阻塞模式），继续等待
                 continue
             except (OSError, IOError) as e:
                 error_msg = str(e).lower()
                 if 'timed out' in error_msg or 'timeout' in error_msg:
-                    timeout_count += 1
-                    time.sleep(0.01)
                     continue
                 else:
-                    log(f"❌ 读取错误: {e}")
+                    log(f"❌ BT socket 读取错误: {e}")
+                    keep_alive_event.clear()
                     break
                     
     except Exception as e:
-        log(f"❌ 读取异常: {e}")
+        log(f"❌ 读取线程异常: {e}")
+        keep_alive_event.clear()
     finally:
         log(f"📊 读取线程结束，共接收 {recv_count} 次，{total_bytes} 字节")
 
 def stdin_to_socket(sock, keep_alive_event):
-    """从 stdin 读取数据并发送到 socket"""
-    log("📤 开始监听 stdin 数据...")
+    """从 Dart stdin 读取数据并发送到 BT socket"""
     send_count = 0
     total_bytes = 0
     
@@ -132,46 +123,59 @@ def stdin_to_socket(sock, keep_alive_event):
         fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
         
         while keep_alive_event.is_set():
-            readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+            try:
+                readable, _, _ = select.select([sys.stdin], [], [], 0.05)
+            except (ValueError, OSError):
+                # stdin 已关闭
+                break
             
-            if readable:
+            if not readable:
+                continue
+            
+            try:
                 data = sys.stdin.buffer.read(4096)
-                if not data:
-                    log("stdin 已关闭")
-                    # 不立即退出，等待响应
-                    time.sleep(3)
-                    break
-                
-                send_count += 1
-                total_bytes += len(data)
-                data_hex = ' '.join(f'{b:02X}' for b in data)
-                log(f"📨 发送 #{send_count} [{len(data)}字节]: {data_hex[:120]}{'...' if len(data_hex) > 120 else ''}")
-                
-                # 发送数据
-                sent = 0
-                while sent < len(data):
-                    try:
-                        n = sock.send(data[sent:])
-                        if n == 0:
-                            log("Socket 连接已关闭（写入端）")
-                            return
-                        sent += n
-                    except socket.timeout:
+            except (OSError, IOError):
+                data = None
+            
+            if not data:
+                log("stdin 已关闭（Dart 进程退出）")
+                keep_alive_event.clear()
+                break
+            
+            send_count += 1
+            total_bytes += len(data)
+            data_hex = ' '.join(f'{b:02X}' for b in data)
+            log(f"📨 stdin→BT #{send_count} [{len(data)}B]: {data_hex[:150]}{'...' if len(data_hex) > 150 else ''}")
+            
+            # 发送数据到 BT socket（带重试）
+            sent = 0
+            while sent < len(data) and keep_alive_event.is_set():
+                try:
+                    n = sock.send(data[sent:])
+                    if n == 0:
+                        log("BT socket 连接已关闭（写入端）")
+                        keep_alive_event.clear()
+                        return
+                    sent += n
+                except socket.timeout:
+                    time.sleep(0.01)
+                    continue
+                except (OSError, IOError) as e:
+                    error_msg = str(e).lower()
+                    if 'timed out' in error_msg or 'timeout' in error_msg:
                         time.sleep(0.01)
                         continue
-                    except (OSError, IOError) as e:
-                        error_msg = str(e).lower()
-                        if 'timed out' in error_msg or 'timeout' in error_msg:
-                            time.sleep(0.01)
-                            continue
-                        else:
-                            log(f"❌ 发送错误: {e}")
-                            return
-                
-                log(f"✅ 发送完成")
+                    else:
+                        log(f"❌ BT socket 发送错误: {e}")
+                        keep_alive_event.clear()
+                        return
+            
+            if sent == len(data):
+                log(f"✅ 发送完成 [{sent}B]")
                 
     except Exception as e:
-        log(f"❌ 写入异常: {e}")
+        log(f"❌ 写入线程异常: {e}")
+        keep_alive_event.clear()
     finally:
         log(f"📊 发送线程结束，共发送 {send_count} 次，{total_bytes} 字节")
 
@@ -189,54 +193,68 @@ def main():
     log(f"PyBluez: {'可用' if HAS_PYBLUEZ else '不可用（使用原始socket）'}")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    # 1. 创建 socket 连接
+    # 创建 socket 连接
     sock = create_rfcomm_socket(mac_address, channel)
     if not sock:
         log("❌ 连接失败")
         sys.exit(1)
     
-    # 2. 创建 keep_alive 事件
+    # 创建 keep_alive 事件（任一线程出错时停止所有线程）
     keep_alive_event = threading.Event()
     keep_alive_event.set()
     
-    log("✅ 连接已建立，开始数据传输")
+    # 处理信号
+    def signal_handler(signum, frame):
+        log(f"收到信号 {signum}")
+        keep_alive_event.clear()
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    log("✅ 连接已建立，开始双向数据透传")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    # 3. 启动双向数据传输
-    read_thread = None
+    # 启动双向数据传输（两个线程）
+    read_thread = threading.Thread(
+        target=socket_to_stdout, 
+        args=(sock, keep_alive_event), 
+        daemon=True,
+        name="bt-read"
+    )
+    write_thread = threading.Thread(
+        target=stdin_to_socket, 
+        args=(sock, keep_alive_event), 
+        daemon=True,
+        name="bt-write"
+    )
+    
+    read_thread.start()
+    write_thread.start()
+    
+    # 主线程等待 keep_alive 被清除
     try:
-        # socket -> stdout（后台线程）
-        read_thread = threading.Thread(
-            target=socket_to_stdout, 
-            args=(sock, keep_alive_event), 
-            daemon=False
-        )
-        read_thread.start()
-        
-        # stdin -> socket（主线程）
-        stdin_to_socket(sock, keep_alive_event)
-        
-        # 发送完成后，等待读取线程
-        log("⏳ 等待读取线程...")
-        read_thread.join(timeout=5)
-        
+        while keep_alive_event.is_set():
+            # 检查两个线程是否还活着
+            if not read_thread.is_alive() and not write_thread.is_alive():
+                log("两个数据传输线程均已退出")
+                break
+            time.sleep(0.1)
     except KeyboardInterrupt:
         log("收到中断信号")
-    except Exception as e:
-        log(f"运行异常: {e}")
-    finally:
-        keep_alive_event.clear()
-        
-        if read_thread and read_thread.is_alive():
-            read_thread.join(timeout=2)
-        
-        log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        log("清理资源...")
-        try:
-            sock.close()
-        except:
-            pass
-        log("✅ 清理完成")
+    
+    # 清理
+    keep_alive_event.clear()
+    
+    log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    log("清理资源...")
+    try:
+        sock.close()
+    except:
+        pass
+    
+    # 等待线程结束
+    read_thread.join(timeout=2)
+    write_thread.join(timeout=2)
+    log("✅ 清理完成")
 
 if __name__ == "__main__":
     main()

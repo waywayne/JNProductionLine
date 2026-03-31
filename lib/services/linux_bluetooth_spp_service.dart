@@ -594,7 +594,8 @@ hciconfig hci0 up 2>/dev/null || true
         
         final process = await Process.start(
           'python3',
-          [scriptPath, deviceAddress, targetChannel.toString()],
+          ['-u', scriptPath, deviceAddress, targetChannel.toString()],
+          environment: {'PYTHONUNBUFFERED': '1'},
         );
         
         _logState?.success('   ✅ RFCOMM Socket 进程已启动');
@@ -890,7 +891,8 @@ hciconfig hci0 up 2>/dev/null || true
       
       final process = await Process.start(
         'python3',
-        [scriptPath, deviceAddress, targetChannel.toString()],
+        ['-u', scriptPath, deviceAddress, targetChannel.toString()],
+        environment: {'PYTHONUNBUFFERED': '1'},
       );
       
       _socketProcess = process;
@@ -979,7 +981,8 @@ hciconfig hci0 up 2>/dev/null || true
       
       final process = await Process.start(
         'python3',
-        [scriptPath, deviceAddress, targetChannel.toString()],
+        ['-u', scriptPath, deviceAddress, targetChannel.toString()],
+        environment: {'PYTHONUNBUFFERED': '1'},
       );
       
       _socketProcess = process;
@@ -1070,8 +1073,9 @@ hciconfig hci0 up 2>/dev/null || true
       // 启动 Python 脚本
       final process = await Process.start(
         'python3',
-        [scriptPath, '/dev/rfcomm0', '115200'],
+        ['-u', scriptPath, '/dev/rfcomm0', '115200'],
         mode: ProcessStartMode.normal,
+        environment: {'PYTHONUNBUFFERED': '1'},
       );
       
       _socketProcess = process;
@@ -1163,8 +1167,9 @@ hciconfig hci0 up 2>/dev/null || true
       // 启动 Python 脚本
       final process = await Process.start(
         'python3',
-        [scriptPath, deviceAddress, targetChannel.toString()],
+        ['-u', scriptPath, deviceAddress, targetChannel.toString()],
         mode: ProcessStartMode.normal,
+        environment: {'PYTHONUNBUFFERED': '1'},
       );
       
       _socketProcess = process;
