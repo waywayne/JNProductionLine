@@ -155,13 +155,9 @@ class NativeRfcommService {
         await Process.run('rfcomm', ['release', 'all']);
       } catch (_) {}
       
-      // 3. 断开 BlueZ 层面的连接（关键！否则 RFCOMM socket 会得到 Errno 52）
-      _log('🧹 断开 BlueZ 连接: $macAddress');
-      try {
-        await Process.run('bash', ['-c', 'echo "disconnect $macAddress" | bluetoothctl']);
-      } catch (_) {}
-      // 等待 BlueZ 释放 L2CAP/ACL 资源
-      await Future.delayed(const Duration(seconds: 1));
+      // ⚠️ 不要调用 bluetoothctl disconnect！会导致 Errno 112 (Host is down)
+      // 因为 pairAndConnectDevice 已不再调用 bluetoothctl connect，所以无需断开
+      // Python RFCOMM socket.connect() 会自行建立 ACL+RFCOMM 连接
       
       // 启动 Python socket 桥接脚本
       final scriptPath = _getScriptPath();

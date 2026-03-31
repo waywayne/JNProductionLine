@@ -10,7 +10,7 @@ RFCOMM Socket 简单桥接脚本
   BT socket   →  Python  →  Dart stdout (接收设备数据)
 
 连接策略（参考 bluetooth_spp_test.py 已验证可行的方式）：
-  1. 先清理 BlueZ 状态（bluetoothctl disconnect + rfcomm release）
+  1. 杀掉残留进程 + rfcomm release（不要 bluetoothctl disconnect，会导致 Errno 112）
   2. 使用 PyBluez BluetoothSocket，设 5s connect 超时
   3. 指定通道失败时，自动扫描常用通道 1-10
 """
@@ -72,19 +72,11 @@ def cleanup_bluez_state(mac_address):
     except:
         pass
     
-    # 3. 断开 BlueZ ACL 连接（关键！bluetoothctl connect 会建立 ACL 连接，
-    #    与 Python RFCOMM socket 冲突导致 Errno 52 Invalid exchange）
-    try:
-        subprocess.run(
-            ['bluetoothctl', 'disconnect', mac_address],
-            capture_output=True, timeout=5
-        )
-        log(f"   bluetoothctl disconnect {mac_address}")
-    except:
-        pass
+    # ⚠️ 不要调用 bluetoothctl disconnect！会导致 Errno 112 (Host is down)
+    # RFCOMM socket.connect() 会自行建立 ACL 连接，无需预先断开
     
-    # 等待 BlueZ 释放 L2CAP/ACL 资源
-    time.sleep(1.0)
+    # 等待系统释放资源
+    time.sleep(0.5)
     log("   ✅ 清理完成")
 
 

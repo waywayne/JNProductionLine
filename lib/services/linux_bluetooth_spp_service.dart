@@ -507,13 +507,9 @@ hciconfig hci0 up 2>/dev/null || true
         await Process.run('rfcomm', ['release', 'all']);
       } catch (_) {}
       
-      // 断开 BlueZ 层面的 ACL 连接（关键！否则 RFCOMM socket 会得到 Errno 52 Invalid exchange）
-      _logState?.debug('   断开 BlueZ 连接: $deviceAddress');
-      try {
-        await Process.run('bash', ['-c', 'echo "disconnect $deviceAddress" | bluetoothctl']);
-      } catch (_) {}
-      // 等待 BlueZ 释放 L2CAP/ACL 资源
-      await Future.delayed(const Duration(seconds: 1));
+      // ⚠️ 不要调用 bluetoothctl disconnect！会导致 Errno 112 (Host is down)
+      // pairAndConnectDevice 已不再调用 bluetoothctl connect，所以无需断开
+      // Python RFCOMM socket.connect() 会自行建立 ACL+RFCOMM 连接
       
       // 仅在 bind 模式下清理 rfcomm 设备文件
       if (_useBindMode) {
