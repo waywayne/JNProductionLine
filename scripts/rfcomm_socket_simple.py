@@ -38,105 +38,113 @@ def log(msg):
 
 
 def cleanup_rfcomm_resources():
-    """清理 RFCOMM 资源（与产测一致：只 pkill + rfcomm release）
+    """彻底清理 RFCOMM 资源，避免 Errno 12 (Cannot allocate memory)
     
     步骤：
-      1. pkill 旧的桥接进程和 cat 进程
-      2. rfcomm release all
-      3. 等待 500ms
-    绝不 bluetoothctl disconnect/connect
-    绝不 hciconfig reset（产测不用）
+      1. pkill 所有旧的桥接进程（排除自己）
+      2. pkill 所有 cat 进程
+      3. rfcomm release all（释放所有绑定）
+      4. 关闭所有 /dev/rfcomm* 设备文件
+      5. 等待 1 秒让内核完全释放资源
     """
     my_pid = os.getpid()
-    log(f"🧹 清理 RFCOMM 资源 (本进程 PID: {my_pid})...")
+    log(f"🧹 彻底清理 RFCOMM 资源 (本进程 PID: {my_pid})")
     
-    # 1. 杀掉旧的桥接进程（排除自己）
+    # 1. 强杀所有旧的 Python 桥接进程（排除自己）
     try:
-        result = subprocess.run(
-            ['pgrep', '-f', 'rfcomm_socket_simple.py'],
-            capture_output=True, text=True, timeout=3
-        )
-        if result.stdout.strip():
+        result = subprocess.run(['pgrep', '-f', 'rfcomm'],
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
             for pid_str in result.stdout.strip().split('\n'):
-                try:
-                    pid = int(pid_str.strip())
-                    if pid != my_pid:
-                        log(f"   杀掉旧桥接进程 PID={pid}")
-                        os.kill(pid, signal.SIGKILL)
-                except (ProcessLookupError, ValueError):
-                    pass
-    except Exception as e:
-        log(f"   pgrep 失败: {e}")
-
-    # 2. 杀掉残留 cat 进程
-    try:
-        subprocess.run(['pkill', '-9', 'cat'], capture_output=True, timeout=3)
-    except Exception:
+                if pid_str and pid_str.strip():
+                    try:
+                        pid = int(pid_str.strip())
+                        if pid != my_pid:
+                            subprocess.run(['kill', '-9', str(pid)], timeout=1)
+                            log(f"   已杀死旧进程 PID: {pid}")
+                    except:
+                        pass
+    except:
         pass
-
+    
+    # 2. 强杀所有 cat 进程
+    try:
+        subprocess.run(['pkill', '-9', 'cat'], stderr=subprocess.DEVNULL, timeout=2)
+    except:
+        pass
+    
     # 3. 释放所有 rfcomm 绑定
     try:
-        subprocess.run(['rfcomm', 'release', 'all'], capture_output=True, timeout=3)
-        log("   rfcomm release all 完成")
-    except Exception:
+        subprocess.run(['sudo', 'rfcomm', 'release', 'all'], 
+                      stderr=subprocess.DEVNULL, timeout=2)
+        log("   已释放所有 rfcomm 绑定")
+    except:
         pass
-
-    # 4. 等待资源释放
-    time.sleep(0.5)
+    
+    # 4. 关闭所有打开的 /dev/rfcomm* 设备文件
+    try:
+        result = subprocess.run(['lsof', '/dev/rfcomm*'], 
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            for line in result.stdout.split('\n')[1:]:  # 跳过标题行
+                parts = line.split()
+                if len(parts) > 1:
+                    try:
+                        pid = int(parts[1])
+                        if pid != my_pid:
+                            subprocess.run(['kill', '-9', str(pid)], timeout=1)
+                            log(f"   已杀死占用 /dev/rfcomm 的进程 PID: {pid}")
+                    except:
+                        pass
+    except:
+        pass
+    
+    # 5. 等待内核完全释放资源
+    time.sleep(1)
     log("🧹 清理完成")
 
 
-def connect_raw_socket(mac, channel, timeout=5):
-    """使用原始 AF_BLUETOOTH socket 连接（不依赖 PyBluez）"""
-    AF_BLUETOOTH = 31
-    BTPROTO_RFCOMM = 3
-    log(f"使用原始 AF_BLUETOOTH socket 连接 {mac} CH{channel} (超时 {timeout}s)")
-    sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
-    sock.settimeout(timeout)
-    sock.connect((mac, channel))
-    log(f"✅ 原始 socket 连接成功: {mac} CH{channel}")
-    return sock
-
-
-def connect_rfcomm(mac, channel, timeout=5, max_retries=3):
-    """连接 RFCOMM — 先尝试 PyBluez，失败则回退到原始 AF_BLUETOOTH socket"""
+def connect_rfcomm(mac, channel, timeout=10, max_retries=5):
+    """连接 RFCOMM — 只使用原始 AF_BLUETOOTH socket（更稳定，避免 PyBluez 的 Errno 77）"""
     last_error = None
-
+    
+    log(f"使用原始 AF_BLUETOOTH socket 连接（不使用 PyBluez）")
+    
     for attempt in range(1, max_retries + 1):
-        # 尝试 PyBluez
-        if HAS_PYBLUEZ:
-            try:
-                log(f"[尝试 {attempt}/{max_retries}] PyBluez 连接 {mac} CH{channel} (超时 {timeout}s)")
-                sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-                sock.settimeout(timeout)
-                sock.connect((mac, channel))
-                log(f"✅ PyBluez 连接成功: {mac} CH{channel}")
-                return sock
-            except Exception as e:
-                last_error = e
-                log(f"⚠️ PyBluez 第 {attempt} 次失败: {e}")
-                try:
-                    sock.close()
-                except:
-                    pass
-                # Errno 77 (EBADFD) — PyBluez fd 异常，直接回退到原始 socket
-                if 'Errno 77' in str(e) or 'bad state' in str(e).lower():
-                    log("🔄 检测到 Errno 77 (EBADFD)，回退到原始 AF_BLUETOOTH socket")
-                    break
-                time.sleep(0.5)
-
-        # 尝试原始 AF_BLUETOOTH socket
         try:
-            return connect_raw_socket(mac, channel, timeout)
-        except Exception as e2:
-            last_error = e2
-            log(f"⚠️ 原始 socket 第 {attempt} 次失败: {e2}")
-            time.sleep(0.5)
-
-    # 所有尝试失败，最后再试一次原始 socket
-    if last_error:
-        log(f"🔄 所有 PyBluez 尝试失败，最终回退原始 socket")
-        return connect_raw_socket(mac, channel, timeout)
+            log(f"[尝试 {attempt}/{max_retries}] 连接 {mac} CH{channel} (超时 {timeout}s)")
+            
+            # 直接使用原始 socket
+            AF_BLUETOOTH = 31
+            BTPROTO_RFCOMM = 3
+            sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
+            sock.settimeout(timeout)
+            
+            # 连接前等待一下，避免资源竞争
+            if attempt > 1:
+                wait_time = min(attempt * 0.5, 2)  # 最多等 2 秒
+                log(f"   等待 {wait_time}s 后重试...")
+                time.sleep(wait_time)
+            
+            sock.connect((mac, channel))
+            log(f"✅ 连接成功: {mac} CH{channel}")
+            return sock
+            
+        except Exception as e:
+            last_error = e
+            log(f"⚠️ 第 {attempt} 次失败: {e}")
+            try:
+                sock.close()
+            except:
+                pass
+            
+            # 如果是 Errno 12 (Cannot allocate memory)，需要更彻底的清理
+            if 'Errno 12' in str(e) or 'Cannot allocate memory' in str(e):
+                log("🔄 检测到 Errno 12，重新清理 RFCOMM 资源...")
+                cleanup_rfcomm_resources()
+    
+    # 所有尝试失败
+    raise Exception(f"连接失败（{max_retries} 次尝试）: {last_error}")
 
 
 def bt_to_stdout(sock, alive):
