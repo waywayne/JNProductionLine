@@ -76,6 +76,7 @@ def device_to_stdout(device_fd, keep_alive_event):
     log("🎧 开始监听设备数据...")
     recv_count = 0
     timeout_count = 0
+    consecutive_empty_reads = 0  # 连续空读取计数
     
     # GTP 数据包缓冲区
     buffer = bytearray()
@@ -92,12 +93,16 @@ def device_to_stdout(device_fd, keep_alive_event):
                 try:
                     data = os.read(device_fd, 4096)  # 增大读取缓冲区
                     if not data:
-                        # select 说有数据但 read 返回空 = 连接真的关闭了
-                        log("设备连接已关闭（读取端）")
-                        break
+                        # RFCOMM 设备文件可能有虚假的空读取，需要多次确认
+                        consecutive_empty_reads += 1
+                        if consecutive_empty_reads >= 3:  # 连续 3 次空读取才认为真的断开
+                            log("设备连接已关闭（读取端）")
+                            break
+                        continue
                     
                     recv_count += 1
                     timeout_count = 0  # 重置超时计数
+                    consecutive_empty_reads = 0  # 重置连续空读取计数
                     last_data_time = time.time()
                     last_activity_time = time.time()
                     
