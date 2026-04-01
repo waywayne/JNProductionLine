@@ -19,12 +19,62 @@ def log(message):
     print(f"[RFCOMM-BIND] {message}", file=sys.stderr, flush=True)
 
 def cleanup_rfcomm():
-    """清理 RFCOMM 设备"""
+    """彻底清理 RFCOMM 资源"""
+    my_pid = os.getpid()
+    log(f"🧹 清理 RFCOMM 资源 (PID: {my_pid})")
+    
+    # 1. 杀死所有旧的 rfcomm 相关进程（排除自己）
     try:
-        subprocess.run(['sudo', 'rfcomm', 'release', '0'],
-                      stderr=subprocess.DEVNULL, timeout=2)
+        result = subprocess.run(['pgrep', '-f', 'rfcomm'],
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            for pid_str in result.stdout.strip().split('\n'):
+                if pid_str and pid_str.strip():
+                    try:
+                        pid = int(pid_str.strip())
+                        if pid != my_pid:
+                            subprocess.run(['kill', '-9', str(pid)], timeout=1)
+                            log(f"   已杀死旧进程 PID: {pid}")
+                    except:
+                        pass
     except:
         pass
+    
+    # 2. 杀死所有 cat 进程
+    try:
+        subprocess.run(['pkill', '-9', 'cat'], stderr=subprocess.DEVNULL, timeout=2)
+    except:
+        pass
+    
+    # 3. 释放所有 rfcomm 绑定
+    try:
+        subprocess.run(['sudo', 'rfcomm', 'release', 'all'],
+                      stderr=subprocess.DEVNULL, timeout=2)
+        log("   已释放所有 rfcomm 绑定")
+    except:
+        pass
+    
+    # 4. 关闭所有打开的 /dev/rfcomm* 设备文件
+    try:
+        result = subprocess.run(['lsof', '/dev/rfcomm*'],
+                              capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            for line in result.stdout.split('\n')[1:]:
+                parts = line.split()
+                if len(parts) > 1:
+                    try:
+                        pid = int(parts[1])
+                        if pid != my_pid:
+                            subprocess.run(['kill', '-9', str(pid)], timeout=1)
+                            log(f"   已杀死占用设备文件的进程 PID: {pid}")
+                    except:
+                        pass
+    except:
+        pass
+    
+    # 5. 等待内核完全释放资源
+    time.sleep(1)
+    log("🧹 清理完成")
 
 def setup_rfcomm_bind(mac_address, channel):
     """使用 rfcomm bind 创建设备文件"""

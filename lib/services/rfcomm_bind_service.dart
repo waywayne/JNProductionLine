@@ -5,9 +5,9 @@ import 'dart:typed_data';
 import '../models/log_state.dart';
 import 'gtp_protocol.dart';
 
-/// 方案二: Python Socket 桥接（备用方案，与方案一相同实现）
-/// 使用 rfcomm_socket_simple.py 直接 socket 连接，不使用 rfcomm bind
-/// 注：rfcomm bind 在某些环境下会出现 Errno 113，因此改用直接 socket 方式
+/// 方案二: rfcomm bind + Python 桥接
+/// 使用 rfcomm bind 创建 /dev/rfcomm0，然后通过 Python 桥接访问
+/// 适用于需要设备文件方式的场景
 class RfcommBindService {
   Process? _bridgeProcess;
   StreamSubscription<List<int>>? _readSubscription;
@@ -83,10 +83,10 @@ class RfcommBindService {
   String _getScriptPath() {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
     final candidates = [
-      '$executableDir/scripts/rfcomm_socket_simple.py',
-      '${Directory.current.path}/scripts/rfcomm_socket_simple.py',
-      '/opt/jn-production-line/scripts/rfcomm_socket_simple.py',
-      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket_simple.py',
+      '$executableDir/scripts/rfcomm_bind_bridge.py',
+      '${Directory.current.path}/scripts/rfcomm_bind_bridge.py',
+      '/opt/jn-production-line/scripts/rfcomm_bind_bridge.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_bind_bridge.py',
     ];
     
     for (final path in candidates) {
@@ -95,7 +95,7 @@ class RfcommBindService {
       }
     }
     
-    return '${Directory.current.path}/scripts/rfcomm_socket_simple.py';
+    return '${Directory.current.path}/scripts/rfcomm_bind_bridge.py';
   }
 
   /// 连接设备（与超声前整机产测完全一致）
@@ -106,7 +106,7 @@ class RfcommBindService {
     }
 
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _log('🔗 开始连接 (Socket 模式 - 备用方案)');
+    _log('🔗 开始连接 (rfcomm bind 模式)');
     _log('   MAC: $macAddress');
     _log('   Channel: $channel');
     if (deviceName != null) {
@@ -118,13 +118,13 @@ class RfcommBindService {
       // 1. 清理旧连接
       _log('🧹 清理旧的 RFCOMM 连接...');
       try {
-        await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_bridge.py']);
       } catch (_) {}
       try {
         await Process.run('pkill', ['-9', 'cat']);
       } catch (_) {}
       try {
-        await Process.run('rfcomm', ['release', 'all']);
+        await Process.run('sudo', ['rfcomm', 'release', 'all']);
       } catch (_) {}
       await Future.delayed(const Duration(milliseconds: 500));
 
@@ -137,8 +137,8 @@ class RfcommBindService {
         return false;
       }
 
-      // 3. 启动 Python Socket 桥接进程
-      _log('🚀 启动 Python Socket 桥接...');
+      // 3. 启动 Python rfcomm bind 桥接进程
+      _log('🚀 启动 rfcomm bind 桥接...');
       final process = await Process.start(
         'python3',
         ['-u', scriptPath, macAddress, channel.toString()],
@@ -189,7 +189,7 @@ class RfcommBindService {
       _fragmentCount = 0;
       _pendingResponses.clear();
 
-      _logSuccess('连接成功 (Socket 模式)');
+      _logSuccess('连接成功 (rfcomm bind 模式)');
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       return true;
