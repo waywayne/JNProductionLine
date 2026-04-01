@@ -216,9 +216,8 @@ def stdin_to_device(device_fd, keep_alive_event, activity_callback=None):
                 try:
                     data = sys.stdin.buffer.read(1024)
                     if not data:
-                        # stdin 关闭，但不立即退出，等待响应
-                        log("stdin 已关闭，等待设备响应...")
-                        time.sleep(2)  # 等待 2 秒让设备响应
+                        # stdin 关闭，退出发送循环（但读取线程继续运行）
+                        log("stdin 已关闭，停止发送循环")
                         break
                     
                     send_count += 1
@@ -254,9 +253,7 @@ def stdin_to_device(device_fd, keep_alive_event, activity_callback=None):
     except Exception as e:
         log(f"写入异常: {e}")
     finally:
-        # 发送完成后，等待一段时间让读取线程接收响应
-        log("📤 发送线程结束，等待响应...")
-        time.sleep(1)
+        log("📤 发送线程结束")
 
 def main():
     if len(sys.argv) != 3:
@@ -307,9 +304,9 @@ def main():
         # stdin -> 设备（主线程）
         stdin_to_device(device_fd, keep_alive_event)
         
-        # 发送完成后，等待读取线程完成（最多等待 5 秒）
-        log("⏳ 等待读取线程完成...")
-        read_thread.join(timeout=5)
+        # stdin 关闭后，继续保持连接，等待读取线程（无限期等待，直到连接断开）
+        log("⏳ stdin 已关闭，保持连接并继续接收数据...")
+        read_thread.join()  # 无限期等待，直到设备断开连接
         
     except KeyboardInterrupt:
         log("收到中断信号")
@@ -319,10 +316,10 @@ def main():
         # 停止 keep_alive 事件
         keep_alive_event.clear()
         
-        # 等待读取线程结束
+        # 等待读取线程结束（给一点时间让它优雅退出）
         if read_thread.is_alive():
             log("⏳ 等待读取线程结束...")
-            read_thread.join(timeout=2)
+            read_thread.join(timeout=1)
         
         # 5. 清理
         log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
