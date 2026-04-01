@@ -76,7 +76,6 @@ def device_to_stdout(device_fd, keep_alive_event):
     log("🎧 开始监听设备数据...")
     recv_count = 0
     timeout_count = 0
-    empty_read_count = 0
     
     # GTP 数据包缓冲区
     buffer = bytearray()
@@ -93,16 +92,12 @@ def device_to_stdout(device_fd, keep_alive_event):
                 try:
                     data = os.read(device_fd, 4096)  # 增大读取缓冲区
                     if not data:
-                        empty_read_count += 1
-                        # 连续多次空读取才认为连接关闭（增加阈值）
-                        if empty_read_count > 100:  # 增加到 100 次（约 5 秒）
-                            log("设备连接已关闭（读取端）")
-                            break
-                        continue
+                        # select 说有数据但 read 返回空 = 连接真的关闭了
+                        log("设备连接已关闭（读取端）")
+                        break
                     
                     recv_count += 1
                     timeout_count = 0  # 重置超时计数
-                    empty_read_count = 0  # 重置空读取计数
                     last_data_time = time.time()
                     last_activity_time = time.time()
                     
@@ -175,7 +170,6 @@ def device_to_stdout(device_fd, keep_alive_event):
                         break
             else:
                 timeout_count += 1
-                empty_read_count += 1  # 无数据也计入空读取
                 
                 # 如果缓冲区有数据且超过 300ms 没有新数据，输出缓冲区内容
                 if buffer and (time.time() - last_data_time) > 0.3:
@@ -184,10 +178,6 @@ def device_to_stdout(device_fd, keep_alive_event):
                     sys.stdout.buffer.write(bytes(buffer))
                     sys.stdout.buffer.flush()
                     buffer.clear()
-                
-                # 重置空读取计数（只要还在活动中）
-                if (time.time() - last_activity_time) < 30:  # 30 秒内有活动
-                    empty_read_count = 0
                 
                 if timeout_count % 400 == 0:
                     log(f"⏳ 持续监听中... (已接收: {recv_count} 次)")
