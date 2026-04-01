@@ -269,28 +269,42 @@ def main():
         log("❌ RFCOMM 绑定失败")
         sys.exit(1)
     
-    # 2. 打开设备文件
+    # 2. 等待 RFCOMM 连接完全建立（避免 Errno 113 No route to host）
+    log("⏳ 等待 RFCOMM 连接建立...")
+    time.sleep(2)  # 额外等待 2 秒确保连接完全建立
+    
+    # 3. 打开设备文件（带重试）
     device_path = '/dev/rfcomm0'
-    try:
-        device_fd = os.open(device_path, os.O_RDWR | os.O_NONBLOCK)
-        log(f"✅ 设备文件已打开: {device_path}")
-    except Exception as e:
-        log(f"❌ 打开设备文件失败: {e}")
+    device_fd = None
+    for attempt in range(3):
+        try:
+            device_fd = os.open(device_path, os.O_RDWR | os.O_NONBLOCK)
+            log(f"✅ 设备文件已打开: {device_path}")
+            break
+        except OSError as e:
+            if e.errno == 113:  # No route to host
+                log(f"⚠️ 尝试 {attempt + 1}/3: 连接尚未建立，等待 1 秒后重试...")
+                time.sleep(1)
+            else:
+                raise
+    
+    if device_fd is None:
+        log(f"❌ 打开设备文件失败: 连接无法建立")
         cleanup_rfcomm()
         sys.exit(1)
     
-    # 3. 设置 stdin 为非阻塞
+    # 4. 设置 stdin 为非阻塞
     flags = fcntl.fcntl(sys.stdin.buffer, fcntl.F_GETFL)
     fcntl.fcntl(sys.stdin.buffer, fcntl.F_SETFL, flags | os.O_NONBLOCK)
     
     log("✅ 连接已建立，开始数据传输")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    # 4. 创建 keep_alive 事件
+    # 5. 创建 keep_alive 事件
     keep_alive_event = threading.Event()
     keep_alive_event.set()
     
-    # 5. 启动双向数据传输
+    # 6. 启动双向数据传输
     try:
         # 设备 -> stdout（后台线程，非 daemon，确保能完成接收）
         read_thread = threading.Thread(target=device_to_stdout, args=(device_fd, keep_alive_event), daemon=False)
