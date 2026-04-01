@@ -269,23 +269,23 @@ def main():
         log("❌ RFCOMM 绑定失败")
         sys.exit(1)
     
-    # 2. 等待 RFCOMM 连接完全建立（避免 Errno 113 No route to host）
-    log("⏳ 等待 RFCOMM 连接建立...")
-    time.sleep(2)  # 额外等待 2 秒确保连接完全建立
-    
-    # 3. 打开设备文件（带重试）
+    # 2. 打开设备文件（带重试，rfcomm bind 后需要时间建立连接）
+    # 注意：rfcomm bind 只是创建绑定，真正的连接在第一次 open() 时发起
     device_path = '/dev/rfcomm0'
     device_fd = None
-    for attempt in range(3):
+    log("⏳ 打开设备文件并建立 RFCOMM 连接...")
+    
+    for attempt in range(10):  # 增加到 10 次重试
         try:
             device_fd = os.open(device_path, os.O_RDWR | os.O_NONBLOCK)
             log(f"✅ 设备文件已打开: {device_path}")
             break
         except OSError as e:
-            if e.errno == 113:  # No route to host
-                log(f"⚠️ 尝试 {attempt + 1}/3: 连接尚未建立，等待 1 秒后重试...")
-                time.sleep(1)
+            if e.errno == 113:  # No route to host - 设备尚未准备好
+                log(f"⚠️ 尝试 {attempt + 1}/10: 设备尚未准备好，等待 2 秒后重试...")
+                time.sleep(2)  # 增加到 2 秒
             else:
+                log(f"❌ 打开设备文件失败: {e}")
                 raise
     
     if device_fd is None:
