@@ -193,11 +193,10 @@ def stdin_to_bt(sock, alive):
             try:
                 data = sys.stdin.buffer.read(4096)
             except (OSError, IOError):
-                data = None
+                continue
             if not data:
-                log("stdin 关闭（Dart 退出）")
-                alive.clear()
-                break
+                # stdin 暂时无数据，继续等待（不退出）
+                continue
 
             n += 1
             total += len(data)
