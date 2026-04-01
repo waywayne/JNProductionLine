@@ -1,0 +1,510 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import '../models/log_state.dart';
+import 'gtp_protocol.dart';
+
+/// 方案三: 稳定 RFCOMM SPP 连接
+/// 使用 rfcomm_stable.py — 原始 AF_BLUETOOTH socket，连上就不断开
+class StableRfcommService {
+  Process? _bridgeProcess;
+  StreamSubscription<List<int>>? _readSubscription;
+  StreamSubscription<String>? _stderrSubscription;
+
+  final StreamController<Uint8List> _dataController =
+      StreamController<Uint8List>.broadcast();
+  final StreamController<String> _logController =
+      StreamController<String>.broadcast();
+
+  bool _isDisposed = false;
+
+  String? _currentDeviceAddress;
+  String? _currentDeviceName;
+  int? _currentChannel;
+  bool _isConnected = false;
+  LogState? _logState;
+
+  // GTP 缓冲区
+  final List<int> _gtpBuffer = [];
+  int _fragmentCount = 0;
+  int _packetCount = 0;
+
+  // 待处理的响应
+  final Map<int, Completer<Map<String, dynamic>?>> _pendingResponses = {};
+  int _sequenceNumber = 0;
+
+  // 统计信息
+  int _totalBytesReceived = 0;
+  int _totalBytesSent = 0;
+
+  void setLogState(LogState? logState) {
+    _logState = logState;
+  }
+
+  bool get isConnected => _isConnected;
+  String? get currentDeviceAddress => _currentDeviceAddress;
+  String? get currentDeviceName => _currentDeviceName;
+  int? get currentChannel => _currentChannel;
+  Stream<Uint8List> get dataStream => _dataController.stream;
+  Stream<String> get logStream => _logController.stream;
+  int get bufferSize => _gtpBuffer.length;
+  int get fragmentCount => _fragmentCount;
+  int get packetCount => _packetCount;
+  int get totalBytesReceived => _totalBytesReceived;
+  int get totalBytesSent => _totalBytesSent;
+
+  void _log(String message) {
+    final timestamp = DateTime.now().toString().substring(11, 19);
+    final logMessage = '[$timestamp] $message';
+    _logState?.info(logMessage);
+    if (!_isDisposed && !_logController.isClosed) {
+      _logController.add(logMessage);
+    }
+  }
+
+  void _logError(String message) {
+    final timestamp = DateTime.now().toString().substring(11, 19);
+    final logMessage = '[$timestamp] ❌ $message';
+    _logState?.error(logMessage);
+    if (!_isDisposed && !_logController.isClosed) {
+      _logController.add(logMessage);
+    }
+  }
+
+  void _logSuccess(String message) {
+    final timestamp = DateTime.now().toString().substring(11, 19);
+    final logMessage = '[$timestamp] ✅ $message';
+    _logState?.success(logMessage);
+    if (!_isDisposed && !_logController.isClosed) {
+      _logController.add(logMessage);
+    }
+  }
+
+  /// 获取脚本路径
+  String _getScriptPath() {
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
+    final candidates = [
+      '$executableDir/scripts/rfcomm_stable.py',
+      '${Directory.current.path}/scripts/rfcomm_stable.py',
+      '/opt/jn-production-line/scripts/rfcomm_stable.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_stable.py',
+    ];
+
+    for (final path in candidates) {
+      if (File(path).existsSync()) {
+        return path;
+      }
+    }
+
+    return '${Directory.current.path}/scripts/rfcomm_stable.py';
+  }
+
+  /// 连接设备
+  Future<bool> connect(String macAddress,
+      {String? deviceName, int channel = 5}) async {
+    if (_isConnected) {
+      _log('⚠️ 已连接，先断开...');
+      await disconnect();
+    }
+
+    _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _log('🔗 开始连接 (稳定 SPP 模式)');
+    _log('   MAC: $macAddress');
+    _log('   Channel: $channel');
+    if (deviceName != null) {
+      _log('   Name: $deviceName');
+    }
+    _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    try {
+      final scriptPath = _getScriptPath();
+      _log('📜 脚本: $scriptPath');
+
+      if (!File(scriptPath).existsSync()) {
+        _logError('脚本文件不存在: $scriptPath');
+        return false;
+      }
+
+      _log('🚀 启动稳定 SPP 桥接...');
+      final process = await Process.start(
+        'python3',
+        ['-u', scriptPath, macAddress, channel.toString()],
+        environment: {'PYTHONUNBUFFERED': '1'},
+      );
+
+      _bridgeProcess = process;
+
+      // 监听 stdout（数据流）
+      _readSubscription = process.stdout.listen(
+        (data) {
+          if (data.isNotEmpty) {
+            _onDataReceived(Uint8List.fromList(data));
+          }
+        },
+        onError: (error) {
+          _logError('数据接收错误: $error');
+        },
+        onDone: () {
+          _log('⚠️ 数据流结束');
+          if (_isConnected) {
+            _isConnected = false;
+            _log('📴 连接已断开');
+          }
+        },
+      );
+
+      // 监听 stderr（日志 + 连接状态检测）
+      bool connectionReady = false;
+      _stderrSubscription = process.stderr
+          .transform(const SystemEncoding().decoder)
+          .listen((msg) {
+        for (final line in msg.split('\n')) {
+          final trimmed = line.trim();
+          if (trimmed.isNotEmpty) {
+            _log('[Python] $trimmed');
+            if (trimmed.contains('连接已建立') || trimmed.contains('连接成功')) {
+              connectionReady = true;
+            }
+          }
+        }
+      });
+
+      // 监听进程退出
+      process.exitCode.then((code) {
+        _log('⚠️ Python 进程退出 (退出码: $code)');
+        if (_isConnected) {
+          _isConnected = false;
+        }
+      });
+
+      // 等待连接建立（最多 30 秒，因为有 5 次重试每次 15 秒超时）
+      _log('⏳ 等待连接建立...');
+      bool processExited = false;
+      process.exitCode.then((_) => processExited = true);
+
+      for (int i = 0; i < 60; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (connectionReady) break;
+        if (processExited) {
+          _logError('桥接进程已退出，连接失败');
+          _bridgeProcess = null;
+          return false;
+        }
+      }
+
+      if (!connectionReady && !processExited) {
+        _logError('连接超时');
+        await disconnect();
+        return false;
+      }
+
+      if (processExited) {
+        _logError('桥接进程已退出，连接失败');
+        _bridgeProcess = null;
+        return false;
+      }
+
+      _currentDeviceAddress = macAddress;
+      _currentDeviceName = deviceName;
+      _currentChannel = channel;
+      _isConnected = true;
+      _sequenceNumber = 0;
+      _gtpBuffer.clear();
+      _packetCount = 0;
+      _fragmentCount = 0;
+      _pendingResponses.clear();
+
+      _logSuccess('连接成功 (稳定 SPP 模式)');
+      _log('   连接将保持直到手动断开');
+      _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      return true;
+    } catch (e) {
+      _logError('连接失败: $e');
+      await disconnect();
+      return false;
+    }
+  }
+
+  /// 处理接收到的数据
+  void _onDataReceived(Uint8List data) {
+    _fragmentCount++;
+    _totalBytesReceived += data.length;
+
+    final hexStr = data
+        .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+        .join(' ');
+    _log('📥 接收 #$_fragmentCount [${data.length}字节]: $hexStr');
+
+    if (!_isDisposed && !_dataController.isClosed) {
+      _dataController.add(data);
+    }
+
+    _gtpBuffer.addAll(data);
+    _processGtpBuffer();
+  }
+
+  /// 处理 GTP 缓冲区
+  void _processGtpBuffer() {
+    while (_gtpBuffer.length >= 4) {
+      int preambleIndex = -1;
+      for (int i = 0; i <= _gtpBuffer.length - 4; i++) {
+        if (_gtpBuffer[i] == 0xD0 &&
+            _gtpBuffer[i + 1] == 0xD2 &&
+            _gtpBuffer[i + 2] == 0xC5 &&
+            _gtpBuffer[i + 3] == 0xC2) {
+          preambleIndex = i;
+          break;
+        }
+      }
+
+      if (preambleIndex == -1) {
+        if (_gtpBuffer.length > 500) {
+          _log('⚠️ 缓冲区过大且未找到 GTP 前导码，清空');
+          _gtpBuffer.clear();
+          _fragmentCount = 0;
+        }
+        break;
+      }
+
+      if (preambleIndex > 0) {
+        _log('⚠️ 跳过 $preambleIndex 字节垃圾数据');
+        _gtpBuffer.removeRange(0, preambleIndex);
+      }
+
+      if (_gtpBuffer.length < 7) break;
+
+      final gtpLength = _gtpBuffer[5] | (_gtpBuffer[6] << 8);
+      final totalLength = 4 + gtpLength;
+
+      if (_gtpBuffer.length < totalLength) {
+        _log('⏳ 等待更多数据 (需要: $totalLength, 当前: ${_gtpBuffer.length})');
+        break;
+      }
+
+      final gtpPacket =
+          Uint8List.fromList(_gtpBuffer.sublist(0, totalLength));
+      _gtpBuffer.removeRange(0, totalLength);
+      _packetCount++;
+      _fragmentCount = 0;
+
+      _processGtpPacket(gtpPacket);
+    }
+  }
+
+  /// 处理完整的 GTP 数据包
+  void _processGtpPacket(Uint8List packet) {
+    final hexStr = packet
+        .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+        .join(' ');
+    _logSuccess('📦 GTP #$_packetCount [${packet.length}字节]: $hexStr');
+
+    final parsedGTP =
+        GTPProtocol.parseGTPResponse(packet, skipCrcVerify: true);
+
+    if (parsedGTP == null || parsedGTP.containsKey('error')) {
+      _logError('GTP 解析失败');
+      return;
+    }
+
+    if (parsedGTP.containsKey('moduleId')) {
+      _log('   ModuleID=0x${(parsedGTP['moduleId'] as int).toRadixString(16).padLeft(4, '0').toUpperCase()}, '
+          'MessageID=0x${(parsedGTP['messageId'] as int).toRadixString(16).padLeft(4, '0').toUpperCase()}, '
+          'Result=${parsedGTP['result']}, SN=${parsedGTP['sn']}');
+    }
+
+    final responseSN = parsedGTP['sn'] as int?;
+    if (responseSN != null &&
+        _pendingResponses.containsKey(responseSN)) {
+      final completer = _pendingResponses[responseSN];
+      if (!completer!.isCompleted) {
+        completer.complete({
+          'rawBytes': packet,
+          'payload': parsedGTP['payload'] ?? Uint8List(0),
+          'timestamp': DateTime.now(),
+          'moduleId': parsedGTP['moduleId'],
+          'messageId': parsedGTP['messageId'],
+          'sn': parsedGTP['sn'],
+          'result': parsedGTP['result'],
+        });
+        _pendingResponses.remove(responseSN);
+        _logSuccess('响应匹配 SN: $responseSN');
+      }
+    } else if (_pendingResponses.isNotEmpty) {
+      final firstKey = _pendingResponses.keys.first;
+      final completer = _pendingResponses[firstKey];
+      if (!completer!.isCompleted) {
+        completer.complete({
+          'rawBytes': packet,
+          'payload': parsedGTP['payload'] ?? Uint8List(0),
+          'timestamp': DateTime.now(),
+          'moduleId': parsedGTP['moduleId'],
+          'messageId': parsedGTP['messageId'],
+          'sn': parsedGTP['sn'],
+          'result': parsedGTP['result'],
+        });
+        _pendingResponses.remove(firstKey);
+        _log('⚠️ 响应 SN 不匹配，使用第一个待处理请求');
+      }
+    }
+  }
+
+  /// 发送原始数据
+  Future<bool> sendRawData(Uint8List data) async {
+    if (!_isConnected || _bridgeProcess == null) {
+      _logError('未连接，无法发送');
+      return false;
+    }
+
+    try {
+      final hexStr = data
+          .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+          .join(' ');
+      _log('📤 发送 [${data.length}字节]: $hexStr');
+
+      _bridgeProcess!.stdin.add(data);
+      await _bridgeProcess!.stdin.flush();
+
+      _totalBytesSent += data.length;
+      _logSuccess('发送完成');
+      return true;
+    } catch (e) {
+      _logError('发送失败: $e');
+      return false;
+    }
+  }
+
+  /// 发送 GTP 命令并等待响应
+  Future<Map<String, dynamic>?> sendCommandAndWaitResponse(
+    Uint8List payload, {
+    int? moduleId,
+    int? messageId,
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    if (!_isConnected) {
+      _logError('未连接，无法发送命令');
+      return {'error': 'Not connected'};
+    }
+
+    _sequenceNumber = (_sequenceNumber + 1) % 65536;
+    final seqNum = _sequenceNumber;
+
+    final gtpPacket = GTPProtocol.buildGTPPacket(
+      payload,
+      moduleId: moduleId ?? 0x0006,
+      messageId: messageId ?? 0xFF01,
+      sequenceNumber: seqNum,
+    );
+
+    final hexStr = gtpPacket
+        .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+        .join(' ');
+    _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _log('📦 发送 GTP 命令');
+    _log('   SN: $seqNum');
+    _log('   ModuleID: 0x${(moduleId ?? 0x0006).toRadixString(16).padLeft(4, '0').toUpperCase()}');
+    _log('   MessageID: 0x${(messageId ?? 0xFF01).toRadixString(16).padLeft(4, '0').toUpperCase()}');
+    _log('   Payload: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+    _log('   完整包: $hexStr');
+    _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    final completer = Completer<Map<String, dynamic>?>();
+    _pendingResponses[seqNum] = completer;
+
+    if (!await sendRawData(gtpPacket)) {
+      _pendingResponses.remove(seqNum);
+      return {'error': 'Send failed'};
+    }
+
+    try {
+      final response = await completer.future.timeout(
+        timeout,
+        onTimeout: () {
+          _pendingResponses.remove(seqNum);
+          _logError('响应超时 (${timeout.inSeconds}秒)');
+
+          if (_gtpBuffer.isNotEmpty) {
+            final bufferData = Uint8List.fromList(_gtpBuffer);
+            _gtpBuffer.clear();
+            _log('⚠️ 超时时缓冲区有 ${bufferData.length} 字节数据');
+            return {
+              'rawBytes': bufferData,
+              'payload': bufferData,
+              'timestamp': DateTime.now(),
+              'raw': true,
+              'warning': '响应超时，返回缓冲区数据',
+            };
+          }
+
+          return {'error': 'Timeout'};
+        },
+      );
+
+      return response;
+    } catch (e) {
+      _pendingResponses.remove(seqNum);
+      _logError('等待响应异常: $e');
+      return {'error': e.toString()};
+    }
+  }
+
+  void clearBuffer() {
+    _gtpBuffer.clear();
+    _fragmentCount = 0;
+    _log('🗑️ 缓冲区已清空');
+  }
+
+  void resetStats() {
+    _totalBytesReceived = 0;
+    _totalBytesSent = 0;
+    _packetCount = 0;
+    _fragmentCount = 0;
+    _log('📊 统计已重置');
+  }
+
+  /// 断开连接
+  Future<void> disconnect() async {
+    _log('🔌 断开连接...');
+
+    _readSubscription?.cancel();
+    _readSubscription = null;
+    _stderrSubscription?.cancel();
+    _stderrSubscription = null;
+
+    if (_bridgeProcess != null) {
+      try {
+        _bridgeProcess!.kill(ProcessSignal.sigterm);
+        await _bridgeProcess!.exitCode.timeout(
+          const Duration(seconds: 3),
+          onTimeout: () {
+            _bridgeProcess?.kill(ProcessSignal.sigkill);
+            return -1;
+          },
+        );
+      } catch (_) {}
+      _bridgeProcess = null;
+    }
+
+    for (final completer in _pendingResponses.values) {
+      if (!completer.isCompleted) {
+        completer.complete({'error': 'Disconnected'});
+      }
+    }
+    _pendingResponses.clear();
+
+    _currentDeviceAddress = null;
+    _currentDeviceName = null;
+    _currentChannel = null;
+    _isConnected = false;
+
+    _logSuccess('已断开连接');
+  }
+
+  void dispose() {
+    _isDisposed = true;
+    disconnect();
+    _dataController.close();
+    _logController.close();
+  }
+}
