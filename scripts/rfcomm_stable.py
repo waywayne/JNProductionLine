@@ -29,8 +29,8 @@ import errno
 # === 常量 ===
 AF_BLUETOOTH = 31
 BTPROTO_RFCOMM = 3
-CONNECT_TIMEOUT = 15
-MAX_RETRIES = 5
+CONNECT_TIMEOUT = 20
+MAX_RETRIES = 10
 
 # === 全局状态 ===
 _alive = threading.Event()
@@ -42,54 +42,26 @@ def log(msg):
     print(f"[{ts}] [SPP-STABLE] {msg}", file=sys.stderr, flush=True)
 
 
-def disconnect_acl(mac):
-    """断开已有的 ACL 连接，解决 Errno 52 (Invalid exchange)
-    
-    Errno 52 的原因：设备已有 BLE/GATT 的 ACL 连接，与 RFCOMM 冲突。
-    必须先用 hcitool dc 断开 ACL 链路，再建立 RFCOMM 连接。
-    """
-    log(f"🔌 断开 {mac} 已有 ACL 连接...")
-    try:
-        subprocess.run(['hcitool', 'dc', mac],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
-        log(f"   hcitool dc {mac} 完成")
-    except Exception:
-        pass
-    # 也尝试用 bluetoothctl disconnect（某些环境需要）
-    try:
-        subprocess.run(['bluetoothctl', 'disconnect', mac],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
-    except Exception:
-        pass
-    time.sleep(1)
-    log("🔌 ACL 断开完成")
-
-
-def cleanup_all(mac=None):
-    """彻底清理所有 RFCOMM 资源"""
+def cleanup_all():
+    """清理旧的 RFCOMM 进程和绑定"""
     my_pid = os.getpid()
     log(f"🧹 清理 RFCOMM 资源 (PID={my_pid})")
 
-    # 杀死所有旧的 rfcomm 相关 Python 进程
-    for pattern in ['rfcomm_stable', 'rfcomm_socket_simple', 'rfcomm_bind_bridge']:
+    # 只杀死旧的同类 Python 桥接进程（不杀 rfcomm 系统进程）
+    for pattern in ['rfcomm_stable.py', 'rfcomm_socket_simple.py', 'rfcomm_bind_bridge.py']:
         try:
             r = subprocess.run(['pgrep', '-f', pattern],
                                capture_output=True, text=True, timeout=2)
             if r.returncode == 0:
                 for line in r.stdout.strip().split('\n'):
+                    if not line.strip():
+                        continue
                     pid = int(line.strip())
                     if pid != my_pid:
                         os.kill(pid, 9)
                         log(f"   杀死 PID {pid} ({pattern})")
         except Exception:
             pass
-
-    # 杀死 cat 进程
-    try:
-        subprocess.run(['pkill', '-9', 'cat'],
-                       stderr=subprocess.DEVNULL, timeout=2)
-    except Exception:
-        pass
 
     # 释放 rfcomm 绑定
     try:
@@ -98,12 +70,8 @@ def cleanup_all(mac=None):
     except Exception:
         pass
 
-    # 断开已有 ACL 连接（解决 Errno 52）
-    if mac:
-        disconnect_acl(mac)
-
     # 等待内核释放
-    time.sleep(1)
+    time.sleep(0.5)
     log("🧹 清理完成")
 
 
@@ -113,9 +81,37 @@ def create_socket():
     return s
 
 
+def ensure_acl(mac):
+    """确保与设备的 ACL 链路已建立
+    
+    使用 l2ping 或 hcitool cc 来建立 ACL 连接，
+    这样后续 RFCOMM socket.connect() 就不会报 Errno 113。
+    """
+    log(f"🔗 确保 ACL 链路: {mac}")
+    # 方法 1: hcitool cc 创建 ACL 连接
+    try:
+        subprocess.run(['hcitool', 'cc', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=10)
+        log(f"   hcitool cc {mac} 完成")
+        time.sleep(0.5)
+        return
+    except Exception:
+        pass
+    # 方法 2: l2ping 触发 ACL
+    try:
+        subprocess.run(['l2ping', '-c', '1', '-t', '5', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=8)
+        log(f"   l2ping {mac} 完成")
+    except Exception:
+        pass
+
+
 def connect(mac, channel):
     """连接 RFCOMM，带智能重试"""
     last_err = None
+
+    # 连接前确保 ACL 链路已建立
+    ensure_acl(mac)
 
     for attempt in range(1, MAX_RETRIES + 1):
         sock = None
@@ -138,17 +134,17 @@ def connect(mac, channel):
                     pass
 
             err_str = str(e)
-            # Errno 52: Invalid exchange — 已有 ACL 连接冲突
-            if 'Errno 52' in err_str or 'Invalid exchange' in err_str:
-                log("🔄 Errno 52 → 断开已有 ACL 连接后重试")
-                disconnect_acl(mac)
             # Errno 12: 资源不足，重新清理
-            elif 'Errno 12' in err_str or 'Cannot allocate' in err_str:
+            if 'Errno 12' in err_str or 'Cannot allocate' in err_str:
                 log("🔄 Errno 12 → 重新清理资源")
-                cleanup_all(mac)
+                cleanup_all()
+            # Errno 113: No route to host — 重新建立 ACL
+            elif 'Errno 113' in err_str or 'No route to host' in err_str:
+                log("🔄 Errno 113 → 重新建立 ACL 链路")
+                ensure_acl(mac)
             else:
-                # 普通失败，等待后重试
-                wait = min(attempt, 3)
+                # Errno 52 等，等待后重试
+                wait = min(attempt * 2, 5)
                 log(f"   等待 {wait}s 后重试...")
                 time.sleep(wait)
 
@@ -306,8 +302,8 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
-    # 清理资源（包括断开已有 ACL 连接）
-    cleanup_all(mac=mac)
+    # 清理旧的 RFCOMM 资源
+    cleanup_all()
 
     # 连接
     try:

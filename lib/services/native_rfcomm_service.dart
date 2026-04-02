@@ -235,8 +235,8 @@ class NativeRfcommService {
         processExited = true;
       });
       
-      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败，最多 15s）
-      for (int i = 0; i < 30; i++) {
+      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败，最多 240s）
+      for (int i = 0; i < 480; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) {
           _logSuccess('Python 桥接连接已就绪');

@@ -147,9 +147,18 @@ class RfcommBindService {
 
       _bridgeProcess = process;
 
-      // 4. 监听 stderr（Python 日志）
-      process.stderr.transform(const SystemEncoding().decoder).listen((line) {
-        _log('[Python] $line');
+      // 4. 监听 stderr（Python 日志 + 连接状态检测）
+      bool connectionReady = false;
+      process.stderr.transform(const SystemEncoding().decoder).listen((msg) {
+        for (final line in msg.split('\n')) {
+          final trimmed = line.trim();
+          if (trimmed.isNotEmpty) {
+            _log('[Python] $trimmed');
+            if (trimmed.contains('连接已建立') || trimmed.contains('开始数据传输')) {
+              connectionReady = true;
+            }
+          }
+        }
       });
 
       // 5. 监听 stdout（数据流）
@@ -171,13 +180,36 @@ class RfcommBindService {
       );
 
       // 6. 监听进程退出
+      bool processExited = false;
       process.exitCode.then((code) {
         _log('⚠️ rfcomm_bind_bridge.py 进程退出 (退出码: $code)');
+        processExited = true;
         if (_isConnected) disconnect();
       });
 
-      // 7. 等待连接建立
-      await Future.delayed(const Duration(seconds: 2));
+      // 7. 等待连接建立（最多 240 秒）
+      _log('⏳ 等待连接建立...');
+      for (int i = 0; i < 480; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (connectionReady) break;
+        if (processExited) {
+          _logError('桥接进程已退出，连接失败');
+          _bridgeProcess = null;
+          return false;
+        }
+      }
+
+      if (!connectionReady && !processExited) {
+        _logError('连接超时');
+        await disconnect();
+        return false;
+      }
+
+      if (processExited) {
+        _logError('桥接进程已退出，连接失败');
+        _bridgeProcess = null;
+        return false;
+      }
 
       _currentDeviceAddress = macAddress;
       _currentDeviceName = deviceName;

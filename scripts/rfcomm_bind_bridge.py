@@ -18,52 +18,30 @@ def log(message):
     """输出日志到 stderr"""
     print(f"[RFCOMM-BIND] {message}", file=sys.stderr, flush=True)
 
-def disconnect_acl(mac):
-    """断开已有的 ACL 连接，解决 Errno 52 (Invalid exchange)"""
-    log(f"🔌 断开 {mac} 已有 ACL 连接...")
-    try:
-        subprocess.run(['hcitool', 'dc', mac],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
-    except Exception:
-        pass
-    try:
-        subprocess.run(['bluetoothctl', 'disconnect', mac],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
-    except Exception:
-        pass
-    time.sleep(1)
-    log("🔌 ACL 断开完成")
-
-
-def cleanup_rfcomm(mac=None):
-    """彻底清理 RFCOMM 资源"""
+def cleanup_rfcomm():
+    """清理旧的 RFCOMM 进程和绑定"""
     my_pid = os.getpid()
     log(f"🧹 清理 RFCOMM 资源 (PID: {my_pid})")
     
-    # 1. 杀死所有旧的 rfcomm 相关进程（排除自己）
-    try:
-        result = subprocess.run(['pgrep', '-f', 'rfcomm'],
-                              capture_output=True, text=True, timeout=2)
-        if result.returncode == 0:
-            for pid_str in result.stdout.strip().split('\n'):
-                if pid_str and pid_str.strip():
-                    try:
-                        pid = int(pid_str.strip())
-                        if pid != my_pid:
-                            subprocess.run(['kill', '-9', str(pid)], timeout=1)
-                            log(f"   已杀死旧进程 PID: {pid}")
-                    except:
-                        pass
-    except:
-        pass
+    # 1. 只杀死旧的同类 Python 桥接进程
+    for pattern in ['rfcomm_stable.py', 'rfcomm_socket_simple.py', 'rfcomm_bind_bridge.py']:
+        try:
+            result = subprocess.run(['pgrep', '-f', pattern],
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                for pid_str in result.stdout.strip().split('\n'):
+                    if pid_str and pid_str.strip():
+                        try:
+                            pid = int(pid_str.strip())
+                            if pid != my_pid:
+                                subprocess.run(['kill', '-9', str(pid)], timeout=1)
+                                log(f"   杀死 PID {pid} ({pattern})")
+                        except:
+                            pass
+        except:
+            pass
     
-    # 2. 杀死所有 cat 进程
-    try:
-        subprocess.run(['pkill', '-9', 'cat'], stderr=subprocess.DEVNULL, timeout=2)
-    except:
-        pass
-    
-    # 3. 释放所有 rfcomm 绑定
+    # 2. 释放所有 rfcomm 绑定
     try:
         subprocess.run(['sudo', 'rfcomm', 'release', 'all'],
                       stderr=subprocess.DEVNULL, timeout=2)
@@ -71,31 +49,28 @@ def cleanup_rfcomm(mac=None):
     except:
         pass
     
-    # 4. 关闭所有打开的 /dev/rfcomm* 设备文件
-    try:
-        result = subprocess.run(['lsof', '/dev/rfcomm*'],
-                              capture_output=True, text=True, timeout=2)
-        if result.returncode == 0:
-            for line in result.stdout.split('\n')[1:]:
-                parts = line.split()
-                if len(parts) > 1:
-                    try:
-                        pid = int(parts[1])
-                        if pid != my_pid:
-                            subprocess.run(['kill', '-9', str(pid)], timeout=1)
-                            log(f"   已杀死占用设备文件的进程 PID: {pid}")
-                    except:
-                        pass
-    except:
-        pass
-    
-    # 5. 断开已有 ACL 连接（解决 Errno 52）
-    if mac:
-        disconnect_acl(mac)
-    
-    # 6. 等待内核完全释放资源
-    time.sleep(1)
+    # 3. 等待内核释放
+    time.sleep(0.5)
     log("🧹 清理完成")
+
+
+def ensure_acl(mac):
+    """确保与设备的 ACL 链路已建立"""
+    log(f"🔗 确保 ACL 链路: {mac}")
+    try:
+        subprocess.run(['hcitool', 'cc', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=10)
+        log(f"   hcitool cc {mac} 完成")
+        time.sleep(0.5)
+        return
+    except Exception:
+        pass
+    try:
+        subprocess.run(['l2ping', '-c', '1', '-t', '5', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=8)
+        log(f"   l2ping {mac} 完成")
+    except Exception:
+        pass
 
 def setup_rfcomm_bind(mac_address, channel):
     """使用 rfcomm bind 创建设备文件"""
@@ -103,9 +78,12 @@ def setup_rfcomm_bind(mac_address, channel):
     log(f"  MAC: {mac_address}")
     log(f"  通道: {channel}")
     
-    # 1. 清理旧的绑定（包括断开已有 ACL）
-    cleanup_rfcomm(mac=mac_address)
+    # 1. 清理旧的绑定
+    cleanup_rfcomm()
     time.sleep(0.5)
+    
+    # 1.5. 确保 ACL 链路已建立
+    ensure_acl(mac_address)
     
     # 2. 绑定设备
     try:
@@ -346,19 +324,22 @@ def main():
     device_fd = None
     log("⏳ 打开设备文件并建立 RFCOMM 连接...")
     
-    for attempt in range(10):  # 增加到 10 次重试
+    max_open_retries = 20
+    for attempt in range(max_open_retries):
         try:
             device_fd = os.open(device_path, os.O_RDWR | os.O_NONBLOCK)
             log(f"✅ 设备文件已打开: {device_path}")
             break
         except OSError as e:
             if e.errno == 113:  # No route to host - 设备尚未准备好
-                log(f"⚠️ 尝试 {attempt + 1}/10: 设备尚未准备好 (Errno 113)，等待 2 秒后重试...")
-                time.sleep(2)
-            elif e.errno == 52:  # Invalid exchange - ACL 冲突
-                log(f"⚠️ 尝试 {attempt + 1}/10: ACL 冲突 (Errno 52)，断开后重试...")
-                disconnect_acl(mac_address)
-                time.sleep(1)
+                log(f"⚠️ 尝试 {attempt + 1}/{max_open_retries}: Errno 113 (No route)，重建 ACL...")
+                if attempt % 3 == 0:
+                    ensure_acl(mac_address)
+                else:
+                    time.sleep(2)
+            elif e.errno == 52:  # Invalid exchange
+                log(f"⚠️ 尝试 {attempt + 1}/{max_open_retries}: Errno 52，等待 3 秒后重试...")
+                time.sleep(3)
             else:
                 log(f"❌ 打开设备文件失败: {e}")
                 raise

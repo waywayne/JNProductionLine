@@ -178,12 +178,12 @@ class StableRfcommService {
         }
       });
 
-      // 等待连接建立（最多 30 秒，因为有 5 次重试每次 15 秒超时）
+      // 等待连接建立（最多 240 秒，因为有 10 次重试每次 20 秒超时 + ACL 建立）
       _log('⏳ 等待连接建立...');
       bool processExited = false;
       process.exitCode.then((_) => processExited = true);
 
-      for (int i = 0; i < 60; i++) {
+      for (int i = 0; i < 480; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) break;
         if (processExited) {
