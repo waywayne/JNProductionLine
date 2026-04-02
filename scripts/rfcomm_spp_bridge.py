@@ -62,7 +62,9 @@ _mainloop = None
 # =============================================
 
 PROFILE_PATH = "/org/bluez/spp_profile"
-SPP_UUID = "00007033-0000-1000-8000-00805f9b34fb"  # 设备自定义 SPP UUID (7033)
+PROFILE_PATH_STD = "/org/bluez/spp_profile_std"
+SPP_UUID_7033 = "00007033-0000-1000-8000-00805f9b34fb"  # 设备自定义 SPP UUID (7033)
+SPP_UUID_1101 = "00001101-0000-1000-8000-00805f9b34fb"  # 标准 SPP UUID
 
 if HAS_DBUS:
     class SppProfile(dbus.service.Object):
@@ -94,7 +96,7 @@ if HAS_DBUS:
 
 
 def register_spp_profile():
-    """在 BlueZ 中注册 SPP Profile"""
+    """在 BlueZ 中注册 SPP Profile（同时注册 7033 和 1101 两个 UUID）"""
     if not HAS_DBUS:
         return None
     try:
@@ -106,8 +108,6 @@ def register_spp_profile():
             "org.bluez.ProfileManager1"
         )
 
-        profile = SppProfile(bus, PROFILE_PATH)
-
         opts = {
             "Name": dbus.String("SPP Bridge"),
             "Role": dbus.String("client"),
@@ -116,9 +116,22 @@ def register_spp_profile():
             "AutoConnect": dbus.Boolean(True),
         }
 
-        # 注册标准 SPP UUID
-        manager.RegisterProfile(PROFILE_PATH, SPP_UUID, opts)
-        log(f"✅ SPP Profile 已注册 (UUID: {SPP_UUID})")
+        # 注册自定义 UUID 7033
+        profile_7033 = SppProfile(bus, PROFILE_PATH)
+        try:
+            manager.RegisterProfile(PROFILE_PATH, SPP_UUID_7033, opts)
+            log(f"✅ Profile 已注册 (UUID: {SPP_UUID_7033})")
+        except Exception as e:
+            log(f"⚠️ 注册 7033 失败: {e}")
+
+        # 注册标准 SPP UUID 1101
+        profile_1101 = SppProfile(bus, PROFILE_PATH_STD)
+        try:
+            manager.RegisterProfile(PROFILE_PATH_STD, SPP_UUID_1101, opts)
+            log(f"✅ Profile 已注册 (UUID: {SPP_UUID_1101})")
+        except Exception as e:
+            log(f"⚠️ 注册 1101 失败: {e}")
+
         return bus
     except Exception as e:
         log(f"⚠️ 注册 Profile 失败: {e}")
@@ -193,9 +206,19 @@ def dbus_connect(mac, timeout=30):
                     pass
 
             # 用 ConnectProfile 指定 UUID — 强制走 BR/EDR RFCOMM
-            log(f"   📡 D-Bus ConnectProfile({SPP_UUID}) ...")
-            device.ConnectProfile(SPP_UUID)
-            log(f"   ConnectProfile 调用成功，等待 NewConnection ...")
+            # 尝试两个 UUID: 先 7033，再 1101
+            cp_ok = False
+            for uuid in [SPP_UUID_7033, SPP_UUID_1101]:
+                try:
+                    log(f"   📡 D-Bus ConnectProfile({uuid}) ...")
+                    device.ConnectProfile(uuid)
+                    log(f"   ConnectProfile({uuid}) 调用成功")
+                    cp_ok = True
+                    break
+                except dbus.exceptions.DBusException as ce:
+                    log(f"   ConnectProfile({uuid}): {str(ce)[:150]}")
+            if not cp_ok:
+                log(f"   ⚠️ 两个 UUID 的 ConnectProfile 都失败")
 
         except dbus.exceptions.DBusException as e:
             err_msg = str(e)
@@ -229,7 +252,175 @@ def dbus_connect(mac, timeout=30):
 
 
 # =============================================
-# 方案 B: 回退方案 - bluetoothctl connect + RFCOMM socket
+# 方案 B: rfcomm bind + connect 方式
+# 最传统可靠的 Linux RFCOMM 连接方式
+# =============================================
+
+def sdp_find_channel(mac, target_uuid='7033'):
+    """SDP 查询通道号"""
+    channels = []
+    try:
+        r = subprocess.run(
+            ['sdptool', 'browse', mac],
+            capture_output=True, text=True, timeout=15
+        )
+        if r.stdout:
+            blocks = r.stdout.split('Service Name:')
+            for block in blocks:
+                if target_uuid.lower() in block.lower() or target_uuid.upper() in block.upper():
+                    for line in block.split('\n'):
+                        if 'Channel:' in line:
+                            try:
+                                ch = int(line.split('Channel:')[1].strip())
+                                if ch not in channels:
+                                    channels.append(ch)
+                                    log(f"   SDP: UUID {target_uuid} → CH{ch}")
+                            except ValueError:
+                                pass
+            if not channels:
+                for block in blocks:
+                    if 'Serial Port' in block:
+                        for line in block.split('\n'):
+                            if 'Channel:' in line:
+                                try:
+                                    ch = int(line.split('Channel:')[1].strip())
+                                    if ch not in channels:
+                                        channels.append(ch)
+                                except ValueError:
+                                    pass
+    except Exception as e:
+        log(f"   ⚠️ SDP 查询失败: {e}")
+    return channels
+
+
+def rfcomm_bind_connect(mac, channel):
+    """方案 B: rfcomm bind → bluetoothctl connect → rfcomm connect → open /dev/rfcomm0
+    这是 Linux 上最传统、最可靠的 RFCOMM 连接方式。
+    """
+    global _fd, _fd_is_socket
+
+    log("📡 方案 B: rfcomm bind + connect")
+
+    # 确保蓝牙适配器开启
+    try:
+        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+    except Exception:
+        pass
+
+    # 确保配对和信任
+    try:
+        r = subprocess.run(['bluetoothctl', 'info', mac],
+                           capture_output=True, text=True, timeout=5)
+        if 'Paired: yes' not in r.stdout:
+            log("   设备未配对，尝试配对...")
+            subprocess.run(['bluetoothctl', 'pair', mac],
+                           capture_output=True, text=True, timeout=15)
+        subprocess.run(['bluetoothctl', 'trust', mac],
+                       capture_output=True, text=True, timeout=5)
+    except Exception:
+        pass
+
+    for attempt in range(1, 4):
+        log(f"🔗 === 第 {attempt}/3 轮 rfcomm bind 连接 {mac} ===")
+
+        # 清理 /dev/rfcomm0
+        try:
+            subprocess.run(['sudo', 'rfcomm', 'release', '0'],
+                           stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+        except Exception:
+            pass
+        try:
+            subprocess.run(['sudo', 'pkill', '-9', '-f', 'rfcomm connect'],
+                           stderr=subprocess.DEVNULL, timeout=2)
+        except Exception:
+            pass
+        time.sleep(0.3)
+
+        # SDP 查询通道（第一轮）
+        if attempt == 1:
+            sdp_channels = sdp_find_channel(mac)
+
+        # 候选通道
+        candidates = list(sdp_channels) if sdp_channels else []
+        if channel not in candidates:
+            candidates.append(channel)
+        for ch in [1, 2, 3, 4, 5, 6]:
+            if ch not in candidates:
+                candidates.append(ch)
+
+        log(f"📋 候选通道: {candidates}")
+
+        for ch in candidates:
+            retries = 2 if ch in (sdp_channels if sdp_channels else []) else 1
+            for retry in range(1, retries + 1):
+                log(f"   📡 rfcomm connect /dev/rfcomm0 {mac} CH{ch} (第{retry}/{retries}次)")
+
+                # 先释放
+                try:
+                    subprocess.run(['sudo', 'rfcomm', 'release', '0'],
+                                   stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=2)
+                except Exception:
+                    pass
+                time.sleep(0.2)
+
+                # rfcomm connect 在后台运行（它会阻塞直到连接断开）
+                rfcomm_proc = None
+                try:
+                    rfcomm_proc = subprocess.Popen(
+                        ['sudo', 'rfcomm', 'connect', '0', mac, str(ch)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                except Exception as e:
+                    log(f"   ⚠️ rfcomm connect 启动失败: {e}")
+                    continue
+
+                # 等待 /dev/rfcomm0 出现
+                dev_path = '/dev/rfcomm0'
+                opened = False
+                for wait in range(30):  # 最多等 6 秒
+                    time.sleep(0.2)
+
+                    # 检查进程是否已退出（失败）
+                    if rfcomm_proc.poll() is not None:
+                        stderr_out = rfcomm_proc.stderr.read().decode('utf-8', errors='replace')
+                        log(f"   ⚠️ rfcomm connect 已退出: {stderr_out.strip()[:200]}")
+                        break
+
+                    if os.path.exists(dev_path):
+                        try:
+                            fd = os.open(dev_path, os.O_RDWR | os.O_NONBLOCK)
+                            _fd = fd
+                            _fd_is_socket = False
+                            _fd_ready.set()
+                            log(f"   ✅ /dev/rfcomm0 已打开! fd={fd}")
+                            opened = True
+                            break
+                        except OSError as e:
+                            log(f"   ⚠️ 打开 {dev_path} 失败: {e}")
+                            continue
+
+                if opened:
+                    return True
+
+                # 清理失败的 rfcomm connect
+                if rfcomm_proc and rfcomm_proc.poll() is None:
+                    try:
+                        rfcomm_proc.kill()
+                    except Exception:
+                        pass
+
+                if retry < retries:
+                    time.sleep(1)
+
+        time.sleep(2)
+
+    return False
+
+
+# =============================================
+# 方案 C: 回退方案 - bluetoothctl connect + RFCOMM socket
 # 设置 BT_SECURITY_LOW 尝试绕过安全限制
 # =============================================
 
@@ -264,10 +455,10 @@ def socket_connect(mac, channel, timeout=10):
 
 
 def fallback_connect(mac, channel):
-    """回退方案：bluetoothctl connect + RFCOMM socket + BT_SECURITY_LOW"""
+    """方案 C 回退：bluetoothctl connect + RFCOMM socket + BT_SECURITY_LOW"""
     global _fd, _fd_is_socket
 
-    log("📡 回退方案: bluetoothctl connect + RFCOMM socket (BT_SECURITY_LOW)")
+    log("📡 方案 C: bluetoothctl connect + RFCOMM socket (BT_SECURITY_LOW)")
 
     # 确保蓝牙适配器开启
     try:
@@ -561,7 +752,7 @@ def main():
     ch = int(sys.argv[2])
 
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    log("SPP 桥接 (BlueZ D-Bus Profile + 回退)")
+    log("SPP 桥接 (D-Bus Profile / rfcomm bind / socket 三方案)")
     log(f"  MAC: {mac}")
     log(f"  默认通道: {ch}")
     log(f"  D-Bus 可用: {HAS_DBUS}")
@@ -585,11 +776,17 @@ def main():
         log("📡 尝试方案 A: BlueZ D-Bus Profile API")
         connected = dbus_connect(mac, timeout=15)
 
-    # 方案 B: 回退到 bluetoothctl connect + RFCOMM socket (BT_SECURITY_LOW)
+    # 方案 B: rfcomm bind + connect
     if not connected:
         if HAS_DBUS:
-            log("⚠️ D-Bus Profile 未成功，回退到方案 B")
-        log("📡 尝试方案 B: bluetoothctl + RFCOMM socket (BT_SECURITY_LOW)")
+            log("⚠️ D-Bus Profile 未成功，尝试方案 B")
+        log("📡 尝试方案 B: rfcomm bind + connect")
+        connected = rfcomm_bind_connect(mac, ch)
+
+    # 方案 C: 回退到 bluetoothctl connect + RFCOMM socket (BT_SECURITY_LOW)
+    if not connected:
+        log("⚠️ 方案 B 未成功，尝试方案 C")
+        log("📡 尝试方案 C: bluetoothctl + RFCOMM socket (BT_SECURITY_LOW)")
         connected = fallback_connect(mac, ch)
 
     if not connected:
