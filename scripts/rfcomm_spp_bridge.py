@@ -62,7 +62,7 @@ _mainloop = None
 # =============================================
 
 PROFILE_PATH = "/org/bluez/spp_profile"
-SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb"  # 标准 SPP UUID
+SPP_UUID = "00007033-0000-1000-8000-00805f9b34fb"  # 设备自定义 SPP UUID (7033)
 
 if HAS_DBUS:
     class SppProfile(dbus.service.Object):
