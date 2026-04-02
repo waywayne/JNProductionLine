@@ -128,24 +128,172 @@ def bt_connect(mac, timeout=15):
         return False
 
 
-def start_rfcomm_connect(mac, channel, dev='/dev/rfcomm0'):
+def sdp_find_spp_channel(mac, target_uuid='7033'):
+    """通过 SDP 查询设备上 UUID 包含 target_uuid 的 SPP 服务的 RFCOMM 通道号。
+    返回通道号列表（可能有多个），失败返回空列表。
     """
-    先用 bluetoothctl 建立 ACL，再用 rfcomm connect 建立 RFCOMM 连接。
-    包含重试逻辑：最多 5 次。
+    log(f"🔍 SDP 查询 {mac}，目标 UUID: {target_uuid}")
+
+    channels = []
+
+    # 方法1: sdptool browse
+    try:
+        r = subprocess.run(
+            ['sdptool', 'browse', mac],
+            capture_output=True, text=True, timeout=15
+        )
+        output = r.stdout
+        if output:
+            log(f"   sdptool browse 返回 {len(output)} 字节")
+            # 按 Service 块分割
+            blocks = output.split('Service Name:')
+            for block in blocks:
+                # 查找包含目标 UUID 的块
+                if target_uuid.lower() in block.lower() or target_uuid.upper() in block.upper():
+                    # 提取 Channel
+                    for line in block.split('\n'):
+                        if 'Channel:' in line:
+                            try:
+                                ch = int(line.split('Channel:')[1].strip())
+                                log(f"   ✅ SDP 找到: UUID 含 {target_uuid} → CH{ch}")
+                                channels.append(ch)
+                            except ValueError:
+                                pass
+            # 如果没找到目标 UUID，尝试查找所有 Serial Port 服务
+            if not channels:
+                for block in blocks:
+                    if 'Serial Port' in block or 'serial' in block.lower():
+                        for line in block.split('\n'):
+                            if 'Channel:' in line:
+                                try:
+                                    ch = int(line.split('Channel:')[1].strip())
+                                    log(f"   📋 SDP Serial Port → CH{ch}")
+                                    channels.append(ch)
+                                except ValueError:
+                                    pass
+            # 如果还是没有，提取所有 RFCOMM 通道
+            if not channels:
+                for line in output.split('\n'):
+                    if 'Channel:' in line:
+                        try:
+                            ch = int(line.split('Channel:')[1].strip())
+                            if ch not in channels:
+                                channels.append(ch)
+                        except ValueError:
+                            pass
+                if channels:
+                    log(f"   📋 SDP 所有通道: {channels}")
+    except subprocess.TimeoutExpired:
+        log(f"   ⚠️ sdptool browse 超时")
+    except Exception as e:
+        log(f"   ⚠️ sdptool browse 失败: {e}")
+
+    # 方法2: sdptool search SP（如果方法1没结果）
+    if not channels:
+        try:
+            r = subprocess.run(
+                ['sdptool', 'search', '--bdaddr', mac, 'SP'],
+                capture_output=True, text=True, timeout=15
+            )
+            output = r.stdout
+            if output:
+                for line in output.split('\n'):
+                    if 'Channel:' in line:
+                        try:
+                            ch = int(line.split('Channel:')[1].strip())
+                            if ch not in channels:
+                                channels.append(ch)
+                                log(f"   📋 sdptool search SP → CH{ch}")
+                        except ValueError:
+                            pass
+        except Exception as e:
+            log(f"   ⚠️ sdptool search 失败: {e}")
+
+    if channels:
+        log(f"🔍 SDP 发现通道: {channels}")
+    else:
+        log(f"⚠️ SDP 未发现任何 RFCOMM 通道")
+
+    return channels
+
+
+def try_rfcomm_connect(mac, channel, dev='/dev/rfcomm0'):
+    """尝试用指定通道号做 rfcomm connect。
+    成功（进程存活）返回 True，失败返回 False。
     """
     global _rfcomm_proc
 
-    max_retries = 5
-    for attempt in range(1, max_retries + 1):
-        log(f"🔗 [尝试 {attempt}/{max_retries}] 连接 {mac} CH{channel}")
+    # 释放之前残留的绑定
+    try:
+        subprocess.run(['sudo', 'rfcomm', 'release', 'all'],
+                       stderr=subprocess.DEVNULL, timeout=2)
+    except Exception:
+        pass
+    time.sleep(0.3)
 
-        # 释放之前可能残留的 rfcomm 绑定
+    log(f"   🔗 rfcomm connect {dev} {mac} CH{channel}")
+    try:
+        _rfcomm_proc = subprocess.Popen(
+            ['sudo', 'rfcomm', 'connect', dev, mac, str(channel)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        log(f"      PID: {_rfcomm_proc.pid}")
+    except Exception as e:
+        log(f"   ❌ 启动失败: {e}")
+        return False
+
+    # 等待结果：成功时进程不退出，失败时立即退出
+    time.sleep(3)
+
+    if _rfcomm_proc.poll() is not None:
         try:
-            subprocess.run(['sudo', 'rfcomm', 'release', 'all'],
-                           stderr=subprocess.DEVNULL, timeout=2)
+            stderr_out = _rfcomm_proc.stderr.read().decode('utf-8', errors='replace').strip()
+            if stderr_out:
+                log(f"      [rfcomm] {stderr_out}")
         except Exception:
             pass
-        time.sleep(0.3)
+        log(f"   ⚠️ CH{channel} 失败 (退出码: {_rfcomm_proc.returncode})")
+        _rfcomm_proc = None
+        return False
+
+    # 进程还在 = 连接成功
+    log(f"   ✅ CH{channel} 连接成功！")
+
+    # 启动后台线程读取 rfcomm connect 输出
+    def read_rfcomm_output():
+        try:
+            for line in _rfcomm_proc.stderr:
+                text = line.decode('utf-8', errors='replace').strip()
+                if text:
+                    log(f"   [rfcomm] {text}")
+        except Exception:
+            pass
+    threading.Thread(target=read_rfcomm_output, daemon=True).start()
+
+    def read_rfcomm_stdout():
+        try:
+            for line in _rfcomm_proc.stdout:
+                text = line.decode('utf-8', errors='replace').strip()
+                if text:
+                    log(f"   [rfcomm] {text}")
+        except Exception:
+            pass
+    threading.Thread(target=read_rfcomm_stdout, daemon=True).start()
+
+    return True
+
+
+def start_rfcomm_connect(mac, channel, dev='/dev/rfcomm0'):
+    """
+    1. bluetoothctl connect 建立 ACL
+    2. SDP 查询 UUID 7033 对应的 RFCOMM 通道号
+    3. 尝试 SDP 发现的通道号 + 用户指定的通道号 + 常见通道号
+    包含重试逻辑：最多 3 轮。
+    """
+    max_rounds = 3
+    for round_num in range(1, max_rounds + 1):
+        log(f"🔗 === 第 {round_num}/{max_rounds} 轮连接 {mac} ===")
 
         # 步骤1: bluetoothctl connect 建立 ACL
         bt_ok = bt_connect(mac)
@@ -154,70 +302,35 @@ def start_rfcomm_connect(mac, channel, dev='/dev/rfcomm0'):
             time.sleep(2)
             continue
 
-        # ACL 建立后等待一下再做 RFCOMM
         time.sleep(1)
 
-        # 步骤2: rfcomm connect
-        log(f"   命令: sudo rfcomm connect {dev} {mac} {channel}")
-        try:
-            _rfcomm_proc = subprocess.Popen(
-                ['sudo', 'rfcomm', 'connect', dev, mac, str(channel)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            log(f"   rfcomm connect PID: {_rfcomm_proc.pid}")
-        except Exception as e:
-            log(f"❌ 启动 rfcomm connect 失败: {e}")
-            time.sleep(2)
-            continue
+        # 步骤2: SDP 查询通道号
+        sdp_channels = sdp_find_spp_channel(mac)
 
-        # 等待 rfcomm connect 结果（它会很快成功或失败）
-        # 成功时它不会退出（保持连接），失败时它会立即退出
+        # 构建候选通道列表：SDP 结果优先 → 用户指定 → 常见通道
+        candidates = []
+        for ch in sdp_channels:
+            if ch not in candidates:
+                candidates.append(ch)
+        if channel not in candidates:
+            candidates.append(channel)
+        for ch in [1, 2, 3, 4, 5, 6]:
+            if ch not in candidates:
+                candidates.append(ch)
+
+        log(f"📋 候选通道: {candidates}")
+
+        # 步骤3: 依次尝试每个通道
+        for ch in candidates:
+            if try_rfcomm_connect(mac, ch, dev):
+                log(f"✅ rfcomm connect 运行中，连接已建立 (CH{ch})")
+                return True
+            time.sleep(1)
+
+        log(f"⚠️ 第 {round_num} 轮所有通道都失败，等待后重试...")
         time.sleep(3)
 
-        if _rfcomm_proc.poll() is not None:
-            # 进程已退出，读取错误信息
-            try:
-                stderr_output = _rfcomm_proc.stderr.read().decode('utf-8', errors='replace').strip()
-                stdout_output = _rfcomm_proc.stdout.read().decode('utf-8', errors='replace').strip()
-                if stderr_output:
-                    log(f"   [rfcomm stderr] {stderr_output}")
-                if stdout_output:
-                    log(f"   [rfcomm stdout] {stdout_output}")
-            except Exception:
-                pass
-            log(f"⚠️ rfcomm connect 已退出 (退出码: {_rfcomm_proc.returncode})，重试...")
-            _rfcomm_proc = None
-            time.sleep(2)
-            continue
-
-        # rfcomm connect 还在运行 = 连接成功
-        log(f"✅ rfcomm connect 运行中，连接已建立")
-
-        # 启动后台线程读取 rfcomm connect 的输出
-        def read_rfcomm_output():
-            try:
-                for line in _rfcomm_proc.stderr:
-                    text = line.decode('utf-8', errors='replace').strip()
-                    if text:
-                        log(f"   [rfcomm] {text}")
-            except Exception:
-                pass
-        threading.Thread(target=read_rfcomm_output, daemon=True).start()
-
-        def read_rfcomm_stdout():
-            try:
-                for line in _rfcomm_proc.stdout:
-                    text = line.decode('utf-8', errors='replace').strip()
-                    if text:
-                        log(f"   [rfcomm] {text}")
-            except Exception:
-                pass
-        threading.Thread(target=read_rfcomm_stdout, daemon=True).start()
-
-        return True
-
-    log(f"❌ 连接失败（{max_retries} 次尝试）")
+    log(f"❌ 连接失败（{max_rounds} 轮尝试）")
     return False
 
 
