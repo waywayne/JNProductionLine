@@ -37,7 +37,24 @@ def log(msg):
     print(f"[{ts}] [RFCOMM-BRIDGE] {msg}", file=sys.stderr, flush=True)
 
 
-def cleanup_rfcomm_resources():
+def disconnect_acl(mac):
+    """断开已有的 ACL 连接，解决 Errno 52 (Invalid exchange)"""
+    log(f"🔌 断开 {mac} 已有 ACL 连接...")
+    try:
+        subprocess.run(['hcitool', 'dc', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+    except Exception:
+        pass
+    try:
+        subprocess.run(['bluetoothctl', 'disconnect', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+    except Exception:
+        pass
+    time.sleep(1)
+    log("🔌 ACL 断开完成")
+
+
+def cleanup_rfcomm_resources(mac=None):
     """彻底清理 RFCOMM 资源，避免 Errno 12 (Cannot allocate memory)
     
     步骤：
@@ -45,7 +62,8 @@ def cleanup_rfcomm_resources():
       2. pkill 所有 cat 进程
       3. rfcomm release all（释放所有绑定）
       4. 关闭所有 /dev/rfcomm* 设备文件
-      5. 等待 1 秒让内核完全释放资源
+      5. 断开已有 ACL 连接（解决 Errno 52）
+      6. 等待 1 秒让内核完全释放资源
     """
     my_pid = os.getpid()
     log(f"🧹 彻底清理 RFCOMM 资源 (本进程 PID: {my_pid})")
@@ -99,7 +117,11 @@ def cleanup_rfcomm_resources():
     except:
         pass
     
-    # 5. 等待内核完全释放资源
+    # 5. 断开已有 ACL 连接（解决 Errno 52）
+    if mac:
+        disconnect_acl(mac)
+    
+    # 6. 等待内核完全释放资源
     time.sleep(1)
     log("🧹 清理完成")
 
@@ -138,10 +160,15 @@ def connect_rfcomm(mac, channel, timeout=10, max_retries=5):
             except:
                 pass
             
-            # 如果是 Errno 12 (Cannot allocate memory)，需要更彻底的清理
-            if 'Errno 12' in str(e) or 'Cannot allocate memory' in str(e):
+            err_str = str(e)
+            # Errno 52: Invalid exchange — 已有 ACL 连接冲突
+            if 'Errno 52' in err_str or 'Invalid exchange' in err_str:
+                log("🔄 Errno 52 → 断开已有 ACL 连接后重试")
+                disconnect_acl(mac)
+            # Errno 12: 资源不足，重新清理
+            elif 'Errno 12' in err_str or 'Cannot allocate memory' in err_str:
                 log("🔄 检测到 Errno 12，重新清理 RFCOMM 资源...")
-                cleanup_rfcomm_resources()
+                cleanup_rfcomm_resources(mac)
     
     # 所有尝试失败
     raise Exception(f"连接失败（{max_retries} 次尝试）: {last_error}")
@@ -247,8 +274,8 @@ def main():
     log(f"PyBluez: {'可用' if HAS_PYBLUEZ else '不可用'}")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    # 连接前清理僵尸 RFCOMM 资源（释放内核内存）
-    cleanup_rfcomm_resources()
+    # 连接前清理僵尸 RFCOMM 资源（释放内核内存 + 断开已有 ACL）
+    cleanup_rfcomm_resources(mac=mac)
 
     try:
         sock = connect_rfcomm(mac, ch)

@@ -18,7 +18,24 @@ def log(message):
     """输出日志到 stderr"""
     print(f"[RFCOMM-BIND] {message}", file=sys.stderr, flush=True)
 
-def cleanup_rfcomm():
+def disconnect_acl(mac):
+    """断开已有的 ACL 连接，解决 Errno 52 (Invalid exchange)"""
+    log(f"🔌 断开 {mac} 已有 ACL 连接...")
+    try:
+        subprocess.run(['hcitool', 'dc', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+    except Exception:
+        pass
+    try:
+        subprocess.run(['bluetoothctl', 'disconnect', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+    except Exception:
+        pass
+    time.sleep(1)
+    log("🔌 ACL 断开完成")
+
+
+def cleanup_rfcomm(mac=None):
     """彻底清理 RFCOMM 资源"""
     my_pid = os.getpid()
     log(f"🧹 清理 RFCOMM 资源 (PID: {my_pid})")
@@ -72,7 +89,11 @@ def cleanup_rfcomm():
     except:
         pass
     
-    # 5. 等待内核完全释放资源
+    # 5. 断开已有 ACL 连接（解决 Errno 52）
+    if mac:
+        disconnect_acl(mac)
+    
+    # 6. 等待内核完全释放资源
     time.sleep(1)
     log("🧹 清理完成")
 
@@ -82,8 +103,8 @@ def setup_rfcomm_bind(mac_address, channel):
     log(f"  MAC: {mac_address}")
     log(f"  通道: {channel}")
     
-    # 1. 清理旧的绑定
-    cleanup_rfcomm()
+    # 1. 清理旧的绑定（包括断开已有 ACL）
+    cleanup_rfcomm(mac=mac_address)
     time.sleep(0.5)
     
     # 2. 绑定设备
@@ -143,11 +164,12 @@ def device_to_stdout(device_fd, keep_alive_event):
                 try:
                     data = os.read(device_fd, 4096)  # 增大读取缓冲区
                     if not data:
-                        # RFCOMM 设备文件可能有虚假的空读取，需要多次确认
+                        # RFCOMM 设备文件经常有虚假的空读取，需要多次确认
                         consecutive_empty_reads += 1
-                        if consecutive_empty_reads >= 3:  # 连续 3 次空读取才认为真的断开
+                        if consecutive_empty_reads >= 20:  # 连续 20 次空读取才认为真的断开
                             log("设备连接已关闭（读取端）")
                             break
+                        time.sleep(0.1)  # 空读取时等待一下再重试
                         continue
                     
                     recv_count += 1
@@ -261,9 +283,8 @@ def stdin_to_device(device_fd, keep_alive_event, activity_callback=None):
                 try:
                     data = sys.stdin.buffer.read(1024)
                     if not data:
-                        # stdin 关闭，退出发送循环（但读取线程继续运行）
-                        log("stdin 已关闭，停止发送循环")
-                        break
+                        # stdin 暂时为空，继续等待（不退出）
+                        continue
                     
                     send_count += 1
                     data_len = len(data)
@@ -332,8 +353,12 @@ def main():
             break
         except OSError as e:
             if e.errno == 113:  # No route to host - 设备尚未准备好
-                log(f"⚠️ 尝试 {attempt + 1}/10: 设备尚未准备好，等待 2 秒后重试...")
-                time.sleep(2)  # 增加到 2 秒
+                log(f"⚠️ 尝试 {attempt + 1}/10: 设备尚未准备好 (Errno 113)，等待 2 秒后重试...")
+                time.sleep(2)
+            elif e.errno == 52:  # Invalid exchange - ACL 冲突
+                log(f"⚠️ 尝试 {attempt + 1}/10: ACL 冲突 (Errno 52)，断开后重试...")
+                disconnect_acl(mac_address)
+                time.sleep(1)
             else:
                 log(f"❌ 打开设备文件失败: {e}")
                 raise
@@ -354,18 +379,21 @@ def main():
     keep_alive_event = threading.Event()
     keep_alive_event.set()
     
-    # 6. 启动双向数据传输
+    # 6. 启动双向数据传输（两个线程，主线程等待）
     try:
-        # 设备 -> stdout（后台线程，非 daemon，确保能完成接收）
-        read_thread = threading.Thread(target=device_to_stdout, args=(device_fd, keep_alive_event), daemon=False)
+        # 设备 -> stdout（读取线程）
+        read_thread = threading.Thread(target=device_to_stdout, args=(device_fd, keep_alive_event), daemon=True)
         read_thread.start()
         
-        # stdin -> 设备（主线程）
-        stdin_to_device(device_fd, keep_alive_event)
+        # stdin -> 设备（写入线程）
+        write_thread = threading.Thread(target=stdin_to_device, args=(device_fd, keep_alive_event), daemon=True)
+        write_thread.start()
         
-        # stdin 关闭后，继续保持连接，等待读取线程（无限期等待，直到连接断开）
-        log("⏳ stdin 已关闭，保持连接并继续接收数据...")
-        read_thread.join()  # 无限期等待，直到设备断开连接
+        # 主线程等待，直到 keep_alive 被清除
+        while keep_alive_event.is_set():
+            if not read_thread.is_alive() and not write_thread.is_alive():
+                break
+            time.sleep(0.2)
         
     except KeyboardInterrupt:
         log("收到中断信号")
@@ -375,12 +403,11 @@ def main():
         # 停止 keep_alive 事件
         keep_alive_event.clear()
         
-        # 等待读取线程结束（给一点时间让它优雅退出）
-        if read_thread.is_alive():
-            log("⏳ 等待读取线程结束...")
-            read_thread.join(timeout=1)
+        # 等待线程结束
+        read_thread.join(timeout=2)
+        write_thread.join(timeout=2)
         
-        # 5. 清理
+        # 清理
         log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         log("清理资源...")
         try:

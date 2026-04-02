@@ -42,7 +42,30 @@ def log(msg):
     print(f"[{ts}] [SPP-STABLE] {msg}", file=sys.stderr, flush=True)
 
 
-def cleanup_all():
+def disconnect_acl(mac):
+    """断开已有的 ACL 连接，解决 Errno 52 (Invalid exchange)
+    
+    Errno 52 的原因：设备已有 BLE/GATT 的 ACL 连接，与 RFCOMM 冲突。
+    必须先用 hcitool dc 断开 ACL 链路，再建立 RFCOMM 连接。
+    """
+    log(f"🔌 断开 {mac} 已有 ACL 连接...")
+    try:
+        subprocess.run(['hcitool', 'dc', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+        log(f"   hcitool dc {mac} 完成")
+    except Exception:
+        pass
+    # 也尝试用 bluetoothctl disconnect（某些环境需要）
+    try:
+        subprocess.run(['bluetoothctl', 'disconnect', mac],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
+    except Exception:
+        pass
+    time.sleep(1)
+    log("🔌 ACL 断开完成")
+
+
+def cleanup_all(mac=None):
     """彻底清理所有 RFCOMM 资源"""
     my_pid = os.getpid()
     log(f"🧹 清理 RFCOMM 资源 (PID={my_pid})")
@@ -74,6 +97,10 @@ def cleanup_all():
                        stderr=subprocess.DEVNULL, timeout=2)
     except Exception:
         pass
+
+    # 断开已有 ACL 连接（解决 Errno 52）
+    if mac:
+        disconnect_acl(mac)
 
     # 等待内核释放
     time.sleep(1)
@@ -111,10 +138,14 @@ def connect(mac, channel):
                     pass
 
             err_str = str(e)
+            # Errno 52: Invalid exchange — 已有 ACL 连接冲突
+            if 'Errno 52' in err_str or 'Invalid exchange' in err_str:
+                log("🔄 Errno 52 → 断开已有 ACL 连接后重试")
+                disconnect_acl(mac)
             # Errno 12: 资源不足，重新清理
-            if 'Errno 12' in err_str or 'Cannot allocate' in err_str:
+            elif 'Errno 12' in err_str or 'Cannot allocate' in err_str:
                 log("🔄 Errno 12 → 重新清理资源")
-                cleanup_all()
+                cleanup_all(mac)
             else:
                 # 普通失败，等待后重试
                 wait = min(attempt, 3)
@@ -275,8 +306,8 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
-    # 清理资源
-    cleanup_all()
+    # 清理资源（包括断开已有 ACL 连接）
+    cleanup_all(mac=mac)
 
     # 连接
     try:
