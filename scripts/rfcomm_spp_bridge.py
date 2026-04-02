@@ -80,9 +80,9 @@ def cleanup():
     log("🧹 清理完成")
 
 
-def bt_connect(mac, timeout=15):
-    """用 bluetoothctl connect 建立 BR/EDR ACL 连接（已验证可以成功）"""
-    log(f"📶 建立 BT ACL 连接: {mac}")
+def ensure_paired(mac):
+    """确保设备已配对和信任（不建立 profile 连接）"""
+    log(f"� 检查配对状态: {mac}")
 
     # 确保蓝牙适配器开启
     try:
@@ -91,55 +91,84 @@ def bt_connect(mac, timeout=15):
     except Exception:
         pass
 
-    # 确保设备已配对
     try:
         r = subprocess.run(
             ['bluetoothctl', 'info', mac],
             capture_output=True, text=True, timeout=5
         )
         if 'Paired: yes' in r.stdout:
-            log(f"   设备已配对")
+            log(f"   ✅ 设备已配对")
+            return True
         else:
             log(f"   设备未配对，尝试配对...")
             subprocess.run(['bluetoothctl', 'pair', mac],
                            capture_output=True, text=True, timeout=15)
             subprocess.run(['bluetoothctl', 'trust', mac],
                            capture_output=True, text=True, timeout=5)
+            return True
     except Exception as e:
         log(f"   检查配对状态异常: {e}")
+        return True  # 继续尝试
 
-    # 检查是否已经连接
+
+def ensure_disconnected_profile(mac):
+    """确保 bluetoothctl 没有占用 profile 连接。
+    bluetoothctl connect 会占用 SPP profile，导致后续 RFCOMM socket 被拒绝。
+    """
     try:
         r = subprocess.run(
             ['bluetoothctl', 'info', mac],
             capture_output=True, text=True, timeout=5
         )
         if 'Connected: yes' in r.stdout:
-            log(f"✅ ACL 已经连接")
-            return True
+            log(f"   ⚠️ 检测到 bluetoothctl profile 连接，断开以释放 SPP...")
+            subprocess.run(['bluetoothctl', 'disconnect', mac],
+                           capture_output=True, text=True, timeout=5)
+            time.sleep(1)
+            log(f"   ✅ 已释放 profile 连接")
     except Exception:
         pass
 
-    # bluetoothctl connect
+
+def ensure_acl(mac):
+    """用 hcitool cc 建立纯 ACL 连接（不占用任何 profile）。
+    这是关键：bluetoothctl connect 会占用 SPP profile 导致 Connection refused，
+    而 hcitool cc 只建立底层 ACL 链路。
+    """
+    log(f"📶 建立纯 ACL 链路: {mac}")
+
+    # 先断开可能存在的 bluetoothctl profile 连接
+    ensure_disconnected_profile(mac)
+
+    # hcitool cc 建立纯 ACL
     try:
         r = subprocess.run(
-            ['bluetoothctl', 'connect', mac],
-            capture_output=True, text=True, timeout=timeout
+            ['sudo', 'hcitool', 'cc', mac],
+            capture_output=True, text=True, timeout=10
         )
-        output = r.stdout + r.stderr
-        log(f"   bluetoothctl connect: {output.strip()[:200]}")
-        if 'Connection successful' in output or 'Connected: yes' in output:
-            log(f"✅ ACL 连接成功")
+        log(f"   hcitool cc: {(r.stdout + r.stderr).strip()[:200] or '完成'}")
+    except subprocess.TimeoutExpired:
+        log(f"   ⚠️ hcitool cc 超时")
+    except Exception as e:
+        log(f"   ⚠️ hcitool cc: {e}")
+
+    time.sleep(0.5)
+
+    # 验证 ACL 是否建立
+    try:
+        r = subprocess.run(
+            ['hcitool', 'con'],
+            capture_output=True, text=True, timeout=5
+        )
+        if mac.upper() in r.stdout.upper() or mac.lower() in r.stdout.lower():
+            log(f"   ✅ ACL 链路已建立")
             return True
         else:
-            log(f"⚠️ ACL 连接结果不确定，继续尝试")
+            log(f"   ⚠️ ACL 链路状态不确定: {r.stdout.strip()[:200]}")
+            # 仍然继续尝试 RFCOMM connect
             return True
-    except subprocess.TimeoutExpired:
-        log(f"⚠️ bluetoothctl connect 超时")
-        return False
-    except Exception as e:
-        log(f"❌ bluetoothctl connect 失败: {e}")
-        return False
+    except Exception:
+        return True
 
 
 def sdp_find_spp_channel(mac, target_uuid='7033'):
@@ -235,23 +264,29 @@ def rfcomm_socket_connect(mac, channel, connect_timeout=10):
 
 
 def connect_spp(mac, channel):
-    """完整的 SPP 连接流程：ACL → SDP → RFCOMM socket。
+    """完整的 SPP 连接流程：
+    1. 确保配对
+    2. 释放可能的 bluetoothctl profile 占用
+    3. hcitool cc 建立纯 ACL
+    4. SDP 查询通道号
+    5. RFCOMM socket 直连
     最多 3 轮重试。返回 socket 或 None。
     """
     max_rounds = 3
+
+    # 先确保配对（只需做一次）
+    ensure_paired(mac)
+
     for round_num in range(1, max_rounds + 1):
         log(f"🔗 === 第 {round_num}/{max_rounds} 轮连接 {mac} ===")
 
-        # 步骤1: bluetoothctl connect 建立 ACL
-        bt_ok = bt_connect(mac)
-        if not bt_ok:
-            log(f"   ACL 连接失败，重试...")
-            time.sleep(2)
-            continue
+        # 步骤1: 建立纯 ACL 链路（不占用 profile）
+        ensure_acl(mac)
 
-        # 步骤2: SDP 查询通道号
-        sdp_channels = sdp_find_spp_channel(mac)
-
+        # 步骤2: SDP 查询通道号（只在第一轮查，后续复用）
+        if round_num == 1:
+            sdp_channels = sdp_find_spp_channel(mac)
+        
         # 构建候选通道：SDP 结果优先 → 用户指定 → 常见通道
         candidates = []
         for ch in sdp_channels:
@@ -265,7 +300,7 @@ def connect_spp(mac, channel):
 
         log(f"📋 候选通道: {candidates}")
 
-        # 步骤3: 尝试每个通道（SDP 通道多试几次）
+        # 步骤3: 尝试每个通道
         for ch in candidates:
             retries = 3 if ch in sdp_channels else 1
             for retry in range(1, retries + 1):
