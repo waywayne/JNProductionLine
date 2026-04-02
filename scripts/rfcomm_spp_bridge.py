@@ -75,56 +75,150 @@ def cleanup():
     log("🧹 清理完成")
 
 
+def bt_connect(mac, timeout=15):
+    """用 bluetoothctl connect 建立 BR/EDR ACL 连接。
+    这是三方工具能连上的关键：先建立 ACL，再做 RFCOMM。
+    """
+    log(f"📶 建立 BT ACL 连接: {mac}")
+
+    # 先确保蓝牙适配器开启
+    try:
+        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'],
+                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+    except Exception:
+        pass
+
+    # 确保设备已配对（信任）
+    try:
+        r = subprocess.run(
+            ['bluetoothctl', 'info', mac],
+            capture_output=True, text=True, timeout=5
+        )
+        if 'Paired: yes' in r.stdout:
+            log(f"   设备已配对")
+        else:
+            log(f"   设备未配对，尝试配对...")
+            subprocess.run(['bluetoothctl', 'pair', mac],
+                           capture_output=True, text=True, timeout=15)
+            subprocess.run(['bluetoothctl', 'trust', mac],
+                           capture_output=True, text=True, timeout=5)
+    except Exception as e:
+        log(f"   检查配对状态异常: {e}")
+
+    # bluetoothctl connect 建立 ACL
+    try:
+        r = subprocess.run(
+            ['bluetoothctl', 'connect', mac],
+            capture_output=True, text=True, timeout=timeout
+        )
+        output = r.stdout + r.stderr
+        log(f"   bluetoothctl connect: {output.strip()[:200]}")
+        if 'Connection successful' in output:
+            log(f"✅ ACL 连接成功")
+            return True
+        else:
+            log(f"⚠️ ACL 连接结果不确定")
+            # 即使输出不含“Connection successful”，可能已经连上，继续尝试
+            return True
+    except subprocess.TimeoutExpired:
+        log(f"⚠️ bluetoothctl connect 超时")
+        return False
+    except Exception as e:
+        log(f"❌ bluetoothctl connect 失败: {e}")
+        return False
+
+
 def start_rfcomm_connect(mac, channel, dev='/dev/rfcomm0'):
     """
-    启动 rfcomm connect 命令建立 RFCOMM 连接。
-    
-    rfcomm connect 会:
-      1. 自动建立 ACL 连接
-      2. 自动建立 RFCOMM 连接
-      3. 创建 /dev/rfcomm0 设备文件
-      4. 保持连接直到进程被杀死
-    
-    这是 Linux 内核级别的连接方式，最稳定可靠。
+    先用 bluetoothctl 建立 ACL，再用 rfcomm connect 建立 RFCOMM 连接。
+    包含重试逻辑：最多 5 次。
     """
     global _rfcomm_proc
 
-    log(f"🔗 启动 rfcomm connect: {mac} CH{channel}")
-    log(f"   命令: sudo rfcomm connect {dev} {mac} {channel}")
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        log(f"🔗 [尝试 {attempt}/{max_retries}] 连接 {mac} CH{channel}")
 
-    try:
-        _rfcomm_proc = subprocess.Popen(
-            ['sudo', 'rfcomm', 'connect', dev, mac, str(channel)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        log(f"   rfcomm connect 进程已启动 (PID: {_rfcomm_proc.pid})")
-    except Exception as e:
-        log(f"❌ 启动 rfcomm connect 失败: {e}")
-        return False
-
-    # 启动后台线程读取 rfcomm connect 的输出
-    def read_rfcomm_output():
+        # 释放之前可能残留的 rfcomm 绑定
         try:
-            for line in _rfcomm_proc.stderr:
-                text = line.decode('utf-8', errors='replace').strip()
-                if text:
-                    log(f"   [rfcomm] {text}")
+            subprocess.run(['sudo', 'rfcomm', 'release', 'all'],
+                           stderr=subprocess.DEVNULL, timeout=2)
         except Exception:
             pass
-    threading.Thread(target=read_rfcomm_output, daemon=True).start()
+        time.sleep(0.3)
 
-    def read_rfcomm_stdout():
+        # 步骤1: bluetoothctl connect 建立 ACL
+        bt_ok = bt_connect(mac)
+        if not bt_ok:
+            log(f"   ACL 连接失败，重试...")
+            time.sleep(2)
+            continue
+
+        # ACL 建立后等待一下再做 RFCOMM
+        time.sleep(1)
+
+        # 步骤2: rfcomm connect
+        log(f"   命令: sudo rfcomm connect {dev} {mac} {channel}")
         try:
-            for line in _rfcomm_proc.stdout:
-                text = line.decode('utf-8', errors='replace').strip()
-                if text:
-                    log(f"   [rfcomm] {text}")
-        except Exception:
-            pass
-    threading.Thread(target=read_rfcomm_stdout, daemon=True).start()
+            _rfcomm_proc = subprocess.Popen(
+                ['sudo', 'rfcomm', 'connect', dev, mac, str(channel)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            log(f"   rfcomm connect PID: {_rfcomm_proc.pid}")
+        except Exception as e:
+            log(f"❌ 启动 rfcomm connect 失败: {e}")
+            time.sleep(2)
+            continue
 
-    return True
+        # 等待 rfcomm connect 结果（它会很快成功或失败）
+        # 成功时它不会退出（保持连接），失败时它会立即退出
+        time.sleep(3)
+
+        if _rfcomm_proc.poll() is not None:
+            # 进程已退出，读取错误信息
+            try:
+                stderr_output = _rfcomm_proc.stderr.read().decode('utf-8', errors='replace').strip()
+                stdout_output = _rfcomm_proc.stdout.read().decode('utf-8', errors='replace').strip()
+                if stderr_output:
+                    log(f"   [rfcomm stderr] {stderr_output}")
+                if stdout_output:
+                    log(f"   [rfcomm stdout] {stdout_output}")
+            except Exception:
+                pass
+            log(f"⚠️ rfcomm connect 已退出 (退出码: {_rfcomm_proc.returncode})，重试...")
+            _rfcomm_proc = None
+            time.sleep(2)
+            continue
+
+        # rfcomm connect 还在运行 = 连接成功
+        log(f"✅ rfcomm connect 运行中，连接已建立")
+
+        # 启动后台线程读取 rfcomm connect 的输出
+        def read_rfcomm_output():
+            try:
+                for line in _rfcomm_proc.stderr:
+                    text = line.decode('utf-8', errors='replace').strip()
+                    if text:
+                        log(f"   [rfcomm] {text}")
+            except Exception:
+                pass
+        threading.Thread(target=read_rfcomm_output, daemon=True).start()
+
+        def read_rfcomm_stdout():
+            try:
+                for line in _rfcomm_proc.stdout:
+                    text = line.decode('utf-8', errors='replace').strip()
+                    if text:
+                        log(f"   [rfcomm] {text}")
+            except Exception:
+                pass
+        threading.Thread(target=read_rfcomm_stdout, daemon=True).start()
+
+        return True
+
+    log(f"❌ 连接失败（{max_retries} 次尝试）")
+    return False
 
 
 def wait_for_device(dev='/dev/rfcomm0', timeout=60):
