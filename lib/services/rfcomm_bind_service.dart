@@ -83,10 +83,10 @@ class RfcommBindService {
   String _getScriptPath() {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
     final candidates = [
-      '$executableDir/scripts/rfcomm_bind_bridge.py',
-      '${Directory.current.path}/scripts/rfcomm_bind_bridge.py',
-      '/opt/jn-production-line/scripts/rfcomm_bind_bridge.py',
-      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_bind_bridge.py',
+      '$executableDir/scripts/rfcomm_spp_bridge.py',
+      '${Directory.current.path}/scripts/rfcomm_spp_bridge.py',
+      '/opt/jn-production-line/scripts/rfcomm_spp_bridge.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_spp_bridge.py',
     ];
     
     for (final path in candidates) {
@@ -95,7 +95,7 @@ class RfcommBindService {
       }
     }
     
-    return '${Directory.current.path}/scripts/rfcomm_bind_bridge.py';
+    return '${Directory.current.path}/scripts/rfcomm_spp_bridge.py';
   }
 
   /// 连接设备（与超声前整机产测完全一致）
@@ -118,10 +118,7 @@ class RfcommBindService {
       // 1. 清理旧连接
       _log('🧹 清理旧的 RFCOMM 连接...');
       try {
-        await Process.run('pkill', ['-9', '-f', 'rfcomm_bind_bridge.py']);
-      } catch (_) {}
-      try {
-        await Process.run('pkill', ['-9', 'cat']);
+        await Process.run('pkill', ['-9', '-f', 'rfcomm_spp_bridge.py']);
       } catch (_) {}
       try {
         await Process.run('sudo', ['rfcomm', 'release', 'all']);
@@ -137,8 +134,8 @@ class RfcommBindService {
         return false;
       }
 
-      // 3. 启动 Python rfcomm bind 桥接进程
-      _log('🚀 启动 rfcomm bind 桥接...');
+      // 3. 启动 Python rfcomm connect 桥接进程
+      _log('🚀 启动 rfcomm connect 桥接...');
       final process = await Process.start(
         'python3',
         ['-u', scriptPath, macAddress, channel.toString()],
@@ -182,14 +179,14 @@ class RfcommBindService {
       // 6. 监听进程退出
       bool processExited = false;
       process.exitCode.then((code) {
-        _log('⚠️ rfcomm_bind_bridge.py 进程退出 (退出码: $code)');
+        _log('⚠️ rfcomm_spp_bridge.py 进程退出 (退出码: $code)');
         processExited = true;
         if (_isConnected) disconnect();
       });
 
-      // 7. 等待连接建立（最多 240 秒）
+      // 7. 等待连接建立（最多 90 秒）
       _log('⏳ 等待连接建立...');
-      for (int i = 0; i < 480; i++) {
+      for (int i = 0; i < 180; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) break;
         if (processExited) {

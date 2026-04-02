@@ -5,8 +5,8 @@ import 'dart:typed_data';
 import '../models/log_state.dart';
 import 'gtp_protocol.dart';
 
-/// 方案三: 稳定 RFCOMM SPP 连接
-/// 使用 rfcomm_stable.py — 原始 AF_BLUETOOTH socket，连上就不断开
+/// 稳定 RFCOMM SPP 连接
+/// 使用 rfcomm_spp_bridge.py — sudo rfcomm connect 命令（Linux 内核级别连接，最可靠）
 class StableRfcommService {
   Process? _bridgeProcess;
   StreamSubscription<List<int>>? _readSubscription;
@@ -85,10 +85,10 @@ class StableRfcommService {
   String _getScriptPath() {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
     final candidates = [
-      '$executableDir/scripts/rfcomm_stable.py',
-      '${Directory.current.path}/scripts/rfcomm_stable.py',
-      '/opt/jn-production-line/scripts/rfcomm_stable.py',
-      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_stable.py',
+      '$executableDir/scripts/rfcomm_spp_bridge.py',
+      '${Directory.current.path}/scripts/rfcomm_spp_bridge.py',
+      '/opt/jn-production-line/scripts/rfcomm_spp_bridge.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_spp_bridge.py',
     ];
 
     for (final path in candidates) {
@@ -97,7 +97,7 @@ class StableRfcommService {
       }
     }
 
-    return '${Directory.current.path}/scripts/rfcomm_stable.py';
+    return '${Directory.current.path}/scripts/rfcomm_spp_bridge.py';
   }
 
   /// 连接设备
@@ -109,7 +109,7 @@ class StableRfcommService {
     }
 
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _log('🔗 开始连接 (稳定 SPP 模式)');
+    _log('🔗 开始连接 (rfcomm connect 模式)');
     _log('   MAC: $macAddress');
     _log('   Channel: $channel');
     if (deviceName != null) {
@@ -126,7 +126,7 @@ class StableRfcommService {
         return false;
       }
 
-      _log('🚀 启动稳定 SPP 桥接...');
+      _log('🚀 启动 rfcomm connect 桥接...');
       final process = await Process.start(
         'python3',
         ['-u', scriptPath, macAddress, channel.toString()],
@@ -178,12 +178,12 @@ class StableRfcommService {
         }
       });
 
-      // 等待连接建立（最多 240 秒，因为有 10 次重试每次 20 秒超时 + ACL 建立）
+      // 等待连接建立（最多 90 秒，rfcomm connect 超时 60s + 设备文件等待）
       _log('⏳ 等待连接建立...');
       bool processExited = false;
       process.exitCode.then((_) => processExited = true);
 
-      for (int i = 0; i < 480; i++) {
+      for (int i = 0; i < 180; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) break;
         if (processExited) {
@@ -215,7 +215,7 @@ class StableRfcommService {
       _fragmentCount = 0;
       _pendingResponses.clear();
 
-      _logSuccess('连接成功 (稳定 SPP 模式)');
+      _logSuccess('连接成功 (rfcomm connect 模式)');
       _log('   连接将保持直到手动断开');
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 

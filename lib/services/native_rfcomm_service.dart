@@ -109,7 +109,7 @@ class NativeRfcommService {
     
     // 1. 强杀旧的 Python 桥接进程
     try {
-      await Process.run('pkill', ['-9', '-f', 'rfcomm_socket_simple.py']);
+      await Process.run('pkill', ['-9', '-f', 'rfcomm_spp_bridge.py']);
     } catch (_) {}
     
     // 2. 强杀残留的 cat /dev/rfcomm 进程
@@ -132,11 +132,10 @@ class NativeRfcommService {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
     // 尝试多个可能的路径
     final candidates = [
-      '$executableDir/scripts/rfcomm_socket_simple.py',
-      '${Directory.current.path}/scripts/rfcomm_socket_simple.py',
-      '/opt/jn-production-line/scripts/rfcomm_socket_simple.py',
-      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_socket_simple.py',
-      '${Platform.resolvedExecutable.contains('/') ? File(Platform.resolvedExecutable).parent.parent.path : '.'}/data/flutter_assets/scripts/rfcomm_socket_simple.py',
+      '$executableDir/scripts/rfcomm_spp_bridge.py',
+      '${Directory.current.path}/scripts/rfcomm_spp_bridge.py',
+      '/opt/jn-production-line/scripts/rfcomm_spp_bridge.py',
+      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/rfcomm_spp_bridge.py',
     ];
     
     for (final path in candidates) {
@@ -146,7 +145,7 @@ class NativeRfcommService {
     }
     
     // 默认路径
-    return '${Directory.current.path}/scripts/rfcomm_socket_simple.py';
+    return '${Directory.current.path}/scripts/rfcomm_spp_bridge.py';
   }
   
   /// 连接设备
@@ -235,8 +234,8 @@ class NativeRfcommService {
         processExited = true;
       });
       
-      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败，最多 240s）
-      for (int i = 0; i < 480; i++) {
+      // 等待连接建立（最多 90s）
+      for (int i = 0; i < 180; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) {
           _logSuccess('Python 桥接连接已就绪');
