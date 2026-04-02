@@ -165,22 +165,52 @@ def dbus_connect(mac, timeout=30):
     except Exception:
         pass
 
-    # bluetoothctl connect — BlueZ 会自动通过已注册的 Profile 建立 RFCOMM
+    # 获取设备的 D-Bus 对象路径
+    mac_path = mac.replace(":", "_").upper()
+    device_path = f"/org/bluez/hci0/dev_{mac_path}"
+    log(f"   设备路径: {device_path}")
+
     for attempt in range(1, 4):
-        log(f"🔗 第 {attempt}/3 次 bluetoothctl connect {mac}")
+        log(f"🔗 第 {attempt}/3 次连接 {mac}")
+
+        # 方法1: D-Bus ConnectProfile(uuid) — 强制 BR/EDR RFCOMM 连接
         try:
-            r = subprocess.run(
-                ['bluetoothctl', 'connect', mac],
-                capture_output=True, text=True, timeout=15
+            device = dbus.Interface(
+                bus.get_object("org.bluez", device_path),
+                "org.bluez.Device1"
             )
-            output = r.stdout + r.stderr
-            log(f"   {output.strip()[:200]}")
-        except subprocess.TimeoutExpired:
-            log("   ⚠️ connect 超时")
-            continue
+
+            # 先确保通用连接（建立 ACL）
+            try:
+                log(f"   📶 D-Bus Device1.Connect() ...")
+                device.Connect()
+                time.sleep(1)
+            except dbus.exceptions.DBusException as e:
+                err_name = e.get_dbus_name() if hasattr(e, 'get_dbus_name') else str(e)
+                log(f"   Connect(): {err_name}")
+                # Already connected 不是错误
+                if 'AlreadyConnected' not in str(err_name):
+                    pass
+
+            # 用 ConnectProfile 指定 UUID — 强制走 BR/EDR RFCOMM
+            log(f"   📡 D-Bus ConnectProfile({SPP_UUID}) ...")
+            device.ConnectProfile(SPP_UUID)
+            log(f"   ConnectProfile 调用成功，等待 NewConnection ...")
+
+        except dbus.exceptions.DBusException as e:
+            err_msg = str(e)
+            log(f"   ⚠️ D-Bus 调用失败: {err_msg[:200]}")
+            # 尝试 bluetoothctl connect 作为备选
+            try:
+                r = subprocess.run(
+                    ['bluetoothctl', 'connect', mac],
+                    capture_output=True, text=True, timeout=15
+                )
+                log(f"   bluetoothctl: {(r.stdout + r.stderr).strip()[:200]}")
+            except Exception:
+                pass
         except Exception as e:
-            log(f"   ⚠️ connect 异常: {e}")
-            continue
+            log(f"   ⚠️ 异常: {e}")
 
         # 等待 D-Bus NewConnection 回调
         log(f"   ⏳ 等待 Profile NewConnection 回调 ({timeout}s)...")
