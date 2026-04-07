@@ -1,571 +1,38 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RFCOMM SPP 桥接 — BlueZ D-Bus Profile API
+RFCOMM SPP 桥接 — 直接 Bluetooth Socket 连接
 
-方案（BlueZ 5 推荐方式，与 Android createRfcommSocketToServiceRecord 等效）：
-  1. 通过 D-Bus 向 BlueZ 注册 SPP Profile（UUID 包含 7033）
-  2. bluetoothctl connect 建立连接
-  3. BlueZ 自动协商 RFCOMM，通过 D-Bus NewConnection 回调给我们 fd
-  4. 双向桥接: stdin → fd, fd → stdout
+连接方式（与三方工具一致）：
+  1. socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)
+  2. socket.connect((MAC, Channel))
+  3. 双向桥接: stdin → socket, socket → stdout
 
-优势：
-  - BlueZ 自动处理 SDP 和 RFCOMM 通道协商
-  - 不需要手动 rfcomm connect 或 socket connect
-  - 不需要 /dev/rfcomm0 设备文件
-  - 与三方工具使用相同的 BlueZ Profile 连接路径
+简单、直接、可靠。不需要 rfcomm 命令、不需要 /dev/rfcomm0、不需要 D-Bus。
 """
 
+import socket
+import time
 import sys
 import os
-import time
-import subprocess
-import threading
 import select
 import signal
+import threading
 import fcntl
-import socket
-import struct
 
-# 尝试导入 dbus，如果失败则回退到 socket 方案
-try:
-    import dbus
-    import dbus.service
-    import dbus.mainloop.glib
-    from gi.repository import GLib
-    HAS_DBUS = True
-except ImportError:
-    HAS_DBUS = False
-
-# RFCOMM socket constants (回退方案用)
+# --- 常量 ---
 AF_BLUETOOTH = 31
 BTPROTO_RFCOMM = 3
-SOL_BLUETOOTH = 274
-BT_SECURITY = 4
-BT_SECURITY_LOW = 1
 
 def log(msg):
     ts = time.strftime('%H:%M:%S')
     print(f"[{ts}] [SPP-BRIDGE] {msg}", file=sys.stderr, flush=True)
 
 
-# === 全局状态 ===
-_alive = threading.Event()
-_fd = None  # RFCOMM 文件描述符 (D-Bus 方案) 或 socket (回退方案)
-_fd_ready = threading.Event()  # D-Bus 回调时设置
-_fd_is_socket = False  # 标记是 socket 还是 fd
-_mainloop = None
-
-
-# =============================================
-# 方案 A: BlueZ D-Bus Profile API
-# =============================================
-
-PROFILE_PATH = "/org/bluez/spp_profile"
-PROFILE_PATH_STD = "/org/bluez/spp_profile_std"
-SPP_UUID_7033 = "00007033-0000-1000-8000-00805f9b34fb"  # 设备自定义 SPP UUID (7033)
-SPP_UUID_1101 = "00001101-0000-1000-8000-00805f9b34fb"  # 标准 SPP UUID
-
-if HAS_DBUS:
-    class SppProfile(dbus.service.Object):
-        """BlueZ Profile1 接口实现"""
-
-        @dbus.service.method("org.bluez.Profile1",
-                             in_signature="", out_signature="")
-        def Release(self):
-            log("📴 Profile Released")
-
-        @dbus.service.method("org.bluez.Profile1",
-                             in_signature="oha{sv}", out_signature="")
-        def NewConnection(self, path, fd, properties):
-            global _fd
-            _fd = fd.take()
-            log(f"✅ NewConnection! device={path} fd={_fd}")
-
-            # 设置非阻塞
-            flags = fcntl.fcntl(_fd, fcntl.F_GETFL)
-            fcntl.fcntl(_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-            _fd_ready.set()
-
-        @dbus.service.method("org.bluez.Profile1",
-                             in_signature="o", out_signature="")
-        def RequestDisconnection(self, path):
-            log(f"📴 RequestDisconnection: {path}")
-            _alive.clear()
-
-
-def register_spp_profile():
-    """在 BlueZ 中注册 SPP Profile（同时注册 7033 和 1101 两个 UUID）"""
-    if not HAS_DBUS:
-        return None
-    try:
-        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-        bus = dbus.SystemBus()
-
-        manager = dbus.Interface(
-            bus.get_object("org.bluez", "/org/bluez"),
-            "org.bluez.ProfileManager1"
-        )
-
-        opts = {
-            "Name": dbus.String("SPP Bridge"),
-            "Role": dbus.String("client"),
-            "RequireAuthentication": dbus.Boolean(False),
-            "RequireAuthorization": dbus.Boolean(False),
-            "AutoConnect": dbus.Boolean(True),
-        }
-
-        # 注册自定义 UUID 7033
-        profile_7033 = SppProfile(bus, PROFILE_PATH)
-        try:
-            manager.RegisterProfile(PROFILE_PATH, SPP_UUID_7033, opts)
-            log(f"✅ Profile 已注册 (UUID: {SPP_UUID_7033})")
-        except Exception as e:
-            log(f"⚠️ 注册 7033 失败: {e}")
-
-        # 注册标准 SPP UUID 1101
-        profile_1101 = SppProfile(bus, PROFILE_PATH_STD)
-        try:
-            manager.RegisterProfile(PROFILE_PATH_STD, SPP_UUID_1101, opts)
-            log(f"✅ Profile 已注册 (UUID: {SPP_UUID_1101})")
-        except Exception as e:
-            log(f"⚠️ 注册 1101 失败: {e}")
-
-        return bus
-    except Exception as e:
-        log(f"⚠️ 注册 Profile 失败: {e}")
-        return None
-
-
-def dbus_connect(mac, timeout=30):
-    """用 D-Bus Profile 方式连接"""
-    global _mainloop, _fd_is_socket
-
-    if not HAS_DBUS:
-        return False
-
-    log("📡 使用 BlueZ D-Bus Profile API 连接")
-
-    bus = register_spp_profile()
-    if bus is None:
-        return False
-
-    _fd_is_socket = False
-
-    # 在后台线程运行 GLib MainLoop
-    _mainloop = GLib.MainLoop()
-    loop_thread = threading.Thread(target=_mainloop.run, daemon=True)
-    loop_thread.start()
-
-    # 确保蓝牙适配器开启
-    try:
-        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-    except Exception:
-        pass
-
-    # 确保设备已配对
-    try:
-        r = subprocess.run(['bluetoothctl', 'info', mac],
-                           capture_output=True, text=True, timeout=5)
-        if 'Paired: yes' not in r.stdout:
-            log("   设备未配对，尝试配对...")
-            subprocess.run(['bluetoothctl', 'pair', mac],
-                           capture_output=True, text=True, timeout=15)
-            subprocess.run(['bluetoothctl', 'trust', mac],
-                           capture_output=True, text=True, timeout=5)
-    except Exception:
-        pass
-
-    # 获取设备的 D-Bus 对象路径
-    mac_path = mac.replace(":", "_").upper()
-    device_path = f"/org/bluez/hci0/dev_{mac_path}"
-    log(f"   设备路径: {device_path}")
-
-    for attempt in range(1, 4):
-        log(f"🔗 第 {attempt}/3 次连接 {mac}")
-
-        # 方法1: D-Bus ConnectProfile(uuid) — 强制 BR/EDR RFCOMM 连接
-        try:
-            device = dbus.Interface(
-                bus.get_object("org.bluez", device_path),
-                "org.bluez.Device1"
-            )
-
-            # 先确保通用连接（建立 ACL）
-            try:
-                log(f"   📶 D-Bus Device1.Connect() ...")
-                device.Connect()
-                time.sleep(1)
-            except dbus.exceptions.DBusException as e:
-                err_name = e.get_dbus_name() if hasattr(e, 'get_dbus_name') else str(e)
-                log(f"   Connect(): {err_name}")
-                # Already connected 不是错误
-                if 'AlreadyConnected' not in str(err_name):
-                    pass
-
-            # 用 ConnectProfile 指定 UUID — 强制走 BR/EDR RFCOMM
-            # 尝试两个 UUID: 先 7033，再 1101
-            cp_ok = False
-            for uuid in [SPP_UUID_7033, SPP_UUID_1101]:
-                try:
-                    log(f"   📡 D-Bus ConnectProfile({uuid}) ...")
-                    device.ConnectProfile(uuid)
-                    log(f"   ConnectProfile({uuid}) 调用成功")
-                    cp_ok = True
-                    break
-                except dbus.exceptions.DBusException as ce:
-                    log(f"   ConnectProfile({uuid}): {str(ce)[:150]}")
-            if not cp_ok:
-                log(f"   ⚠️ 两个 UUID 的 ConnectProfile 都失败")
-
-        except dbus.exceptions.DBusException as e:
-            err_msg = str(e)
-            log(f"   ⚠️ D-Bus 调用失败: {err_msg[:200]}")
-            # 尝试 bluetoothctl connect 作为备选
-            try:
-                r = subprocess.run(
-                    ['bluetoothctl', 'connect', mac],
-                    capture_output=True, text=True, timeout=15
-                )
-                log(f"   bluetoothctl: {(r.stdout + r.stderr).strip()[:200]}")
-            except Exception:
-                pass
-        except Exception as e:
-            log(f"   ⚠️ 异常: {e}")
-
-        # 等待 D-Bus NewConnection 回调
-        log(f"   ⏳ 等待 Profile NewConnection 回调 ({timeout}s)...")
-        if _fd_ready.wait(timeout=timeout):
-            log(f"✅ D-Bus Profile 连接成功! fd={_fd}")
-            return True
-
-        log(f"   ⚠️ 未收到 NewConnection 回调")
-        time.sleep(2)
-
-    # 停止 mainloop
-    if _mainloop and _mainloop.is_running():
-        _mainloop.quit()
-
-    return False
-
-
-# =============================================
-# 方案 B: rfcomm bind + connect 方式
-# 最传统可靠的 Linux RFCOMM 连接方式
-# =============================================
-
-def sdp_find_channel(mac, target_uuid='7033'):
-    """SDP 查询通道号"""
-    channels = []
-    try:
-        r = subprocess.run(
-            ['sdptool', 'browse', mac],
-            capture_output=True, text=True, timeout=15
-        )
-        if r.stdout:
-            blocks = r.stdout.split('Service Name:')
-            for block in blocks:
-                if target_uuid.lower() in block.lower() or target_uuid.upper() in block.upper():
-                    for line in block.split('\n'):
-                        if 'Channel:' in line:
-                            try:
-                                ch = int(line.split('Channel:')[1].strip())
-                                if ch not in channels:
-                                    channels.append(ch)
-                                    log(f"   SDP: UUID {target_uuid} → CH{ch}")
-                            except ValueError:
-                                pass
-            if not channels:
-                for block in blocks:
-                    if 'Serial Port' in block:
-                        for line in block.split('\n'):
-                            if 'Channel:' in line:
-                                try:
-                                    ch = int(line.split('Channel:')[1].strip())
-                                    if ch not in channels:
-                                        channels.append(ch)
-                                except ValueError:
-                                    pass
-    except Exception as e:
-        log(f"   ⚠️ SDP 查询失败: {e}")
-    return channels
-
-
-def rfcomm_bind_connect(mac, channel):
-    """方案 B: rfcomm bind → bluetoothctl connect → rfcomm connect → open /dev/rfcomm0
-    这是 Linux 上最传统、最可靠的 RFCOMM 连接方式。
-    """
-    global _fd, _fd_is_socket
-
-    log("📡 方案 B: rfcomm bind + connect")
-
-    # 确保蓝牙适配器开启
-    try:
-        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-    except Exception:
-        pass
-
-    # 确保配对和信任
-    try:
-        r = subprocess.run(['bluetoothctl', 'info', mac],
-                           capture_output=True, text=True, timeout=5)
-        if 'Paired: yes' not in r.stdout:
-            log("   设备未配对，尝试配对...")
-            subprocess.run(['bluetoothctl', 'pair', mac],
-                           capture_output=True, text=True, timeout=15)
-        subprocess.run(['bluetoothctl', 'trust', mac],
-                       capture_output=True, text=True, timeout=5)
-    except Exception:
-        pass
-
-    for attempt in range(1, 4):
-        log(f"🔗 === 第 {attempt}/3 轮 rfcomm bind 连接 {mac} ===")
-
-        # 清理 /dev/rfcomm0
-        try:
-            subprocess.run(['sudo', 'rfcomm', 'release', '0'],
-                           stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=3)
-        except Exception:
-            pass
-        try:
-            subprocess.run(['sudo', 'pkill', '-9', '-f', 'rfcomm connect'],
-                           stderr=subprocess.DEVNULL, timeout=2)
-        except Exception:
-            pass
-        time.sleep(0.3)
-
-        # SDP 查询通道（第一轮）
-        if attempt == 1:
-            sdp_channels = sdp_find_channel(mac)
-
-        # 候选通道
-        candidates = list(sdp_channels) if sdp_channels else []
-        if channel not in candidates:
-            candidates.append(channel)
-        for ch in [1, 2, 3, 4, 5, 6]:
-            if ch not in candidates:
-                candidates.append(ch)
-
-        log(f"📋 候选通道: {candidates}")
-
-        for ch in candidates:
-            retries = 2 if ch in (sdp_channels if sdp_channels else []) else 1
-            for retry in range(1, retries + 1):
-                log(f"   📡 rfcomm connect /dev/rfcomm0 {mac} CH{ch} (第{retry}/{retries}次)")
-
-                # 先释放
-                try:
-                    subprocess.run(['sudo', 'rfcomm', 'release', '0'],
-                                   stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=2)
-                except Exception:
-                    pass
-                time.sleep(0.2)
-
-                # rfcomm connect 在后台运行（它会阻塞直到连接断开）
-                rfcomm_proc = None
-                try:
-                    rfcomm_proc = subprocess.Popen(
-                        ['sudo', 'rfcomm', 'connect', '0', mac, str(ch)],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
-                    )
-                except Exception as e:
-                    log(f"   ⚠️ rfcomm connect 启动失败: {e}")
-                    continue
-
-                # 等待 /dev/rfcomm0 出现
-                dev_path = '/dev/rfcomm0'
-                opened = False
-                for wait in range(30):  # 最多等 6 秒
-                    time.sleep(0.2)
-
-                    # 检查进程是否已退出（失败）
-                    if rfcomm_proc.poll() is not None:
-                        stderr_out = rfcomm_proc.stderr.read().decode('utf-8', errors='replace')
-                        log(f"   ⚠️ rfcomm connect 已退出: {stderr_out.strip()[:200]}")
-                        break
-
-                    if os.path.exists(dev_path):
-                        try:
-                            fd = os.open(dev_path, os.O_RDWR | os.O_NONBLOCK)
-                            _fd = fd
-                            _fd_is_socket = False
-                            _fd_ready.set()
-                            log(f"   ✅ /dev/rfcomm0 已打开! fd={fd}")
-                            opened = True
-                            break
-                        except OSError as e:
-                            log(f"   ⚠️ 打开 {dev_path} 失败: {e}")
-                            continue
-
-                if opened:
-                    return True
-
-                # 清理失败的 rfcomm connect
-                if rfcomm_proc and rfcomm_proc.poll() is None:
-                    try:
-                        rfcomm_proc.kill()
-                    except Exception:
-                        pass
-
-                if retry < retries:
-                    time.sleep(1)
-
-        time.sleep(2)
-
-    return False
-
-
-# =============================================
-# 方案 C: 回退方案 - bluetoothctl connect + RFCOMM socket
-# 设置 BT_SECURITY_LOW 尝试绕过安全限制
-# =============================================
-
-def socket_connect(mac, channel, timeout=10):
-    """用 RFCOMM socket 连接，设置 BT_SECURITY_LOW"""
-    log(f"   🔗 RFCOMM socket CH{channel} (SECURITY_LOW)")
-
-    try:
-        s = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
-
-        # 设置安全级别为 LOW（不要求加密/认证）
-        try:
-            s.setsockopt(SOL_BLUETOOTH, BT_SECURITY,
-                         struct.pack('I', BT_SECURITY_LOW))
-            log(f"      BT_SECURITY_LOW 已设置")
-        except Exception as e:
-            log(f"      ⚠️ 设置 BT_SECURITY_LOW 失败: {e}")
-
-        s.settimeout(timeout)
-        s.connect((mac, channel))
-        s.settimeout(None)
-
-        log(f"   ✅ CH{channel} 连接成功！")
-        return s
-    except Exception as e:
-        log(f"   ⚠️ CH{channel} 失败: {e}")
-        try:
-            s.close()
-        except Exception:
-            pass
-        return None
-
-
-def fallback_connect(mac, channel):
-    """方案 C 回退：bluetoothctl connect + RFCOMM socket + BT_SECURITY_LOW"""
-    global _fd, _fd_is_socket
-
-    log("📡 方案 C: bluetoothctl connect + RFCOMM socket (BT_SECURITY_LOW)")
-
-    # 确保蓝牙适配器开启
-    try:
-        subprocess.run(['sudo', 'hciconfig', 'hci0', 'up'],
-                       stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-    except Exception:
-        pass
-
-    # 确保配对
-    try:
-        r = subprocess.run(['bluetoothctl', 'info', mac],
-                           capture_output=True, text=True, timeout=5)
-        if 'Paired: yes' not in r.stdout:
-            subprocess.run(['bluetoothctl', 'pair', mac],
-                           capture_output=True, text=True, timeout=15)
-            subprocess.run(['bluetoothctl', 'trust', mac],
-                           capture_output=True, text=True, timeout=5)
-    except Exception:
-        pass
-
-    for attempt in range(1, 4):
-        log(f"🔗 === 第 {attempt}/3 轮连接 {mac} ===")
-
-        # bluetoothctl connect 建立 ACL
-        try:
-            r = subprocess.run(
-                ['bluetoothctl', 'connect', mac],
-                capture_output=True, text=True, timeout=15
-            )
-            output = r.stdout + r.stderr
-            log(f"   bluetoothctl: {output.strip()[:200]}")
-        except Exception as e:
-            log(f"   ⚠️ bluetoothctl connect: {e}")
-            time.sleep(2)
-            continue
-
-        # SDP 查询通道
-        sdp_channels = []
-        try:
-            r = subprocess.run(
-                ['sdptool', 'browse', mac],
-                capture_output=True, text=True, timeout=15
-            )
-            if r.stdout:
-                blocks = r.stdout.split('Service Name:')
-                for block in blocks:
-                    if '7033' in block.lower() or '7033' in block.upper():
-                        for line in block.split('\n'):
-                            if 'Channel:' in line:
-                                try:
-                                    ch = int(line.split('Channel:')[1].strip())
-                                    if ch not in sdp_channels:
-                                        sdp_channels.append(ch)
-                                        log(f"   SDP: UUID 7033 → CH{ch}")
-                                except ValueError:
-                                    pass
-                if not sdp_channels:
-                    for block in blocks:
-                        if 'Serial Port' in block:
-                            for line in block.split('\n'):
-                                if 'Channel:' in line:
-                                    try:
-                                        ch = int(line.split('Channel:')[1].strip())
-                                        if ch not in sdp_channels:
-                                            sdp_channels.append(ch)
-                                    except ValueError:
-                                        pass
-        except Exception:
-            pass
-
-        # 候选通道
-        candidates = list(sdp_channels)
-        if channel not in candidates:
-            candidates.append(channel)
-        for ch in [1, 2, 3, 4, 5, 6]:
-            if ch not in candidates:
-                candidates.append(ch)
-
-        log(f"📋 候选通道: {candidates}")
-
-        for ch in candidates:
-            retries = 3 if ch in sdp_channels else 1
-            for retry in range(1, retries + 1):
-                if retries > 1:
-                    log(f"   � CH{ch} 第 {retry}/{retries} 次")
-                s = socket_connect(mac, ch)
-                if s:
-                    _fd = s
-                    _fd_is_socket = True
-                    _fd_ready.set()
-                    return True
-                if retry < retries:
-                    time.sleep(1)
-
-        time.sleep(2)
-
-    return False
-
-
-# =============================================
-# 通用读写线程
-# =============================================
-
-def cleanup():
+def cleanup_old_processes():
     """清理旧的桥接进程"""
+    import subprocess
     my_pid = os.getpid()
-    log("🧹 清理旧连接...")
 
     for pattern in ['rfcomm_spp_bridge.py', 'rfcomm_stable.py',
                     'rfcomm_socket_simple.py', 'rfcomm_bind_bridge.py']:
@@ -580,17 +47,13 @@ def cleanup():
                         pid = int(line.strip())
                         if pid != my_pid:
                             os.kill(pid, 9)
-                            log(f"   杀死旧桥接 PID {pid}")
+                            log(f"   杀死旧进程 PID {pid}")
                     except Exception:
                         pass
         except Exception:
             pass
 
-    try:
-        subprocess.run(['sudo', 'pkill', '-9', '-f', 'rfcomm connect'],
-                       stderr=subprocess.DEVNULL, timeout=2)
-    except Exception:
-        pass
+    # 释放 rfcomm 绑定
     try:
         subprocess.run(['sudo', 'rfcomm', 'release', 'all'],
                        stderr=subprocess.DEVNULL, timeout=2)
@@ -598,62 +61,64 @@ def cleanup():
         pass
 
     time.sleep(0.3)
-    log("🧹 清理完成")
 
 
-def reader_thread():
-    """fd/socket → stdout"""
-    global _fd
+def connect_spp(mac, channel, timeout=10):
+    """
+    直接用 Bluetooth RFCOMM socket 连接设备。
+    这一步会触发系统的连接请求（自动建立 ACL）。
+    """
+    log(f"🔗 正在连接设备: {mac} (Channel {channel})...")
+
+    client_sock = socket.socket(AF_BLUETOOTH, socket.SOCK_STREAM, BTPROTO_RFCOMM)
+    client_sock.settimeout(timeout)
+
+    try:
+        client_sock.connect((mac, channel))
+        client_sock.settimeout(None)  # 连接后切回阻塞模式
+        log(f"✅ 连接已建立！")
+        return client_sock
+    except Exception as e:
+        log(f"❌ 连接失败 (CH{channel}): {e}")
+        try:
+            client_sock.close()
+        except Exception:
+            pass
+        return None
+
+
+def reader_thread(sock, alive_event):
+    """socket → stdout"""
     n = 0
     total = 0
     log("📡 读取线程启动")
 
     try:
-        while _alive.is_set():
-            if _fd_is_socket:
-                # socket 方式
-                try:
-                    rlist, _, _ = select.select([_fd], [], [], 0.2)
-                except (OSError, ValueError):
-                    if not _alive.is_set():
-                        break
-                    continue
-                if not rlist:
-                    continue
-                try:
-                    data = _fd.recv(4096)
-                except socket.timeout:
-                    continue
-                except OSError as e:
-                    if not _alive.is_set():
-                        break
-                    log(f"❌ 读取错误: {e}")
-                    _alive.clear()
+        while alive_event.is_set():
+            try:
+                rlist, _, _ = select.select([sock], [], [], 0.2)
+            except (OSError, ValueError):
+                if not alive_event.is_set():
                     break
-            else:
-                # fd 方式
-                try:
-                    rlist, _, _ = select.select([_fd], [], [], 0.2)
-                except (OSError, ValueError):
-                    if not _alive.is_set():
-                        break
-                    continue
-                if not rlist:
-                    continue
-                try:
-                    data = os.read(_fd, 4096)
-                except OSError as e:
-                    if e.errno == 11:  # EAGAIN
-                        continue
-                    if not _alive.is_set():
-                        break
-                    log(f"❌ 读取错误: {e}")
-                    _alive.clear()
+                continue
+
+            if not rlist:
+                continue
+
+            try:
+                data = sock.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError as e:
+                if not alive_event.is_set():
                     break
+                log(f"❌ 读取错误: {e}")
+                alive_event.clear()
+                break
 
             if not data:
                 log("📴 远端关闭连接")
-                _alive.clear()
+                alive_event.clear()
                 break
 
             n += 1
@@ -666,18 +131,17 @@ def reader_thread():
                 sys.stdout.buffer.flush()
             except BrokenPipeError:
                 log("📴 stdout 管道断裂")
-                _alive.clear()
+                alive_event.clear()
                 break
     except Exception as e:
         log(f"❌ 读取线程异常: {e}")
-        _alive.clear()
+        alive_event.clear()
     finally:
         log(f"📊 读取结束: {n}次 {total}B")
 
 
-def writer_thread():
-    """stdin → fd/socket"""
-    global _fd
+def writer_thread(sock, alive_event):
+    """stdin → socket"""
     n = 0
     total = 0
     log("📡 写入线程启动")
@@ -687,11 +151,11 @@ def writer_thread():
         flags = fcntl.fcntl(stdin_fd, fcntl.F_GETFL)
         fcntl.fcntl(stdin_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
-        while _alive.is_set():
+        while alive_event.is_set():
             try:
                 rlist, _, _ = select.select([sys.stdin], [], [], 0.2)
             except (ValueError, OSError):
-                if not _alive.is_set():
+                if not alive_event.is_set():
                     break
                 continue
 
@@ -711,122 +175,98 @@ def writer_thread():
             hex_preview = ' '.join(f'{b:02X}' for b in data[:64])
             log(f"📨 #{n} [{len(data)}B]: {hex_preview}")
 
-            if _fd_is_socket:
-                try:
-                    _fd.sendall(data)
-                    log(f"✅ 已发送 {len(data)}B")
-                except OSError as e:
-                    log(f"❌ 发送错误: {e}")
-                    _alive.clear()
-                    return
-            else:
-                offset = 0
-                while offset < len(data) and _alive.is_set():
-                    try:
-                        written = os.write(_fd, data[offset:])
-                        offset += written
-                    except OSError as e:
-                        if e.errno == 11:  # EAGAIN
-                            time.sleep(0.01)
-                            continue
-                        log(f"❌ 写入错误: {e}")
-                        _alive.clear()
-                        return
+            try:
+                sock.sendall(data)
                 log(f"✅ 已发送 {len(data)}B")
+            except OSError as e:
+                log(f"❌ 发送错误: {e}")
+                alive_event.clear()
+                return
 
     except Exception as e:
         log(f"❌ 写入线程异常: {e}")
-        _alive.clear()
+        alive_event.clear()
     finally:
         log(f"📊 发送结束: {n}次 {total}B")
 
 
 def main():
-    global _fd
-
     if len(sys.argv) != 3:
         print("用法: rfcomm_spp_bridge.py <MAC> <通道>", file=sys.stderr)
         sys.exit(1)
 
     mac = sys.argv[1]
-    ch = int(sys.argv[2])
+    channel = int(sys.argv[2])
 
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    log("SPP 桥接 (D-Bus Profile / rfcomm bind / socket 三方案)")
+    log("SPP 桥接 (直接 Bluetooth Socket)")
     log(f"  MAC: {mac}")
-    log(f"  默认通道: {ch}")
-    log(f"  D-Bus 可用: {HAS_DBUS}")
+    log(f"  Channel: {channel}")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     # 信号处理
+    alive = threading.Event()
+    alive.set()
+
     def on_signal(signum, _):
         log(f"收到信号 {signum}，准备退出")
-        _alive.clear()
+        alive.clear()
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
-    # 1. 清理旧连接
-    cleanup()
+    # 1. 清理旧进程
+    cleanup_old_processes()
 
-    # 2. 尝试连接
-    connected = False
+    # 2. 连接（带重试，尝试指定通道 + 常见通道）
+    client_sock = None
+    candidates = [channel]
+    for ch in [1, 2, 3, 4, 5, 6]:
+        if ch not in candidates:
+            candidates.append(ch)
 
-    # 方案 A: D-Bus Profile
-    if HAS_DBUS:
-        log("📡 尝试方案 A: BlueZ D-Bus Profile API")
-        connected = dbus_connect(mac, timeout=15)
+    for attempt in range(1, 4):
+        log(f"🔗 第 {attempt}/3 轮连接尝试")
+        for ch in candidates:
+            client_sock = connect_spp(mac, ch, timeout=10)
+            if client_sock:
+                log(f"✅ 成功连接到 Channel {ch}")
+                break
+        if client_sock:
+            break
+        if attempt < 3:
+            log(f"⏳ 等待 2 秒后重试...")
+            time.sleep(2)
 
-    # 方案 B: rfcomm bind + connect
-    if not connected:
-        if HAS_DBUS:
-            log("⚠️ D-Bus Profile 未成功，尝试方案 B")
-        log("📡 尝试方案 B: rfcomm bind + connect")
-        connected = rfcomm_bind_connect(mac, ch)
-
-    # 方案 C: 回退到 bluetoothctl connect + RFCOMM socket (BT_SECURITY_LOW)
-    if not connected:
-        log("⚠️ 方案 B 未成功，尝试方案 C")
-        log("📡 尝试方案 C: bluetoothctl + RFCOMM socket (BT_SECURITY_LOW)")
-        connected = fallback_connect(mac, ch)
-
-    if not connected:
-        log("❌ 无法建立 SPP 连接")
+    if not client_sock:
+        log("❌ 所有通道连接均失败")
+        log("提示：请检查设备是否进入配对模式或被其他设备占用。")
         sys.exit(1)
 
-    _alive.set()
-
     log("✅ 连接已建立，开始双向数据传输")
-    log("   连接将保持直到手动断开")
     log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-    # 3. 启动读写线程
-    t_read = threading.Thread(target=reader_thread, daemon=True)
-    t_write = threading.Thread(target=writer_thread, daemon=True)
+    # 3. 启动双向桥接
+    t_read = threading.Thread(target=reader_thread, args=(client_sock, alive), daemon=True)
+    t_write = threading.Thread(target=writer_thread, args=(client_sock, alive), daemon=True)
     t_read.start()
     t_write.start()
 
     # 4. 主线程等待
     try:
-        while _alive.is_set():
+        while alive.is_set():
             if not t_read.is_alive() and not t_write.is_alive():
                 break
             time.sleep(0.2)
     except KeyboardInterrupt:
         log("KeyboardInterrupt")
 
-    _alive.clear()
+    alive.clear()
     log("🔌 关闭连接...")
 
     try:
-        if _fd_is_socket:
-            _fd.close()
-        else:
-            os.close(_fd)
+        client_sock.close()
     except Exception:
         pass
-
-    if _mainloop and _mainloop.is_running():
-        _mainloop.quit()
 
     t_read.join(timeout=2)
     t_write.join(timeout=2)
