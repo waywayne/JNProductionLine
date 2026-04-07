@@ -584,48 +584,35 @@ class ProductionTestCommands {
         
       case 0x01: // 连接热点 - 返回IP地址
       case 0x05: // WiFi连接命令 - 返回IP地址
-        if (payload.length >= 2) { // CMD + IP数据或状态码
-          // 检查第二个字节是否是状态码（非ASCII可打印字符）
-          // 状态码通常是 0x00 (成功), 0x01 (失败), 等
-          int secondByte = payload[1];
+        // 设备返回格式: [CMD][OPT][IP_DATA...]
+        // 需要跳过 CMD 和 OPT 两个字节
+        // 先确定数据起始偏移：如果第二个字节等于 opt，说明设备回显了 OPT，跳过2字节
+        int dataOffset = 1; // 默认跳过 CMD
+        if (payload.length >= 2 && payload[1] == opt) {
+          dataOffset = 2; // 跳过 CMD + OPT
+        }
+        
+        if (payload.length > dataOffset) {
+          // IP地址以ASCII字符串形式返回，格式如 "192.168.1.100"
+          List<int> ipBytes = payload.sublist(dataOffset);
           
-          // 如果第二个字节是状态码（0x00-0x0F 范围内的控制字符）
-          if (secondByte < 0x20) {
-            // 这是状态码响应
-            if (secondByte == 0x00) {
-              // 0x00 = 成功，但没有IP数据
-              result['success'] = true;
-              result['statusCode'] = secondByte;
-              result['message'] = 'WiFi命令执行成功（无IP返回）';
-            } else {
-              // 其他状态码 = 失败或进行中
-              result['success'] = false;
-              result['statusCode'] = secondByte;
-              result['error'] = 'WiFi命令返回状态码: 0x${secondByte.toRadixString(16).padLeft(2, '0').toUpperCase()}';
-            }
+          // 找到\0的位置
+          int nullIndex = ipBytes.indexOf(0);
+          if (nullIndex >= 0) {
+            ipBytes = ipBytes.sublist(0, nullIndex);
+          }
+          
+          // 将字节转换为ASCII字符串
+          String ipAddress = String.fromCharCodes(ipBytes);
+          
+          // 验证IP地址格式（应该包含数字和点）
+          if (ipAddress.isNotEmpty && _isValidIPFormat(ipAddress)) {
+            result['ip'] = ipAddress;
+            result['success'] = true;
           } else {
-            // IP地址以ASCII字符串形式返回，格式如 "192.168.1.100"
-            // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
-            List<int> ipBytes = payload.sublist(1);
-            
-            // 找到\0的位置
-            int nullIndex = ipBytes.indexOf(0);
-            if (nullIndex >= 0) {
-              ipBytes = ipBytes.sublist(0, nullIndex);
-            }
-            
-            // 将字节转换为ASCII字符串
-            String ipAddress = String.fromCharCodes(ipBytes);
-            
-            // 验证IP地址格式（应该包含数字和点）
-            if (ipAddress.isNotEmpty && _isValidIPFormat(ipAddress)) {
-              result['ip'] = ipAddress;
-              result['success'] = true;
-            } else {
-              result['success'] = false;
-              result['error'] = 'IP地址格式无效: $ipAddress';
-              result['rawBytes'] = payload.sublist(1).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ');
-            }
+            result['success'] = false;
+            result['error'] = 'IP地址格式无效: $ipAddress';
+            result['rawBytes'] = payload.sublist(dataOffset).map((b) => '0x${b.toRadixString(16).padLeft(2, '0').toUpperCase()}').join(' ');
           }
         } else {
           // 如果没有IP数据，也认为连接成功
@@ -634,9 +621,14 @@ class ProductionTestCommands {
         break;
         
       case 0x02: // 测试RSSI
-        if (payload.length >= 2) { // CMD + RSSI值
+        // 设备返回格式: [CMD][OPT][RSSI] 或 [CMD][RSSI]
+        int rssiOffset = 1;
+        if (payload.length >= 2 && payload[1] == opt) {
+          rssiOffset = 2; // 跳过 CMD + OPT
+        }
+        if (payload.length > rssiOffset) {
           // RSSI值通常是有符号整数
-          int rssi = payload[1];
+          int rssi = payload[rssiOffset];
           if (rssi > 127) rssi = rssi - 256; // 转换为有符号数
           result['rssi'] = rssi;
           result['success'] = true;
@@ -645,10 +637,14 @@ class ProductionTestCommands {
         
       case 0x03: // 获取MAC地址
       case 0x04: // 烧录MAC地址
-        if (payload.length >= 2) { // 至少需要 CMD + 数据
+        // 设备返回格式: [CMD][OPT][MAC_DATA...] 或 [CMD][MAC_DATA...]
+        int macOffset = 1;
+        if (payload.length >= 2 && payload[1] == opt) {
+          macOffset = 2; // 跳过 CMD + OPT
+        }
+        if (payload.length > macOffset) {
           // MAC地址以ASCII字符串形式返回，格式如 "00:90:4c:2e:e3:16"
-          // 从索引1开始读取（跳过CMD字节），直到遇到\0或数据结束
-          List<int> macBytes = payload.sublist(1);
+          List<int> macBytes = payload.sublist(macOffset);
           
           // 找到\0的位置
           int nullIndex = macBytes.indexOf(0);
