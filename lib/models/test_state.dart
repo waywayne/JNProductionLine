@@ -4168,7 +4168,7 @@ class TestState extends ChangeNotifier {
   }
 
   /// IMU数据获取测试
-  /// 开始获取数据 -> 持续接收5秒 -> 询问是否结束 -> 停止获取数据
+  /// 开始获取数据 -> 持续接收10秒 -> 询问是否结束 -> 停止获取数据
   Future<bool> testIMU() async {
     // 检查连接状态：串口或Linux蓝牙
     final bool isConnected = _serialService.isConnected || _linuxBtService.isConnected;
@@ -4216,10 +4216,10 @@ class TestState extends ChangeNotifier {
       _logState?.success('✅ 开始获取IMU数据命令发送成功', type: LogType.debug);
       _logState?.info('📡 开始监听IMU数据流...', type: LogType.debug);
 
-      // 步骤2: 持续接收IMU数据5秒
+      // 步骤2: 持续接收IMU数据10秒
       int dataCount = 0;
       final startTime = DateTime.now();
-      final endTime = startTime.add(const Duration(seconds: 5));
+      final endTime = startTime.add(const Duration(seconds: 10));
       
       // 设置数据流监听器
       StreamSubscription? dataSubscription;
@@ -4259,7 +4259,7 @@ class TestState extends ChangeNotifier {
         }
       });
 
-      // 等待5秒
+      // 等待10秒
       while (DateTime.now().isBefore(endTime)) {
         await Future.delayed(const Duration(milliseconds: 100));
       }
@@ -4268,7 +4268,7 @@ class TestState extends ChangeNotifier {
       await dataSubscription?.cancel();
 
       _logState?.info('', type: LogType.debug);
-      _logState?.info('⏰ 5秒数据收集完成，共收到 $dataCount 条IMU数据', type: LogType.debug);
+      _logState?.info('⏰ 10秒数据收集完成，共收到 $dataCount 条IMU数据', type: LogType.debug);
 
       if (!receivedData) {
         _logState?.warning('⚠️  未收到IMU数据，可能设备未正确响应', type: LogType.debug);
