@@ -76,21 +76,21 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     _stepResults3.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: '产测开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '设备电压测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '电量检测测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '充电状态测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: '右触控-TK1测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: '右触控-TK2测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '右触控-TK3测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '左触控-佩戴测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '左触控-点击测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: '左触控-双击测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 16, name: '左触控-长按测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 17, name: '结束产测', status: TestStepStatus.pending),
+      // TestStepResult(stepNumber: 3, name: '设备电压测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '电量检测测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '充电状态测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: '右触控-TK1测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '右触控-TK2测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '右触控-TK3测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '左触控-佩戴测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '左触控-点击测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '左触控-双击测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '左触控-长按测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '结束产测', status: TestStepStatus.pending),
     ]);
   }
 
@@ -1169,66 +1169,66 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             success = await _testProductionStart(state, logState);
             message = success ? '产测开始成功' : '产测开始失败';
             break;
-          case 2: // 设备电压测试
-            final result = await _testVoltage3(state, logState);
-            success = result['success'] as bool;
-            message = result['message'] as String?;
-            break;
-          case 3: // 电量检测测试
+          // case N: // 设备电压测试（已注释）
+          //   final result = await _testVoltage3(state, logState);
+          //   success = result['success'] as bool;
+          //   message = result['message'] as String?;
+          //   break;
+          case 2: // 电量检测测试
             final result = await _testBattery3(state, logState);
             success = result['success'] as bool;
             message = result['message'] as String?;
             break;
-          case 4: // 充电状态测试
+          case 3: // 充电状态测试
             final result = await _testChargeStatus3(state, logState);
             success = result['success'] as bool;
             message = result['message'] as String?;
             break;
-          case 5: // LED灯(外侧)开启
+          case 4: // LED灯(外侧)开启
             success = await _testLED3(state, logState, isOuter: true, turnOn: true);
             message = success ? 'LED外侧开启成功' : 'LED外侧开启失败';
             break;
-          case 6: // LED灯(外侧)关闭
+          case 5: // LED灯(外侧)关闭
             success = await _testLED3(state, logState, isOuter: true, turnOn: false);
             message = success ? 'LED外侧关闭成功' : 'LED外侧关闭失败';
             break;
-          case 7: // LED灯(内侧)开启
+          case 6: // LED灯(内侧)开启
             success = await _testLED3(state, logState, isOuter: false, turnOn: true);
             message = success ? 'LED内侧开启成功' : 'LED内侧开启失败';
             break;
-          case 8: // LED灯(内侧)关闭
+          case 7: // LED灯(内侧)关闭
             success = await _testLED3(state, logState, isOuter: false, turnOn: false);
             message = success ? 'LED内侧关闭成功' : 'LED内侧关闭失败';
             break;
-          case 9: // 右触控-TK1测试
+          case 8: // 右触控-TK1测试
             success = await _testTouch3(state, logState, touchType: 'TK1');
             message = success ? 'TK1测试通过' : 'TK1测试失败';
             break;
-          case 10: // 右触控-TK2测试
+          case 9: // 右触控-TK2测试
             success = await _testTouch3(state, logState, touchType: 'TK2');
             message = success ? 'TK2测试通过' : 'TK2测试失败';
             break;
-          case 11: // 右触控-TK3测试
+          case 10: // 右触控-TK3测试
             success = await _testTouch3(state, logState, touchType: 'TK3');
             message = success ? 'TK3测试通过' : 'TK3测试失败';
             break;
-          case 12: // 左触控-佩戴测试
+          case 11: // 左触控-佩戴测试
             success = await _testLeftTouch3(state, logState, touchType: 'wear');
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 13: // 左触控-点击测试
+          case 12: // 左触控-点击测试
             success = await _testLeftTouch3(state, logState, touchType: 'click');
             message = success ? '点击检测通过' : '点击检测失败';
             break;
-          case 14: // 左触控-双击测试
+          case 13: // 左触控-双击测试
             success = await _testLeftTouch3(state, logState, touchType: 'double_click');
             message = success ? '双击检测通过' : '双击检测失败';
             break;
-          case 15: // 左触控-长按测试
+          case 14: // 左触控-长按测试
             success = await _testLeftTouch3(state, logState, touchType: 'long_press');
             message = success ? '长按检测通过' : '长按检测失败';
             break;
-          case 16: // 结束产测
+          case 15: // 结束产测
             success = await _testProductionEnd3(state, logState);
             message = success ? '产测结束成功' : '产测结束失败';
             break;
@@ -1275,52 +1275,64 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
   }
 
-  // ========== 工位3: 蓝牙连接测试 ==========
+  // ========== 工位3: 蓝牙连接测试（与工位1一致） ==========
   Future<bool> _testBluetoothConnection3(TestState state, LogState logState) async {
-    logState.info('🔵 步骤1: 蓝牙连接测试');
-    
-    final bluetoothAddress = _productInfo3!.bluetoothAddress;
-    if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
-      logState.error('❌ 蓝牙地址为空');
+    try {
+      if (_productInfo3 == null) {
+        logState.error('设备信息未获取');
+        return false;
+      }
+      
+      final bluetoothAddress = _productInfo3!.bluetoothAddress;
+      if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙地址为空');
+        return false;
+      }
+
+      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      logState.info('🔗 使用 ${_getMethodName(_selectedMethod3)}');
+      
+      bool success = false;
+      
+      switch (_selectedMethod3) {
+        case BluetoothTestMethod.autoScan:
+          success = await state.testBluetoothMethod1AutoScan(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
+          break;
+        case BluetoothTestMethod.directConnect:
+          success = await state.testBluetoothMethod2DirectConnect(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
+          break;
+        case BluetoothTestMethod.rfcommBind:
+          success = await state.testBluetoothMethod3RfcommBind(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
+          break;
+        case BluetoothTestMethod.rfcommSocket:
+          success = await state.testBluetoothMethod4RfcommSocket(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
+          break;
+        case BluetoothTestMethod.serial:
+          success = await state.testBluetoothMethod5Serial(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
+          break;
+        case BluetoothTestMethod.commandLine:
+          success = await state.testBluetoothMethod6CommandLine(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
+          break;
+      }
+
+      if (success) {
+        logState.info('✅ 蓝牙连接成功');
+        // 蓝牙连接成功后调用 BYD MES start
+        // logState.info('📤 调用 BYD MES start...');
+        // _mesService3.printConfig();
+        // final mesResult = await _mesService3.start(_productInfo3!.snCode);
+        // if (mesResult['success'] == true) {
+        //   logState.info('✅ MES start 成功');
+        // } else {
+        //   logState.warning('⚠️ MES start 失败: ${mesResult['error']}');
+        // }
+      }
+
+      return success;
+    } catch (e) {
+      logState.error('蓝牙连接测试失败: $e');
       return false;
     }
-
-    bool success = false;
-    switch (_selectedMethod3) {
-      case BluetoothTestMethod.autoScan:
-        success = await state.testBluetoothMethod1AutoScan(deviceAddress: bluetoothAddress);
-        break;
-      case BluetoothTestMethod.directConnect:
-        success = await state.testBluetoothMethod2DirectConnect(deviceAddress: bluetoothAddress);
-        break;
-      case BluetoothTestMethod.rfcommBind:
-        success = await state.testBluetoothMethod3RfcommBind(deviceAddress: bluetoothAddress);
-        break;
-      case BluetoothTestMethod.rfcommSocket:
-        success = await state.testBluetoothMethod4RfcommSocket(deviceAddress: bluetoothAddress);
-        break;
-      case BluetoothTestMethod.serial:
-        success = await state.testBluetoothMethod5Serial(deviceAddress: bluetoothAddress);
-        break;
-      case BluetoothTestMethod.commandLine:
-        success = await state.testBluetoothMethod6CommandLine(deviceAddress: bluetoothAddress);
-        break;
-    }
-
-    if (success) {
-      logState.info('✅ 蓝牙连接成功');
-      // 蓝牙连接成功后调用 BYD MES start
-      logState.info('📤 调用 BYD MES start...');
-      _mesService3.printConfig();
-      final mesResult = await _mesService3.start(_productInfo3!.snCode);
-      if (mesResult['success'] == true) {
-        logState.info('✅ MES start 成功');
-      } else {
-        logState.warning('⚠️ MES start 失败: ${mesResult['error']}');
-      }
-    }
-
-    return success;
   }
 
   // ========== 工位3: 电压测试 ==========
