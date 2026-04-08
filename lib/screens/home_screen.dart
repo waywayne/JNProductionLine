@@ -16,6 +16,7 @@ import '../widgets/bluetooth_test_dialog.dart';
 import '../widgets/wifi_test_steps_widget.dart';
 import '../widgets/test_report_dialog.dart';
 import '../widgets/gpib_detection_dialog.dart';
+import '../widgets/image_quality_dialog.dart';
 import '../widgets/test_mode_selector.dart';
 import '../widgets/connection_selector.dart';
 
@@ -79,6 +80,10 @@ class _HomeScreenState extends State<HomeScreen> {
             // Sensor测试弹窗
             if (testState.showSensorDialog)
               const SensorDataDialog(),
+            
+            // 图片质量检测弹窗
+            if (testState.showImageQualityDialog)
+              const ImageQualityDialog(),
             
             // IMU测试弹窗
             if (testState.showIMUDialog)

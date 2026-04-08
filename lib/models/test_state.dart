@@ -11,6 +11,7 @@ import '../services/python_bluetooth_service.dart';
 import '../services/production_test_commands.dart';
 import '../services/gtp_protocol.dart';
 import '../services/gpib_service.dart';
+import '../services/image_test_service.dart';
 import '../services/sn_manager_service.dart';
 import '../services/sn_api_service.dart';
 import '../services/product_sn_api.dart';
@@ -200,6 +201,12 @@ class TestState extends ChangeNotifier {
   int _sensorRetryCount = 0;
   Uint8List? _completeImageData;
 
+  // 图片质量检测状态
+  bool _showImageQualityDialog = false;
+  String _imageQualityStatus = ''; // 'detecting', 'pass', 'fail'
+  String _imageQualityMessage = '';
+  double? _imageQualityOutput; // 算法输出值
+
   // IMU数据流监听状态
   bool _isIMUTesting = false;
   bool _showIMUDialog = false;
@@ -296,6 +303,12 @@ class TestState extends ChangeNotifier {
   bool get showSensorDialog => _showSensorDialog;
   List<Map<String, dynamic>> get sensorDataList => _sensorDataList;
   Uint8List? get completeImageData => _completeImageData;
+
+  // 图片质量检测状态getter
+  bool get showImageQualityDialog => _showImageQualityDialog;
+  String get imageQualityStatus => _imageQualityStatus;
+  String get imageQualityMessage => _imageQualityMessage;
+  double? get imageQualityOutput => _imageQualityOutput;
 
   // IMU测试状态getter
   bool get isIMUTesting => _isIMUTesting;
@@ -576,6 +589,7 @@ class TestState extends ChangeNotifier {
       // 关闭所有弹窗
       _showIMUDialog = false;
       _showSensorDialog = false;
+      _showImageQualityDialog = false;
       _showBluetoothDialog = false;
       _showMICDialog = false;
       
@@ -1023,6 +1037,7 @@ class TestState extends ChangeNotifier {
     _showWiFiDialog = false;
     _showIMUDialog = false;
     _showSensorDialog = false;
+    _showImageQualityDialog = false;
     _showLEDDialog = false;
     _showTouchDialog = false;
     _showTestReportDialog = false;
@@ -9934,6 +9949,7 @@ class TestState extends ChangeNotifier {
 
   /// 测试摄像头图片质量（调用image_test库）
   /// 返回true表示测试通过，false表示失败
+  /// 流程：检查文件存在 → 检查文件大小 → 弹窗显示图片+检测中提示 → FFI调用棋盘格检测 → 显示结果
   Future<bool> testCameraImageQuality() async {
     if (_sensorImagePath == null || _sensorImagePath!.isEmpty) {
       _logState?.error('❌ 图片路径为空，无法进行质量检测', type: LogType.debug);
@@ -9944,39 +9960,154 @@ class TestState extends ChangeNotifier {
       _logState?.info('🔍 开始检测图片质量...', type: LogType.debug);
       _logState?.info('   图片路径: $_sensorImagePath', type: LogType.debug);
       
-      // 检查文件是否存在
+      // ========== 步骤1: 检查文件是否存在 ==========
       final imageFile = File(_sensorImagePath!);
       if (!await imageFile.exists()) {
-        _logState?.error('❌ 图片文件不存在', type: LogType.debug);
+        _logState?.error('❌ 图片文件不存在: $_sensorImagePath', type: LogType.debug);
         return false;
       }
       
-      // TODO: 调用image_test库进行图片质量检测
-      // 参考.h文件中的接口判断图片是否通过
-      // 这里需要使用FFI调用C/C++库
-      
-      // 临时实现：检查文件大小是否合理
+      // ========== 步骤2: 检查文件大小 ==========
       final fileSize = await imageFile.length();
-      _logState?.info('   图片大小: $fileSize bytes', type: LogType.debug);
+      _logState?.info('   图片大小: ${(fileSize / 1024).toStringAsFixed(2)} KB', type: LogType.debug);
       
       if (fileSize < 1024) {
-        _logState?.error('❌ 图片文件太小，可能损坏', type: LogType.debug);
+        _logState?.error('❌ 图片文件太小 ($fileSize bytes)，可能损坏', type: LogType.debug);
         return false;
       }
       
-      // TODO: 实际的图片质量检测逻辑
-      // 1. 加载图片
-      // 2. 检测棋盘格角点
-      // 3. 计算图片清晰度
-      // 4. 判断是否符合标准
+      if (fileSize > 50 * 1024 * 1024) {
+        _logState?.error('❌ 图片文件过大 (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)', type: LogType.debug);
+        return false;
+      }
       
-      _logState?.success('✅ 图片质量检测通过', type: LogType.debug);
-      return true;
+      // ========== 步骤3: 显示图片弹窗 + "算法检测中" 提示 ==========
+      _completeImageData = await imageFile.readAsBytes();
+      _showImageQualityDialog = true;
+      _imageQualityStatus = 'detecting';
+      _imageQualityMessage = '算法检测中，请稍候...';
+      _imageQualityOutput = null;
+      notifyListeners();
+      
+      _logState?.info('📺 显示图片弹窗，开始算法检测...', type: LogType.debug);
+      
+      // 给 UI 一帧时间渲染弹窗
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // ========== 步骤4: 加载 image_test 原生库 ==========
+      final imageTestService = ImageTestService.instance;
+      
+      if (!imageTestService.isLoaded) {
+        _logState?.info('📦 加载 image_test 原生库...', type: LogType.debug);
+        final loaded = imageTestService.load();
+        if (!loaded) {
+          _logState?.error('❌ 无法加载 libimage_test.so 原生库', type: LogType.debug);
+          _logState?.error('   请确保 libimage_test.so 已部署到以下路径之一:', type: LogType.debug);
+          _logState?.error('   - <可执行文件目录>/lib/libimage_test.so', type: LogType.debug);
+          _logState?.error('   - /opt/jn-production-line/lib/libimage_test.so', type: LogType.debug);
+          _logState?.error('   - /usr/local/lib/libimage_test.so', type: LogType.debug);
+          
+          _imageQualityStatus = 'fail';
+          _imageQualityMessage = '无法加载 libimage_test.so 原生库';
+          notifyListeners();
+          
+          // 显示失败结果 2 秒后关闭弹窗
+          await Future.delayed(const Duration(seconds: 2));
+          _showImageQualityDialog = false;
+          notifyListeners();
+          return false;
+        }
+        
+        final version = imageTestService.getVersion();
+        if (version != null) {
+          _logState?.info('   库版本: $version', type: LogType.debug);
+        }
+      }
+      
+      // ========== 步骤5: 调用棋盘格检测（在 isolate 中运行避免阻塞 UI） ==========
+      _logState?.info('🔍 调用 imagetest_chessboard 检测棋盘格...', type: LogType.debug);
+      _logState?.info('   参数: gridX=17, gridY=29, threshold=1.0', type: LogType.debug);
+      
+      // FFI 调用（同步，但通常很快）
+      final result = imageTestService.testChessboard(
+        _sensorImagePath!,
+        gridX: 17,
+        gridY: 29,
+        threshold: 1.0,
+      );
+      
+      if (result == null) {
+        _logState?.error('❌ 棋盘格检测调用失败（返回 null）', type: LogType.debug);
+        
+        _imageQualityStatus = 'fail';
+        _imageQualityMessage = '棋盘格检测调用失败';
+        notifyListeners();
+        
+        await Future.delayed(const Duration(seconds: 2));
+        _showImageQualityDialog = false;
+        notifyListeners();
+        return false;
+      }
+      
+      // ========== 步骤6: 解析检测结果 ==========
+      final int ret = result['ret'] as int;
+      final double output = result['output'] as double;
+      final bool pass = result['pass'] as bool;
+      
+      _imageQualityOutput = output;
+      
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📊 棋盘格检测结果:', type: LogType.debug);
+      _logState?.info('   返回值: $ret (${pass ? "PASS" : "FAIL"})', type: LogType.debug);
+      _logState?.info('   输出值: ${output.toStringAsFixed(4)}', type: LogType.debug);
+      _logState?.info('   阈值: 1.0', type: LogType.debug);
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      if (pass) {
+        _logState?.success('✅ 棋盘格检测通过 (output=${output.toStringAsFixed(4)})', type: LogType.debug);
+        
+        _imageQualityStatus = 'pass';
+        _imageQualityMessage = '棋盘格检测通过\n输出值: ${output.toStringAsFixed(4)}';
+        notifyListeners();
+        
+        // 显示成功结果 2 秒后关闭弹窗
+        await Future.delayed(const Duration(seconds: 2));
+        _showImageQualityDialog = false;
+        notifyListeners();
+        return true;
+      } else {
+        _logState?.error('❌ 棋盘格检测失败 (ret=$ret, output=${output.toStringAsFixed(4)})', type: LogType.debug);
+        
+        _imageQualityStatus = 'fail';
+        _imageQualityMessage = '棋盘格检测失败\n输出值: ${output.toStringAsFixed(4)}';
+        notifyListeners();
+        
+        // 显示失败结果 2 秒后关闭弹窗
+        await Future.delayed(const Duration(seconds: 2));
+        _showImageQualityDialog = false;
+        notifyListeners();
+        return false;
+      }
       
     } catch (e) {
       _logState?.error('❌ 图片质量检测异常: $e', type: LogType.debug);
+      
+      // 确保异常时也关闭弹窗
+      _imageQualityStatus = 'fail';
+      _imageQualityMessage = '检测异常: $e';
+      notifyListeners();
+      
+      await Future.delayed(const Duration(seconds: 2));
+      _showImageQualityDialog = false;
+      notifyListeners();
       return false;
     }
+  }
+  
+  /// 关闭图片质量检测弹窗
+  void closeImageQualityDialog() {
+    _showImageQualityDialog = false;
+    notifyListeners();
   }
 
   @override
