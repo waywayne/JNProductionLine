@@ -79,6 +79,7 @@ include(flutter/generated_plugins.cmake)
 set(IMAGE_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/image_detect")
 set(IMAGE_TEST_STATIC "${IMAGE_TEST_DIR}/libimage_test.a")
 set(OPENCV_LIB_DIR "${IMAGE_TEST_DIR}/opencv/lib")
+set(IMAGE_TEST_FOUND FALSE)
 
 if(EXISTS "${IMAGE_TEST_STATIC}")
   # 收集所有 OpenCV 静态库
@@ -98,11 +99,7 @@ if(EXISTS "${IMAGE_TEST_STATIC}")
     PREFIX "lib"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
-
-  # 将 libimage_test.so 加入安装
-  install(FILES "$<TARGET_FILE:image_test>"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
+  set(IMAGE_TEST_FOUND TRUE)
 
   message(STATUS "image_test: 将从静态库构建 libimage_test.so")
 else()
@@ -139,6 +136,13 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endforeach(bundled_library)
+
+# 安装 libimage_test.so（延迟到 INSTALL_BUNDLE_LIB_DIR 定义之后）
+if(IMAGE_TEST_FOUND)
+  install(FILES "$<TARGET_FILE:image_test>"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
