@@ -115,13 +115,17 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
-# 安装 libimage_test.so（如果预编译的 .so 文件存在）
-if(EXISTS "${IMAGE_TEST_SO}")
-  install(FILES "${IMAGE_TEST_SO}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
-  message(STATUS "image_test: 找到预编译 libimage_test.so，将打包到 bundle")
-endif()
+# 安装 libimage_test.so（在 install 阶段动态检查文件是否存在）
+install(CODE "
+  set(_IMAGE_TEST_SO \"${IMAGE_TEST_SO}\")
+  set(_DEST \"${INSTALL_BUNDLE_LIB_DIR}\")
+  if(EXISTS \"\${_IMAGE_TEST_SO}\")
+    message(STATUS \"image_test: 复制 libimage_test.so 到 \${_DEST}\")
+    file(INSTALL \"\${_IMAGE_TEST_SO}\" DESTINATION \"\${_DEST}\")
+  else()
+    message(WARNING \"image_test: 未找到 \${_IMAGE_TEST_SO}，跳过\")
+  endif()
+" COMPONENT Runtime)
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")

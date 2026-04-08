@@ -71,6 +71,18 @@ jobs:
       run: flutter analyze
       continue-on-error: true
       
+    - name: Verify native libraries
+      run: |
+        echo "🔍 检查 libimage_test.so 是否在代码仓库中..."
+        if [ -f "lib/image_detect/libimage_test.so" ]; then
+          echo "✅ 找到 libimage_test.so"
+          ls -lh lib/image_detect/libimage_test.so
+          file lib/image_detect/libimage_test.so
+        else
+          echo "⚠️  libimage_test.so 未找到，图片检测功能将不可用"
+          echo "   请确保 .gitignore 中有 !lib/image_detect/*.so 例外规则"
+        fi
+
     - name: Build Linux application
       run: |
         echo "🔨 Building for architecture: ${{ matrix.arch }}"
@@ -79,6 +91,19 @@ jobs:
         # 验证构建产物
         echo "📦 Build output:"
         ls -la build/linux/
+        
+        # 验证 libimage_test.so 是否被打包
+        echo ""
+        echo "🔍 检查 bundle 中的 libimage_test.so..."
+        BUNDLE_LIB="build/linux/${{ matrix.arch }}/release/bundle/lib"
+        if [ -f "$BUNDLE_LIB/libimage_test.so" ]; then
+          echo "✅ libimage_test.so 已打包到 bundle/lib/"
+          ls -lh "$BUNDLE_LIB/libimage_test.so"
+        else
+          echo "⚠️  libimage_test.so 未在 bundle 中找到"
+          echo "   bundle/lib 内容:"
+          ls -la "$BUNDLE_LIB/" 2>/dev/null || echo "   (目录不存在)"
+        fi
         
     - name: Package application
       run: |
