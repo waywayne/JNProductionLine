@@ -69,6 +69,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+!lib/image_detect/*.so
 .Python
 env/
 venv/
