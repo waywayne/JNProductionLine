@@ -86,7 +86,7 @@ if(EXISTS "${IMAGE_TEST_STATIC}")
   file(GLOB OPENCV_STATIC_LIBS "${OPENCV_LIB_DIR}/libopencv_*.a")
 
   # 创建共享库目标
-  add_library(image_test SHARED "${CMAKE_CURRENT_SOURCE_DIR}/runner/image_test_stub.c")
+  add_library(image_test SHARED "${CMAKE_CURRENT_SOURCE_DIR}/runner/image_test_stub.cpp")
   target_link_libraries(image_test
     -Wl,--whole-archive
     "${IMAGE_TEST_STATIC}"
