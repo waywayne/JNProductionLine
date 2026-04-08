@@ -121,24 +121,42 @@ class ImageTestService {
   }
 
   void _bindFunctions() {
-    _getVersion = _lib!
-        .lookupFunction<_ImagetestGetversionC, _ImagetestGetversionDart>(
-            'imagetest_getversion');
+    // 注意: 库是 C++ 编译的，头文件无 extern "C"，符号被 C++ name mangling。
+    // 优先尝试 C 符号名，如果失败则使用 C++ mangled 符号名。
+    _getVersion = _lookupFunctionSafe<_ImagetestGetversionC, _ImagetestGetversionDart>(
+        'imagetest_getversion',
+        '_Z20imagetest_getversionv');
 
-    _chessboard = _lib!
-        .lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
-            'imagetest_chessboard');
+    _chessboard = _lookupFunctionSafe<_ImagetestChessboardC, _ImagetestChessboardDart>(
+        'imagetest_chessboard',
+        '_Z20imagetest_chessboardPKciidPd');
 
-    _colorChart = _lib!
-        .lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
-            'imagetest_color_chart');
+    _colorChart = _lookupFunctionSafe<_ImagetestColorChartC, _ImagetestColorChartDart>(
+        'imagetest_color_chart',
+        '_Z21imagetest_color_chartPKcdPd');
 
-    _resolutionChart = _lib!.lookupFunction<_ImagetestResolutionChartC,
-        _ImagetestResolutionChartDart>('imagetest_resolution_chart');
+    _resolutionChart = _lookupFunctionSafe<_ImagetestResolutionChartC,
+        _ImagetestResolutionChartDart>(
+        'imagetest_resolution_chart',
+        '_Z26imagetest_resolution_chartPKcdPd');
 
-    _greyboard = _lib!
-        .lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
-            'imagetest_greyboard');
+    _greyboard = _lookupFunctionSafe<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
+        'imagetest_greyboard',
+        '_Z19imagetest_greyboardPKcdPd');
+  }
+
+  /// 安全查找符号：先尝试 C 符号名，失败则尝试 C++ mangled 符号名
+  F? _lookupFunctionSafe<N extends Function, F extends Function>(
+      String cName, String cppMangledName) {
+    try {
+      return _lib!.lookupFunction<N, F>(cName);
+    } catch (_) {
+      try {
+        return _lib!.lookupFunction<N, F>(cppMangledName);
+      } catch (_) {
+        return null;
+      }
+    }
   }
 
   /// 获取库版本
