@@ -75,36 +75,14 @@ set_target_properties(${BINARY_NAME}
 include(flutter/generated_plugins.cmake)
 
 
-# === 构建 libimage_test.so 共享库（从静态库链接） ===
+# === libimage_test.so ===
+# 注意: libimage_test.so 需要在目标机器上预先构建并部署。
+# 静态库 (.a) 编译时未使用 -fPIC，无法在此处链接为共享库。
+# 请使用 lib/image_detect/build_so.sh 在目标机器上构建，
+# 然后将 libimage_test.so 复制到 bundle/lib/ 或系统 lib 路径。
+# 如果 libimage_test.so 已存在于 image_detect 目录中，则自动打包。
 set(IMAGE_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/image_detect")
-set(IMAGE_TEST_STATIC "${IMAGE_TEST_DIR}/libimage_test.a")
-set(OPENCV_LIB_DIR "${IMAGE_TEST_DIR}/opencv/lib")
-set(IMAGE_TEST_FOUND FALSE)
-
-if(EXISTS "${IMAGE_TEST_STATIC}")
-  # 收集所有 OpenCV 静态库
-  file(GLOB OPENCV_STATIC_LIBS "${OPENCV_LIB_DIR}/libopencv_*.a")
-
-  # 创建共享库目标
-  add_library(image_test SHARED "${CMAKE_CURRENT_SOURCE_DIR}/runner/image_test_stub.cpp")
-  target_link_libraries(image_test
-    -Wl,--whole-archive
-    "${IMAGE_TEST_STATIC}"
-    ${OPENCV_STATIC_LIBS}
-    -Wl,--no-whole-archive
-    stdc++ m pthread dl z
-  )
-  set_target_properties(image_test PROPERTIES
-    OUTPUT_NAME "image_test"
-    PREFIX "lib"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-  )
-  set(IMAGE_TEST_FOUND TRUE)
-
-  message(STATUS "image_test: 将从静态库构建 libimage_test.so")
-else()
-  message(WARNING "image_test: 未找到 ${IMAGE_TEST_STATIC}，跳过构建")
-endif()
+set(IMAGE_TEST_SO "${IMAGE_TEST_DIR}/libimage_test.so")
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
@@ -137,11 +115,12 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
-# 安装 libimage_test.so（延迟到 INSTALL_BUNDLE_LIB_DIR 定义之后）
-if(IMAGE_TEST_FOUND)
-  install(FILES "$<TARGET_FILE:image_test>"
+# 安装 libimage_test.so（如果预编译的 .so 文件存在）
+if(EXISTS "${IMAGE_TEST_SO}")
+  install(FILES "${IMAGE_TEST_SO}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
+  message(STATUS "image_test: 找到预编译 libimage_test.so，将打包到 bundle")
 endif()
 
 # Copy the native assets provided by the build.dart from all packages.
