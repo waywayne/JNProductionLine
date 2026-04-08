@@ -75,6 +75,40 @@ set_target_properties(${BINARY_NAME}
 include(flutter/generated_plugins.cmake)
 
 
+# === 构建 libimage_test.so 共享库（从静态库链接） ===
+set(IMAGE_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib/image_detect")
+set(IMAGE_TEST_STATIC "${IMAGE_TEST_DIR}/libimage_test.a")
+set(OPENCV_LIB_DIR "${IMAGE_TEST_DIR}/opencv/lib")
+
+if(EXISTS "${IMAGE_TEST_STATIC}")
+  # 收集所有 OpenCV 静态库
+  file(GLOB OPENCV_STATIC_LIBS "${OPENCV_LIB_DIR}/libopencv_*.a")
+
+  # 创建共享库目标
+  add_library(image_test SHARED "${CMAKE_CURRENT_SOURCE_DIR}/runner/image_test_stub.c")
+  target_link_libraries(image_test
+    -Wl,--whole-archive
+    "${IMAGE_TEST_STATIC}"
+    ${OPENCV_STATIC_LIBS}
+    -Wl,--no-whole-archive
+    stdc++ m pthread dl z
+  )
+  set_target_properties(image_test PROPERTIES
+    OUTPUT_NAME "image_test"
+    PREFIX "lib"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+  )
+
+  # 将 libimage_test.so 加入安装
+  install(FILES "$<TARGET_FILE:image_test>"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+
+  message(STATUS "image_test: 将从静态库构建 libimage_test.so")
+else()
+  message(WARNING "image_test: 未找到 ${IMAGE_TEST_STATIC}，跳过构建")
+endif()
+
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
 # directory.

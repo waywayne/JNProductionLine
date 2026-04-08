@@ -81,7 +81,8 @@ class ImageTestService {
 
   /// 加载原生库
   /// 搜索多个路径查找 libimage_test.so
-  bool load() {
+  /// [searchLog] 可选回调，用于输出搜索过程日志
+  bool load({void Function(String message)? searchLog}) {
     if (_isLoaded) return true;
 
     final executableDir = File(Platform.resolvedExecutable).parent.path;
@@ -96,19 +97,26 @@ class ImageTestService {
       'lib/image_detect/libimage_test.so',
     ];
 
+    searchLog?.call('🔍 搜索 libimage_test.so ...');
+    searchLog?.call('   可执行文件目录: $executableDir');
+
     for (final path in candidates) {
       try {
-        if (File(path).existsSync()) {
+        final exists = File(path).existsSync();
+        searchLog?.call('   ${exists ? "✅" : "❌"} $path');
+        if (exists) {
           _lib = DynamicLibrary.open(path);
           _bindFunctions();
           _isLoaded = true;
+          searchLog?.call('   ✅ 成功加载: $path');
           return true;
         }
       } catch (e) {
-        // 继续尝试下一个路径
+        searchLog?.call('   ⚠️  $path 存在但加载失败: $e');
       }
     }
 
+    searchLog?.call('❌ 所有路径均未找到 libimage_test.so');
     return false;
   }
 

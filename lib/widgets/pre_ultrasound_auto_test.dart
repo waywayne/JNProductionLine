@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +10,8 @@ import '../services/byd_mes_service.dart';
 import '../services/linux_bluetooth_spp_service.dart';
 import '../config/wifi_config.dart';
 import '../config/production_config.dart';
+import '../models/touch_test_step.dart';
+import '../services/gtp_protocol.dart';
 import 'sn_input_dialog.dart';
 import 'bluetooth_test_options_dialog.dart';
 
@@ -1490,75 +1493,330 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return confirmed == true;
   }
 
-  // ========== 工位3: 右触控测试 ==========
+  // ========== 工位3: 右触控测试（与单板产测方案一致） ==========
   Future<bool> _testTouch3(TestState state, LogState logState, {required String touchType}) async {
     logState.info('👆 右触控-$touchType测试');
     
+    final int areaId;
+    switch (touchType) {
+      case 'TK1': areaId = TouchTestConfig.rightAreaTK1; break;
+      case 'TK2': areaId = TouchTestConfig.rightAreaTK2; break;
+      case 'TK3': areaId = TouchTestConfig.rightAreaTK3; break;
+      default: 
+        logState.error('❌ 未知触控区域: $touchType');
+        return false;
+    }
+    
+    final threshold = _config.touchThreshold;
+    logState.info('   阈值: $threshold');
+    
+    // 步骤1: 获取基线CDC值（未触摸状态）
+    logState.info('📡 获取右Touch基线 CDC 值...');
+    final baselineCommand = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchRight, TouchTestConfig.rightAreaUntouched,
+    );
+    final baselineResponse = await state.sendCommandViaLinuxBluetooth(
+      baselineCommand,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    int? baselineCdc;
+    if (baselineResponse != null && !baselineResponse.containsKey('error')) {
+      final payload = baselineResponse['payload'];
+      if (payload is Uint8List) {
+        final touchResult = ProductionTestCommands.parseTouchResponse(payload);
+        if (touchResult != null && touchResult['success'] == true) {
+          baselineCdc = touchResult['cdcValue'] as int?;
+          logState.info('✅ 基线 CDC 值: $baselineCdc');
+        }
+      }
+    }
+    
+    if (baselineCdc == null) {
+      logState.error('❌ 获取基线CDC值失败');
+      return false;
+    }
+    
+    // 步骤2: 发送目标区域触控命令
+    logState.info('📤 发送 $touchType 触控检测命令...');
+    final touchCommand = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchRight, areaId,
+    );
+    final touchResponse = await state.sendCommandViaLinuxBluetooth(
+      touchCommand,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (touchResponse == null || touchResponse.containsKey('error')) {
+      logState.error('❌ 发送触控命令失败');
+      return false;
+    }
+    
+    // 步骤3: 监听CDC推送数据，弹窗实时显示CDC值
+    logState.info('📡 开始监听 $touchType CDC推送数据...');
+    logState.info('👆 请触摸 $touchType 区域');
+    
     if (!mounted) return false;
-    final confirmed = await showDialog<bool>(
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    int? latestCdc;
+    int? latestDiff;
+    bool testPassed = false;
+    
+    // 创建一个 StatefulBuilder 弹窗来实时更新CDC值
+    showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.touch_app, color: Colors.blue),
-            const SizedBox(width: 12),
-            Text('右触控-$touchType测试'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('请按住$touchType区域，确认阈值变化量超过${_config.touchThreshold}'),
-            const SizedBox(height: 8),
-            const Text('确认测试通过后点击"通过"按钮', style: TextStyle(color: Colors.grey, fontSize: 12)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('未通过')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('通过'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            // 设置监听器（只设置一次）
+            subscription ??= state.linuxBluetoothDataStream.listen((data) {
+              try {
+                final gtpResponse = GTPProtocol.parseGTPResponse(data);
+                if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+                  final payload = gtpResponse['payload'] as Uint8List;
+                  if (payload.isNotEmpty && payload[0] == ProductionTestCommands.cmdTouch) {
+                    final touchResult = ProductionTestCommands.parseTouchResponse(payload);
+                    if (touchResult != null && touchResult['success'] == true) {
+                      final cdcValue = touchResult['cdcValue'] as int;
+                      final cdcDiff = (cdcValue - baselineCdc!).abs();
+                      
+                      latestCdc = cdcValue;
+                      latestDiff = cdcDiff;
+                      
+                      logState.info('📥 $touchType CDC: $cdcValue (差值: $cdcDiff, 阈值: $threshold)');
+                      
+                      setDialogState(() {});
+                      
+                      if (cdcDiff >= threshold && !testPassed) {
+                        testPassed = true;
+                        logState.info('✅ $touchType CDC差值 $cdcDiff >= 阈值 $threshold，测试通过!');
+                        
+                        // 延迟关闭弹窗，让用户看到结果
+                        Future.delayed(const Duration(seconds: 1), () {
+                          subscription?.cancel();
+                          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+                          if (!completer.isCompleted) completer.complete(true);
+                        });
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                logState.warning('⚠️ 解析Touch推送数据出错: $e');
+              }
+            });
+            
+            final statusColor = testPassed ? Colors.green : (latestCdc != null ? Colors.blue : Colors.orange);
+            final statusText = testPassed 
+                ? '✅ 测试通过!' 
+                : (latestCdc != null ? '检测中...' : '等待触摸...');
+            
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.touch_app, color: statusColor),
+                  const SizedBox(width: 12),
+                  Text('右触控-$touchType测试'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('请触摸 $touchType 区域', style: const TextStyle(fontSize: 16)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('基线CDC: $baselineCdc', style: const TextStyle(fontSize: 14)),
+                        const SizedBox(height: 4),
+                        Text('当前CDC: ${latestCdc ?? "--"}', 
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor)),
+                        const SizedBox(height: 4),
+                        Text('CDC差值: ${latestDiff ?? "--"} / 阈值: $threshold',
+                            style: TextStyle(fontSize: 14, 
+                                color: (latestDiff != null && latestDiff! >= threshold) ? Colors.green : Colors.red)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(statusText, style: TextStyle(fontSize: 14, color: statusColor, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              actions: [
+                if (!testPassed)
+                  TextButton(
+                    onPressed: () {
+                      subscription?.cancel();
+                      Navigator.of(dialogContext).pop();
+                      if (!completer.isCompleted) completer.complete(false);
+                    },
+                    child: const Text('取消测试'),
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
-
-    return confirmed == true;
+    
+    return completer.future;
   }
 
-  // ========== 工位3: 左触控测试 ==========
+  // ========== 工位3: 左触控测试（与单板产测方案一致） ==========
   Future<bool> _testLeftTouch3(TestState state, LogState logState, {required String touchType}) async {
     final touchName = {'wear': '佩戴', 'click': '点击', 'double_click': '双击', 'long_press': '长按'}[touchType] ?? touchType;
     logState.info('👆 左触控-$touchName测试');
     
+    final int actionId;
+    switch (touchType) {
+      case 'wear': actionId = TouchTestConfig.leftActionWearDetect; break;
+      case 'click': actionId = TouchTestConfig.leftActionSingleTap; break;
+      case 'double_click': actionId = TouchTestConfig.leftActionDoubleTap; break;
+      case 'long_press': actionId = TouchTestConfig.leftActionLongPress; break;
+      default:
+        logState.error('❌ 未知左触控类型: $touchType');
+        return false;
+    }
+    
+    // 发送左触控命令
+    logState.info('📤 发送左触控-$touchName命令...');
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, actionId,
+    );
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 发送左触控命令失败');
+      return false;
+    }
+    
+    // 监听CDC推送数据，弹窗实时显示
+    logState.info('📡 开始监听左触控-$touchName推送数据...');
+    logState.info('👆 请执行$touchName操作');
+    
     if (!mounted) return false;
-    final confirmed = await showDialog<bool>(
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    int? latestCdc;
+    bool testPassed = false;
+    
+    showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.touch_app, color: Colors.orange),
-            const SizedBox(width: 12),
-            Text('左触控-$touchName测试'),
-          ],
-        ),
-        content: Text('请执行$touchName操作，确认设备响应正确后点击"通过"'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('未通过')),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('通过'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            // 设置监听器（只设置一次）
+            subscription ??= state.linuxBluetoothDataStream.listen((data) {
+              try {
+                final gtpResponse = GTPProtocol.parseGTPResponse(data);
+                if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+                  final payload = gtpResponse['payload'] as Uint8List;
+                  if (payload.isNotEmpty && payload[0] == ProductionTestCommands.cmdTouch) {
+                    final touchResult = ProductionTestCommands.parseTouchResponse(payload);
+                    if (touchResult != null && touchResult['success'] == true) {
+                      final cdcValue = touchResult['cdcValue'] as int?;
+                      latestCdc = cdcValue;
+                      
+                      logState.info('📥 左触控-$touchName CDC: $cdcValue');
+                      
+                      if (!testPassed) {
+                        testPassed = true;
+                        logState.info('✅ 左触控-$touchName 收到响应，测试通过!');
+                        
+                        setDialogState(() {});
+                        
+                        Future.delayed(const Duration(seconds: 1), () {
+                          subscription?.cancel();
+                          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+                          if (!completer.isCompleted) completer.complete(true);
+                        });
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                logState.warning('⚠️ 解析左Touch推送数据出错: $e');
+              }
+            });
+            
+            final statusColor = testPassed ? Colors.green : Colors.orange;
+            final statusText = testPassed 
+                ? '✅ 测试通过!' 
+                : '等待$touchName操作...';
+            
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.touch_app, color: statusColor),
+                  const SizedBox(width: 12),
+                  Text('左触控-$touchName测试'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('请执行$touchName操作', style: const TextStyle(fontSize: 16)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('CDC值: ${latestCdc ?? "--"}', 
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(statusText, style: TextStyle(fontSize: 14, color: statusColor, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              actions: [
+                if (!testPassed)
+                  TextButton(
+                    onPressed: () {
+                      subscription?.cancel();
+                      Navigator.of(dialogContext).pop();
+                      if (!completer.isCompleted) completer.complete(false);
+                    },
+                    child: const Text('取消测试'),
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
-
-    return confirmed == true;
+    
+    return completer.future;
   }
 
   // ========== 工位3: 结束产测 ==========

@@ -3580,6 +3580,9 @@ class TestState extends ChangeNotifier {
   /// 获取当前连接的 Linux 蓝牙设备信息
   String? get linuxBluetoothDeviceName => _linuxBtService.currentDeviceName;
   String? get linuxBluetoothDeviceAddress => _linuxBtService.currentDeviceAddress;
+  
+  /// 获取 Linux 蓝牙数据流（用于监听设备推送数据）
+  Stream<Uint8List> get linuxBluetoothDataStream => _linuxBtService.dataStream;
 
   /// 通过 Linux 蓝牙发送命令并等待响应（GTP 协议封装）
   Future<Map<String, dynamic>?> sendCommandViaLinuxBluetooth(
@@ -9999,13 +10002,11 @@ class TestState extends ChangeNotifier {
       
       if (!imageTestService.isLoaded) {
         _logState?.info('📦 加载 image_test 原生库...', type: LogType.debug);
-        final loaded = imageTestService.load();
+        final loaded = imageTestService.load(
+          searchLog: (msg) => _logState?.info(msg, type: LogType.debug),
+        );
         if (!loaded) {
           _logState?.error('❌ 无法加载 libimage_test.so 原生库', type: LogType.debug);
-          _logState?.error('   请确保 libimage_test.so 已部署到以下路径之一:', type: LogType.debug);
-          _logState?.error('   - <可执行文件目录>/lib/libimage_test.so', type: LogType.debug);
-          _logState?.error('   - /opt/jn-production-line/lib/libimage_test.so', type: LogType.debug);
-          _logState?.error('   - /usr/local/lib/libimage_test.so', type: LogType.debug);
           
           _imageQualityStatus = 'fail';
           _imageQualityMessage = '无法加载 libimage_test.so 原生库';
