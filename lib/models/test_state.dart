@@ -2222,7 +2222,7 @@ class TestState extends ChangeNotifier {
 
       _logState?.info('', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.success('✅ 右Touch半自动化测试完成', type: LogType.debug);
+      _logState?.success('✅ 右Touch半自动化测试完成了', type: LogType.debug);
       _logState?.info('⏱️  结束时间: ${DateTime.now().toString()}', type: LogType.debug);
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     } catch (e) {
