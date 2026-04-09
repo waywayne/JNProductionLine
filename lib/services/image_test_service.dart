@@ -1,5 +1,6 @@
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 /// FFI 绑定 image_test 原生库
@@ -310,6 +311,94 @@ class ImageTestService {
     } finally {
       calloc.free(pathPtr);
       calloc.free(outputPtr);
+    }
+  }
+
+  /// 在 Isolate 中运行棋盘格检测（避免阻塞 UI 线程）
+  /// 参数通过 Map 传递，因为 Isolate 不能传递 FFI 对象
+  Future<Map<String, dynamic>?> testChessboardAsync(
+    String imagePath, {
+    int gridX = 17,
+    int gridY = 29,
+    double threshold = 1.0,
+  }) async {
+    // 获取库文件路径（需要在 isolate 中重新打开）
+    if (!_isLoaded || _lib == null) return null;
+
+    // 找到已加载的库路径
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
+    final candidates = [
+      '$executableDir/lib/libimage_test.so',
+      '$executableDir/libimage_test.so',
+      '/opt/jn-production-line/lib/libimage_test.so',
+      '/usr/local/lib/libimage_test.so',
+      '/usr/lib/libimage_test.so',
+      '${Platform.environment['HOME']}/git/JNProductionLine/lib/image_detect/libimage_test.so',
+      'lib/image_detect/libimage_test.so',
+    ];
+
+    String? libPath;
+    for (final path in candidates) {
+      if (File(path).existsSync()) {
+        libPath = path;
+        break;
+      }
+    }
+
+    if (libPath == null) return null;
+
+    final params = {
+      'libPath': libPath,
+      'imagePath': imagePath,
+      'gridX': gridX,
+      'gridY': gridY,
+      'threshold': threshold,
+    };
+
+    try {
+      return await Isolate.run(() => _runChessboardInIsolate(params));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Isolate 中执行的棋盘格检测（顶层静态方法）
+  static Map<String, dynamic>? _runChessboardInIsolate(Map<String, dynamic> params) {
+    final libPath = params['libPath'] as String;
+    final imagePath = params['imagePath'] as String;
+    final gridX = params['gridX'] as int;
+    final gridY = params['gridY'] as int;
+    final threshold = params['threshold'] as double;
+
+    try {
+      final lib = DynamicLibrary.open(libPath);
+
+      // 尝试 C 符号名，失败则用 C++ mangled 符号名
+      late final int Function(Pointer<Utf8>, int, int, double, Pointer<Double>) chessboardFn;
+      try {
+        chessboardFn = lib.lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
+            'imagetest_chessboard');
+      } catch (_) {
+        chessboardFn = lib.lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
+            '_Z20imagetest_chessboardPKciidPd');
+      }
+
+      final pathPtr = imagePath.toNativeUtf8();
+      final outputPtr = calloc<Double>();
+
+      try {
+        final ret = chessboardFn(pathPtr, gridX, gridY, threshold, outputPtr);
+        return {
+          'ret': ret,
+          'output': outputPtr.value,
+          'pass': ret == 0,
+        };
+      } finally {
+        calloc.free(pathPtr);
+        calloc.free(outputPtr);
+      }
+    } catch (e) {
+      return {'ret': -1, 'output': 0.0, 'pass': false, 'error': e.toString()};
     }
   }
 }

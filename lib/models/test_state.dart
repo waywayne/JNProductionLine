@@ -10025,12 +10025,13 @@ class TestState extends ChangeNotifier {
         }
       }
       
-      // ========== 步骤5: 调用棋盘格检测（在 isolate 中运行避免阻塞 UI） ==========
+      // ========== 步骤5: 调用棋盘格检测（在 Isolate 中运行避免阻塞 UI） ==========
       _logState?.info('🔍 调用 imagetest_chessboard 检测棋盘格...', type: LogType.debug);
       _logState?.info('   参数: gridX=17, gridY=29, threshold=1.0', type: LogType.debug);
+      _logState?.info('   使用 Isolate 异步执行，避免阻塞 UI...', type: LogType.debug);
       
-      // FFI 调用（同步，但通常很快）
-      final result = imageTestService.testChessboard(
+      // FFI 调用（在独立 Isolate 中执行，不阻塞 UI 线程）
+      final result = await imageTestService.testChessboardAsync(
         _sensorImagePath!,
         gridX: 17,
         gridY: 29,
