@@ -106,21 +106,27 @@ class ImageTestService {
         searchLog?.call('   ${exists ? "✅" : "❌"} $path');
         if (exists) {
           _lib = DynamicLibrary.open(path);
-          _bindFunctions();
+          searchLog?.call('   ✅ 库文件已打开: $path');
+          try {
+            _bindFunctions(searchLog: searchLog);
+          } catch (e) {
+            searchLog?.call('   ⚠️  绑定函数时异常(已忽略): $e');
+          }
           _isLoaded = true;
-          searchLog?.call('   ✅ 成功加载: $path');
+          searchLog?.call('   ✅ 成功加载并绑定函数');
           return true;
         }
       } catch (e) {
-        searchLog?.call('   ⚠️  $path 存在但加载失败: $e');
+        searchLog?.call('   ⚠️  $path 加载异常: $e');
+        _lib = null;
       }
     }
 
-    searchLog?.call('❌ 所有路径均未找到 libimage_test.so');
+    searchLog?.call('❌ 所有路径均未找到或加载失败 libimage_test.so');
     return false;
   }
 
-  void _bindFunctions() {
+  void _bindFunctions({void Function(String message)? searchLog}) {
     // 注意: 库是 C++ 编译的，头文件无 extern "C"，符号被 C++ name mangling。
     // 优先尝试 C 符号名，如果失败则使用 C++ mangled 符号名。
 
@@ -128,55 +134,75 @@ class ImageTestService {
     try {
       _getVersion = _lib!.lookupFunction<_ImagetestGetversionC, _ImagetestGetversionDart>(
           'imagetest_getversion');
+      searchLog?.call('   ✅ 绑定 imagetest_getversion (C符号)');
     } catch (_) {
       try {
         _getVersion = _lib!.lookupFunction<_ImagetestGetversionC, _ImagetestGetversionDart>(
             '_Z20imagetest_getversionv');
-      } catch (_) {}
+        searchLog?.call('   ✅ 绑定 imagetest_getversion (C++符号)');
+      } catch (_) {
+        searchLog?.call('   ❌ 绑定 imagetest_getversion 失败');
+      }
     }
 
     // imagetest_chessboard
     try {
       _chessboard = _lib!.lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
           'imagetest_chessboard');
+      searchLog?.call('   ✅ 绑定 imagetest_chessboard (C符号)');
     } catch (_) {
       try {
         _chessboard = _lib!.lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
             '_Z20imagetest_chessboardPKciidPd');
-      } catch (_) {}
+        searchLog?.call('   ✅ 绑定 imagetest_chessboard (C++符号)');
+      } catch (_) {
+        searchLog?.call('   ❌ 绑定 imagetest_chessboard 失败');
+      }
     }
 
     // imagetest_color_chart
     try {
       _colorChart = _lib!.lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
           'imagetest_color_chart');
+      searchLog?.call('   ✅ 绑定 imagetest_color_chart (C符号)');
     } catch (_) {
       try {
         _colorChart = _lib!.lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
             '_Z21imagetest_color_chartPKcdPd');
-      } catch (_) {}
+        searchLog?.call('   ✅ 绑定 imagetest_color_chart (C++符号)');
+      } catch (_) {
+        searchLog?.call('   ❌ 绑定 imagetest_color_chart 失败');
+      }
     }
 
     // imagetest_resolution_chart
     try {
       _resolutionChart = _lib!.lookupFunction<_ImagetestResolutionChartC,
           _ImagetestResolutionChartDart>('imagetest_resolution_chart');
+      searchLog?.call('   ✅ 绑定 imagetest_resolution_chart (C符号)');
     } catch (_) {
       try {
         _resolutionChart = _lib!.lookupFunction<_ImagetestResolutionChartC,
             _ImagetestResolutionChartDart>('_Z26imagetest_resolution_chartPKcdPd');
-      } catch (_) {}
+        searchLog?.call('   ✅ 绑定 imagetest_resolution_chart (C++符号)');
+      } catch (_) {
+        searchLog?.call('   ❌ 绑定 imagetest_resolution_chart 失败');
+      }
     }
 
     // imagetest_greyboard
     try {
       _greyboard = _lib!.lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
           'imagetest_greyboard');
+      searchLog?.call('   ✅ 绑定 imagetest_greyboard (C符号)');
     } catch (_) {
       try {
         _greyboard = _lib!.lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
             '_Z19imagetest_greyboardPKcdPd');
-      } catch (_) {}
+        searchLog?.call('   ✅ 绑定 imagetest_greyboard (C++符号)');
+      } catch (_) {
+        searchLog?.call('   ❌ 绑定 imagetest_greyboard 失败');
+      }
     }
   }
 
