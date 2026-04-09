@@ -179,8 +179,8 @@ class NativeRfcommService {
       }
       
       _bridgeProcess = await Process.start(
-        'python3',
-        ['-u', scriptPath, macAddress, channel.toString()],
+        'sudo',
+        ['python3', '-u', scriptPath, macAddress, channel.toString()],
         environment: {'PYTHONUNBUFFERED': '1'},
       );
       

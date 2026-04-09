@@ -137,8 +137,8 @@ class RfcommBindService {
       // 3. 启动 Python rfcomm connect 桥接进程
       _log('🚀 启动 rfcomm connect 桥接...');
       final process = await Process.start(
-        'python3',
-        ['-u', scriptPath, macAddress, channel.toString()],
+        'sudo',
+        ['python3', '-u', scriptPath, macAddress, channel.toString()],
         environment: {'PYTHONUNBUFFERED': '1'},
       );
 

@@ -555,11 +555,11 @@ hciconfig hci0 up 2>/dev/null || true
     }
     
     try {
-      _logState?.debug('   启动命令: python3 $scriptPath $deviceAddress $targetChannel');
+      _logState?.debug('   启动命令: sudo python3 $scriptPath $deviceAddress $targetChannel');
       
       final process = await Process.start(
-        'python3',
-        ['-u', scriptPath, deviceAddress, targetChannel.toString()],
+        'sudo',
+        ['python3', '-u', scriptPath, deviceAddress, targetChannel.toString()],
         environment: {'PYTHONUNBUFFERED': '1'},
       );
       
