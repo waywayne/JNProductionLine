@@ -123,39 +123,60 @@ class ImageTestService {
   void _bindFunctions() {
     // 注意: 库是 C++ 编译的，头文件无 extern "C"，符号被 C++ name mangling。
     // 优先尝试 C 符号名，如果失败则使用 C++ mangled 符号名。
-    _getVersion = _lookupFunctionSafe<_ImagetestGetversionC, _ImagetestGetversionDart>(
-        'imagetest_getversion',
-        '_Z20imagetest_getversionv');
 
-    _chessboard = _lookupFunctionSafe<_ImagetestChessboardC, _ImagetestChessboardDart>(
-        'imagetest_chessboard',
-        '_Z20imagetest_chessboardPKciidPd');
-
-    _colorChart = _lookupFunctionSafe<_ImagetestColorChartC, _ImagetestColorChartDart>(
-        'imagetest_color_chart',
-        '_Z21imagetest_color_chartPKcdPd');
-
-    _resolutionChart = _lookupFunctionSafe<_ImagetestResolutionChartC,
-        _ImagetestResolutionChartDart>(
-        'imagetest_resolution_chart',
-        '_Z26imagetest_resolution_chartPKcdPd');
-
-    _greyboard = _lookupFunctionSafe<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
-        'imagetest_greyboard',
-        '_Z19imagetest_greyboardPKcdPd');
-  }
-
-  /// 安全查找符号：先尝试 C 符号名，失败则尝试 C++ mangled 符号名
-  F? _lookupFunctionSafe<N extends Function, F extends Function>(
-      String cName, String cppMangledName) {
+    // imagetest_getversion
     try {
-      return _lib!.lookupFunction<N, F>(cName);
+      _getVersion = _lib!.lookupFunction<_ImagetestGetversionC, _ImagetestGetversionDart>(
+          'imagetest_getversion');
     } catch (_) {
       try {
-        return _lib!.lookupFunction<N, F>(cppMangledName);
-      } catch (_) {
-        return null;
-      }
+        _getVersion = _lib!.lookupFunction<_ImagetestGetversionC, _ImagetestGetversionDart>(
+            '_Z20imagetest_getversionv');
+      } catch (_) {}
+    }
+
+    // imagetest_chessboard
+    try {
+      _chessboard = _lib!.lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
+          'imagetest_chessboard');
+    } catch (_) {
+      try {
+        _chessboard = _lib!.lookupFunction<_ImagetestChessboardC, _ImagetestChessboardDart>(
+            '_Z20imagetest_chessboardPKciidPd');
+      } catch (_) {}
+    }
+
+    // imagetest_color_chart
+    try {
+      _colorChart = _lib!.lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
+          'imagetest_color_chart');
+    } catch (_) {
+      try {
+        _colorChart = _lib!.lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
+            '_Z21imagetest_color_chartPKcdPd');
+      } catch (_) {}
+    }
+
+    // imagetest_resolution_chart
+    try {
+      _resolutionChart = _lib!.lookupFunction<_ImagetestResolutionChartC,
+          _ImagetestResolutionChartDart>('imagetest_resolution_chart');
+    } catch (_) {
+      try {
+        _resolutionChart = _lib!.lookupFunction<_ImagetestResolutionChartC,
+            _ImagetestResolutionChartDart>('_Z26imagetest_resolution_chartPKcdPd');
+      } catch (_) {}
+    }
+
+    // imagetest_greyboard
+    try {
+      _greyboard = _lib!.lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
+          'imagetest_greyboard');
+    } catch (_) {
+      try {
+        _greyboard = _lib!.lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
+            '_Z19imagetest_greyboardPKcdPd');
+      } catch (_) {}
     }
   }
 
