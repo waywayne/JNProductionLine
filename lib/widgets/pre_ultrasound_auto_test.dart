@@ -1549,6 +1549,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     int? latestDiff;
     bool testPassed = false;
     bool testCancelled = false;
+    bool pollingStarted = false;
     int currentRetry = 0;
     const int maxRetries = 10;
     
@@ -1559,8 +1560,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            // 启动轮询（只启动一次）
-            if (currentRetry == 0 && !testPassed && !testCancelled) {
+            // 启动轮询（只启动一次，用 pollingStarted 防止重复）
+            if (!pollingStarted && !testPassed && !testCancelled) {
+              pollingStarted = true;
               // 使用 Future 启动轮询循环
               Future(() async {
                 final touchCommand = ProductionTestCommands.createTouchCommand(
