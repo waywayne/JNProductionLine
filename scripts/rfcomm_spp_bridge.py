@@ -33,6 +33,9 @@ def cleanup_old_processes():
     """清理旧的桥接进程"""
     import subprocess
     my_pid = os.getpid()
+    my_ppid = os.getppid()
+    # 排除自身PID和父进程PID（sudo wrapper），避免误杀新启动的进程
+    exclude_pids = {my_pid, my_ppid}
 
     for pattern in ['rfcomm_spp_bridge.py', 'rfcomm_stable.py',
                     'rfcomm_socket_simple.py', 'rfcomm_bind_bridge.py']:
@@ -45,7 +48,7 @@ def cleanup_old_processes():
                         continue
                     try:
                         pid = int(line.strip())
-                        if pid != my_pid:
+                        if pid not in exclude_pids:
                             os.kill(pid, 9)
                             log(f"   杀死旧进程 PID {pid}")
                     except Exception:
