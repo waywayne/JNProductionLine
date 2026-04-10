@@ -217,8 +217,8 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
-    # 1. 清理旧进程
-    cleanup_old_processes()
+    # 1. 清理旧进程（已移到 Dart 端在启动前执行，避免 Python 误杀自身 sudo 父进程）
+    # cleanup_old_processes()
 
     # 2. 连接（带重试，尝试指定通道 + 常见通道）
     client_sock = None

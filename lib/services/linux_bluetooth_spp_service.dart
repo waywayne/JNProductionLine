@@ -555,6 +555,18 @@ hciconfig hci0 up 2>/dev/null || true
     }
     
     try {
+      // 在启动新进程前，先清理旧的桥接进程（避免 Python 内部清理误杀自己）
+      _logState?.debug('   清理旧的桥接进程...');
+      await Process.run('bash', ['-c', 
+        "pgrep -f rfcomm_spp_bridge.py | xargs -r kill -9 2>/dev/null; "
+        "pgrep -f rfcomm_stable.py | xargs -r kill -9 2>/dev/null; "
+        "pgrep -f rfcomm_socket_simple.py | xargs -r kill -9 2>/dev/null; "
+        "pgrep -f rfcomm_bind_bridge.py | xargs -r kill -9 2>/dev/null; "
+        "sudo rfcomm release all 2>/dev/null; "
+        "true"
+      ]);
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       _logState?.debug('   启动命令: sudo python3 $scriptPath $deviceAddress $targetChannel');
       
       final process = await Process.start(
