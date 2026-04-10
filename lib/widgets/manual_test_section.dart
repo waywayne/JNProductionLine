@@ -1,6 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
+import '../models/log_state.dart';
+import '../config/wifi_config.dart';
 import '../services/production_test_commands.dart';
 import '../services/product_sn_api.dart';
 import 'led_test_dialog.dart';
@@ -902,18 +905,191 @@ class ManualTestSection extends StatelessWidget {
 
   /// 摄像头棋盘格测试
   Future<void> _testCameraChessboard(BuildContext context, TestState state) async {
-    // 先检查蓝牙连接
+    final logState = context.read<LogState>();
+
+    // ========== 步骤1: 检查蓝牙连接，未连接则弹窗输入MAC并连接 ==========
     if (!state.isLinuxBluetoothConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('❌ 请先连接蓝牙'),
-          backgroundColor: Colors.red,
+      final macController = TextEditingController();
+      final macAddress = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.bluetooth_disabled, color: Colors.orange),
+              SizedBox(width: 12),
+              Text('蓝牙未连接'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('摄像头棋盘格测试需要先连接蓝牙。'),
+              const SizedBox(height: 8),
+              const Text('请输入设备蓝牙 MAC 地址:'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: macController,
+                decoration: const InputDecoration(
+                  hintText: '例如: AA:BB:CC:DD:EE:FF',
+                  labelText: '蓝牙 MAC 地址',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.bluetooth),
+                ),
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 16),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(null),
+              child: const Text('取消'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.of(context).pop(macController.text.trim()),
+              icon: const Icon(Icons.bluetooth_connected),
+              label: const Text('连接'),
+            ),
+          ],
         ),
       );
+
+      if (macAddress == null || macAddress.isEmpty) {
+        return;
+      }
+
+      // 连接蓝牙
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🔵 正在连接蓝牙 $macAddress ...'),
+            backgroundColor: Colors.blue,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      logState.info('🔵 手动棋盘格测试: 连接蓝牙 $macAddress', type: LogType.debug);
+      final connected = await state.testLinuxBluetooth(
+        deviceAddress: macAddress,
+      );
+
+      if (!connected) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('❌ 蓝牙连接失败'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ 蓝牙连接成功'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    }
+
+    // ========== 步骤2: 连接WiFi获取设备IP ==========
+    logState.info('📶 手动棋盘格测试: 连接WiFi热点...', type: LogType.debug);
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('📶 正在连接WiFi热点...'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+
+    String? deviceIP;
+
+    final String ssid = WiFiConfig.defaultSSID;
+    final String password = WiFiConfig.defaultPassword;
+
+    if (ssid.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ WiFi SSID未配置，请在通用配置中设置'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
       return;
     }
 
-    // 弹窗确认
+    logState.info('   SSID: $ssid', type: LogType.debug);
+
+    final ssidBytes = ssid.codeUnits + [0x00];
+    final pwdBytes = password.codeUnits + [0x00];
+    final wifiPayload = [...ssidBytes, ...pwdBytes];
+    final wifiCommand = ProductionTestCommands.createControlWifiCommand(0x05, data: wifiPayload);
+
+    for (int retry = 0; retry < 3; retry++) {
+      if (retry > 0) {
+        logState.info('   WiFi重试 ($retry/3)...', type: LogType.debug);
+        await Future.delayed(const Duration(seconds: 2));
+      }
+
+      try {
+        final response = await state.sendCommandViaLinuxBluetooth(
+          wifiCommand,
+          timeout: const Duration(seconds: 10),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+
+        if (response != null && !response.containsKey('error')) {
+          if (response.containsKey('payload') && response['payload'] != null) {
+            final responsePayload = response['payload'] as Uint8List;
+            final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x05);
+
+            if (wifiResult != null && wifiResult['success'] == true && wifiResult.containsKey('ip')) {
+              deviceIP = wifiResult['ip'];
+              logState.success('✅ 获取到设备IP: $deviceIP', type: LogType.debug);
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        logState.warning('⚠️ WiFi连接异常: $e', type: LogType.debug);
+      }
+    }
+
+    if (deviceIP == null || deviceIP.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ WiFi连接失败，未获取到设备IP'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ WiFi已连接，设备IP: $deviceIP'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+
+    // ========== 步骤3: 弹窗确认开始拍摄 ==========
+    if (!context.mounted) return;
     final userConfirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -954,7 +1130,7 @@ class ManualTestSection extends StatelessWidget {
 
     if (userConfirmed != true) return;
 
-    // 发送 Sensor 命令 (0x0C + 0x02 = 开始发送数据)
+    // ========== 步骤4: 发送拍照命令 ==========
     final command = ProductionTestCommands.createSensorCommand(0x02);
     
     try {
@@ -977,68 +1153,30 @@ class ManualTestSection extends StatelessWidget {
         return;
       }
 
-      // 提示用户需要输入设备IP进行图片下载
-      if (context.mounted) {
-        final ipController = TextEditingController();
-        final ip = await showDialog<String>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('输入设备IP'),
-            content: TextField(
-              controller: ipController,
-              decoration: const InputDecoration(
-                hintText: '例如: 192.168.1.100',
-                labelText: '设备IP地址',
-              ),
-              keyboardType: TextInputType.number,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(null),
-                child: const Text('取消'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.of(context).pop(ipController.text),
-                child: const Text('确定'),
-              ),
-            ],
-          ),
-        );
-
-        if (ip == null || ip.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('⚠️ 未输入IP，跳过图片下载'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          return;
-        }
-
-        // 下载图片
-        final downloadSuccess = await state.downloadImageFromDevice(ip);
-        if (!downloadSuccess) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('❌ 图片下载失败'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-          return;
-        }
-
-        // 图片质量检测
-        final qualitySuccess = await state.testCameraImageQuality();
+      // ========== 步骤5: 下载图片 ==========
+      logState.info('📥 开始FTP下载图片 (IP: $deviceIP)...', type: LogType.debug);
+      final downloadSuccess = await state.downloadImageFromDevice(deviceIP);
+      if (!downloadSuccess) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(qualitySuccess ? '✅ 摄像头棋盘格测试通过' : '❌ 图片质量检测失败'),
-              backgroundColor: qualitySuccess ? Colors.green : Colors.red,
+            const SnackBar(
+              content: Text('❌ 图片下载失败'),
+              backgroundColor: Colors.red,
             ),
           );
         }
+        return;
+      }
+
+      // ========== 步骤6: 图片质量检测 ==========
+      final qualitySuccess = await state.testCameraImageQuality();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(qualitySuccess ? '✅ 摄像头棋盘格测试通过' : '❌ 图片质量检测失败'),
+            backgroundColor: qualitySuccess ? Colors.green : Colors.red,
+          ),
+        );
       }
     } catch (e) {
       if (context.mounted) {
