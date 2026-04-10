@@ -53,9 +53,11 @@ echo ""
 echo "🔨 Building Linux application..."
 flutter build linux --release
 
-# 打包
+# 打包（包含 scripts 目录）
 echo ""
 echo "📦 Packaging application..."
+# 将 scripts 目录复制到 bundle 中，确保部署时包含最新的 Python 脚本
+cp -r scripts build/linux/x64/release/bundle/
 cd build/linux/x64/release/bundle
 tar -czf ../../../../../jn-production-line-linux-x64.tar.gz .
 cd ../../../../../
