@@ -1549,106 +1549,21 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     int? latestDiff;
     bool testPassed = false;
     bool testCancelled = false;
-    bool pollingStarted = false;
     int currentRetry = 0;
     const int maxRetries = 10;
     
-    // 弹窗实时显示CDC值
+    // 用于从外部更新 dialog UI 的回调
+    void Function(void Function())? _setDialogState;
+    
+    // 弹窗实时显示CDC值（轮询逻辑不在 builder 内，避免重复启动）
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            // 启动轮询（只启动一次，用 pollingStarted 防止重复）
-            if (!pollingStarted && !testPassed && !testCancelled) {
-              pollingStarted = true;
-              // 使用 Future 启动轮询循环
-              Future(() async {
-                final touchCommand = ProductionTestCommands.createTouchCommand(
-                  TouchTestConfig.touchRight, areaId,
-                );
-                
-                for (int retry = 0; retry <= maxRetries; retry++) {
-                  if (testCancelled || testPassed) break;
-                  
-                  currentRetry = retry;
-                  
-                  if (retry > 0) {
-                    logState.info('🔄 $touchType 重试第 $retry 次', type: LogType.debug);
-                    await Future.delayed(const Duration(milliseconds: 500));
-                  }
-                  
-                  // 等待用户操作的时间
-                  await Future.delayed(const Duration(seconds: 2));
-                  if (testCancelled) break;
-                  
-                  // 主动发送命令获取CDC值
-                  try {
-                    final response = await state.sendCommandViaLinuxBluetooth(
-                      touchCommand,
-                      timeout: const Duration(seconds: 10),
-                      moduleId: ProductionTestCommands.moduleId,
-                      messageId: ProductionTestCommands.messageId,
-                    );
-                    
-                    if (response != null && !response.containsKey('error')) {
-                      if (response.containsKey('payload') && response['payload'] != null) {
-                        final payload = response['payload'] as Uint8List;
-                        final touchResult = ProductionTestCommands.parseTouchResponse(payload);
-                        
-                        if (touchResult != null && touchResult['success'] == true) {
-                          final cdcValue = touchResult['cdcValue'] as int;
-                          final cdcDiff = (cdcValue - baselineCdc!).abs();
-                          
-                          latestCdc = cdcValue;
-                          latestDiff = cdcDiff;
-                          
-                          logState.info('📥 $touchType CDC: $cdcValue (差值: $cdcDiff, 阈值: $threshold)');
-                          
-                          if (dialogContext.mounted) {
-                            setDialogState(() {});
-                          }
-                          
-                          if (cdcDiff >= threshold) {
-                            testPassed = true;
-                            logState.info('✅ $touchType CDC差值 $cdcDiff >= 阈值 $threshold，测试通过!');
-                            
-                            if (dialogContext.mounted) {
-                              setDialogState(() {});
-                            }
-                            
-                            // 延迟关闭弹窗，让用户看到结果
-                            await Future.delayed(const Duration(seconds: 1));
-                            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-                            if (!completer.isCompleted) completer.complete(true);
-                            return;
-                          } else {
-                            logState.warning('⚠️ $touchType CDC差值 $cdcDiff < 阈值 $threshold', type: LogType.debug);
-                          }
-                        }
-                      }
-                    } else {
-                      logState.warning('⚠️ $touchType 获取CDC失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
-                    }
-                  } catch (e) {
-                    logState.warning('⚠️ $touchType 轮询异常: $e', type: LogType.debug);
-                  }
-                  
-                  // 重试间隔
-                  if (retry < maxRetries && !testCancelled && !testPassed) {
-                    await Future.delayed(const Duration(milliseconds: 1000));
-                  }
-                }
-                
-                // 所有重试完成仍未通过
-                if (!testPassed && !testCancelled) {
-                  logState.error('❌ $touchType 重试 $maxRetries 次后仍然失败');
-                  if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-                  if (!completer.isCompleted) completer.complete(false);
-                }
-              });
-            }
+            // 仅保存回调引用，不在此处启动任何轮询
+            _setDialogState = setDialogState;
             
             final statusColor = testPassed ? Colors.green : (latestCdc != null ? Colors.blue : Colors.orange);
             final statusText = testPassed 
@@ -1713,6 +1628,96 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         );
       },
     );
+    
+    // 轮询逻辑在 showDialog 之外，保证只执行一次
+    // 等待 dialog 初始化完成
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    final touchCommand = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchRight, areaId,
+    );
+    
+    for (int retry = 0; retry <= maxRetries; retry++) {
+      if (testCancelled || testPassed) break;
+      
+      currentRetry = retry;
+      
+      if (retry > 0) {
+        logState.info('🔄 $touchType 重试第 $retry 次', type: LogType.debug);
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+      
+      // 等待用户操作的时间
+      await Future.delayed(const Duration(seconds: 2));
+      if (testCancelled) break;
+      
+      // 主动发送命令获取CDC值
+      try {
+        final response = await state.sendCommandViaLinuxBluetooth(
+          touchCommand,
+          timeout: const Duration(seconds: 10),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+        
+        if (response != null && !response.containsKey('error')) {
+          if (response.containsKey('payload') && response['payload'] != null) {
+            final payload = response['payload'] as Uint8List;
+            final touchResult = ProductionTestCommands.parseTouchResponse(payload);
+            
+            if (touchResult != null && touchResult['success'] == true) {
+              final cdcValue = touchResult['cdcValue'] as int;
+              final cdcDiff = (cdcValue - baselineCdc!).abs();
+              
+              latestCdc = cdcValue;
+              latestDiff = cdcDiff;
+              
+              logState.info('📥 $touchType CDC: $cdcValue (差值: $cdcDiff, 阈值: $threshold)');
+              
+              _setDialogState?.call(() {});
+              
+              if (cdcDiff >= threshold) {
+                testPassed = true;
+                logState.info('✅ $touchType CDC差值 $cdcDiff >= 阈值 $threshold，测试通过!');
+                
+                _setDialogState?.call(() {});
+                
+                // 延迟关闭弹窗，让用户看到结果
+                await Future.delayed(const Duration(seconds: 1));
+                if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pop();
+                }
+                if (!completer.isCompleted) completer.complete(true);
+                return completer.future;
+              } else {
+                logState.warning('⚠️ $touchType CDC差值 $cdcDiff < 阈值 $threshold', type: LogType.debug);
+              }
+            }
+          }
+        } else {
+          logState.warning('⚠️ $touchType 获取CDC失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
+        }
+      } catch (e) {
+        logState.warning('⚠️ $touchType 轮询异常: $e', type: LogType.debug);
+      }
+      
+      // 更新 dialog 显示
+      _setDialogState?.call(() {});
+      
+      // 重试间隔
+      if (retry < maxRetries && !testCancelled && !testPassed) {
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
+    }
+    
+    // 所有重试完成仍未通过
+    if (!testPassed && !testCancelled) {
+      logState.error('❌ $touchType 重试 $maxRetries 次后仍然失败');
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (!completer.isCompleted) completer.complete(false);
+    }
     
     return completer.future;
   }
