@@ -231,9 +231,15 @@ class ManualTestSection extends StatelessWidget {
               ),
               _buildTestButton(
                 context,
-                'Touch左侧',
+                '左佩戴检测',
                 Icons.touch_app,
-                () => state.testTouchLeft(),
+                () => state.testLeftWearDetect(),
+              ),
+              _buildTestButton(
+                context,
+                '左Touch事件',
+                Icons.touch_app,
+                () => state.testLeftTouchEvent(),
               ),
               _buildTestButton(
                 context,

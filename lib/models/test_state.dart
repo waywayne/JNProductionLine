@@ -6386,6 +6386,12 @@ class TestState extends ChangeNotifier {
     }
   }
 
+  /// 手动测试: 左佩戴检测（公开方法，供 ManualTestSection 调用）
+  Future<bool> testLeftWearDetect() => _autoTestLeftWearDetect();
+
+  /// 手动测试: 左触控事件测试（公开方法，供 ManualTestSection 调用）
+  Future<bool> testLeftTouchEvent() => _autoTestLeftTouchEvent();
+
   /// 左佩戴检测自动测试
   /// 流程: 发送 0x07+0x00+0x04 → 收到回复后 → 监听是否有 0x07+0x00+0x04 推送返回 → 有则通过
   Future<bool> _autoTestLeftWearDetect() async {
