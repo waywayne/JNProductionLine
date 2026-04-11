@@ -87,6 +87,15 @@ class TouchTestConfig {
   static const int leftActionDoubleTap = 0x02;  // 双击
   static const int leftActionLongPress = 0x03;  // 长按
   static const int leftActionWearDetect = 0x04; // 佩戴检测
+  static const int leftActionSlide = 0x05;       // 滑动
+  
+  /// 左Touch事件有效的ActionID集合（单击/双击/长按/滑动）
+  static const List<int> leftTouchEventActionIds = [
+    leftActionSingleTap,   // 0x01
+    leftActionDoubleTap,   // 0x02
+    leftActionLongPress,   // 0x03
+    leftActionSlide,       // 0x05
+  ];
 
   // 右Touch区域ID (AreaID)
   static const int rightAreaUntouched = 0x00;  // 未触摸
@@ -107,6 +116,8 @@ class TouchTestConfig {
         return '长按';
       case leftActionWearDetect:
         return '佩戴检测';
+      case leftActionSlide:
+        return '滑动';
       default:
         return '未知动作';
     }
@@ -141,6 +152,8 @@ class TouchTestConfig {
         return '请长按左侧Touch区域（保持3秒）';
       case leftActionWearDetect:
         return '请将设备佩戴到耳朵上进行佩戴检测';
+      case leftActionSlide:
+        return '请在左侧Touch区域进行滑动操作';
       default:
         return '请按照指示操作左侧Touch区域';
     }

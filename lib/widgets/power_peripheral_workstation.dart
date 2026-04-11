@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import '../models/log_state.dart';
+import '../models/touch_test_step.dart';
 import '../services/product_sn_api.dart';
 import '../services/production_test_commands.dart';
+import '../services/gtp_protocol.dart';
 import '../services/byd_mes_service.dart';
 import '../config/production_config.dart';
 import 'sn_input_dialog.dart';
@@ -49,11 +52,9 @@ class _PowerPeripheralWorkstationState extends State<PowerPeripheralWorkstation>
       TestStepResult(stepNumber: 10, name: '右触控-TK1测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 11, name: '右触控-TK2测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 12, name: '右触控-TK3测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '左触控-佩戴测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '左触控-点击测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: '左触控-双击测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 16, name: '左触控-长按测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 17, name: '结束产测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '左佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '左触控事件测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '结束产测', status: TestStepStatus.pending),
     ]);
   }
 
@@ -356,23 +357,15 @@ class _PowerPeripheralWorkstationState extends State<PowerPeripheralWorkstation>
             success = await _testTouch(state, logState, touchType: 'TK3');
             message = success ? 'TK3测试通过' : 'TK3测试失败';
             break;
-          case 12: // 左触控-佩戴测试
-            success = await _testLeftTouch(state, logState, touchType: 'wear');
+          case 12: // 左佩戴检测
+            success = await _testLeftWearDetect(state, logState);
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 13: // 左触控-点击测试
-            success = await _testLeftTouch(state, logState, touchType: 'click');
-            message = success ? '点击检测通过' : '点击检测失败';
+          case 13: // 左触控事件测试
+            success = await _testLeftTouchEvent(state, logState);
+            message = success ? '左触控事件通过' : '左触控事件失败';
             break;
-          case 14: // 左触控-双击测试
-            success = await _testLeftTouch(state, logState, touchType: 'double_click');
-            message = success ? '双击检测通过' : '双击检测失败';
-            break;
-          case 15: // 左触控-长按测试
-            success = await _testLeftTouch(state, logState, touchType: 'long_press');
-            message = success ? '长按检测通过' : '长按检测失败';
-            break;
-          case 16: // 结束产测
+          case 14: // 结束产测
             success = await _testProductionEnd(state, logState);
             message = success ? '产测结束成功' : '产测结束失败';
             break;
@@ -718,45 +711,265 @@ class _PowerPeripheralWorkstationState extends State<PowerPeripheralWorkstation>
     return true;
   }
 
-  Future<bool> _testLeftTouch(TestState state, LogState logState, {required String touchType}) async {
-    final touchName = {
-      'wear': '佩戴',
-      'click': '点击',
-      'double_click': '双击',
-      'long_press': '长按',
-    }[touchType] ?? touchType;
+  // ========== 左佩戴检测 ==========
+  // 流程: 发送 0x07+0x00+0x04 → 收到ACK → 监听 0x07+0x00+0x04 推送 → 通过
+  Future<bool> _testLeftWearDetect(TestState state, LogState logState) async {
+    logState.info('👆 左佩戴检测');
     
-    logState.info('👆 左触控-$touchName测试');
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, TouchTestConfig.leftActionWearDetect,
+    );
+    logState.info('📤 发送佩戴检测命令...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
     
-    // 弹出提示对话框
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 佩戴检测命令发送失败');
+      return false;
+    }
+    
+    logState.info('✅ 命令已发送，开始监听佩戴检测推送...');
+    logState.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...');
+    
     if (!mounted) return false;
-    final confirmed = await showDialog<bool>(
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    bool testPassed = false;
+    String statusInfo = '请佩戴设备...';
+    
+    void Function(void Function())? _setDialogState;
+    
+    showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.touch_app, color: Colors.orange),
-            const SizedBox(width: 12),
-            Text('左触控-$touchName测试'),
-          ],
-        ),
-        content: Text('请执行$touchName操作，确认设备响应正确后点击"通过"'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('未通过'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('通过'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            _setDialogState = setDialogState;
+            final statusColor = testPassed ? Colors.green : Colors.orange;
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.touch_app, color: statusColor),
+                  const SizedBox(width: 12),
+                  const Text('左佩戴检测'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('请将设备佩戴到耳朵上', style: TextStyle(fontSize: 16)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Text(statusInfo, 
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor)),
+                  ),
+                ],
+              ),
+              actions: [
+                if (!testPassed)
+                  TextButton(
+                    onPressed: () {
+                      subscription?.cancel();
+                      Navigator.of(dialogContext).pop();
+                      if (!completer.isCompleted) completer.complete(false);
+                    },
+                    child: const Text('取消测试'),
+                  ),
+              ],
+            );
+          },
+        );
+      },
     );
+    
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    final timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!completer.isCompleted) {
+        logState.error('❌ 佩戴检测超时（15秒）');
+        subscription?.cancel();
+        statusInfo = '❌ 超时';
+        _setDialogState?.call(() {});
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) Navigator.of(context, rootNavigator: true).pop();
+          if (!completer.isCompleted) completer.complete(false);
+        });
+      }
+    });
+    
+    subscription = state.linuxBluetoothDataStream.listen((data) {
+      try {
+        final gtpResponse = GTPProtocol.parseGTPResponse(data);
+        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+          final payload = gtpResponse['payload'] as Uint8List;
+          if (payload.length >= 3 && 
+              payload[0] == ProductionTestCommands.cmdTouch && 
+              payload[1] == TouchTestConfig.touchLeft && 
+              payload[2] == TouchTestConfig.leftActionWearDetect) {
+            if (!testPassed) {
+              testPassed = true;
+              statusInfo = '✅ 佩戴检测通过！';
+              logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+              _setDialogState?.call(() {});
+              timeoutTimer.cancel();
+              subscription?.cancel();
+              Future.delayed(const Duration(seconds: 1), () {
+                if (mounted) Navigator.of(context, rootNavigator: true).pop();
+                if (!completer.isCompleted) completer.complete(true);
+              });
+            }
+          }
+        }
+      } catch (e) {
+        logState.warning('⚠️ 解析推送数据出错: $e');
+      }
+    });
+    
+    return completer.future;
+  }
 
-    return confirmed == true;
+  // ========== 左触控事件测试 ==========
+  // 流程: 发送 0x07+0x00+0x00 → 监听 0x07+0x00+(0x01/0x02/0x03/0x05) 推送 → 通过
+  Future<bool> _testLeftTouchEvent(TestState state, LogState logState) async {
+    logState.info('👆 左触控事件测试');
+    
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, TouchTestConfig.leftActionUntouched,
+    );
+    logState.info('📤 发送左触控事件命令...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 左触控事件命令发送失败');
+      return false;
+    }
+    
+    logState.info('✅ 命令已发送，开始监听触控事件推送...');
+    logState.info('👂 等待触控事件 (单击/双击/长按/滑动)...');
+    
+    if (!mounted) return false;
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    bool testPassed = false;
+    String statusInfo = '请执行任意触控操作（单击/双击/长按/滑动）...';
+    
+    void Function(void Function())? _setDialogState;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            _setDialogState = setDialogState;
+            final statusColor = testPassed ? Colors.green : Colors.orange;
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.touch_app, color: statusColor),
+                  const SizedBox(width: 12),
+                  const Text('左触控事件测试'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('请对左侧Touch执行任意操作', style: TextStyle(fontSize: 16)),
+                  const SizedBox(height: 8),
+                  const Text('（单击/双击/长按/滑动均可）', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Text(statusInfo, 
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor)),
+                  ),
+                ],
+              ),
+              actions: [
+                if (!testPassed)
+                  TextButton(
+                    onPressed: () {
+                      subscription?.cancel();
+                      Navigator.of(dialogContext).pop();
+                      if (!completer.isCompleted) completer.complete(false);
+                    },
+                    child: const Text('取消测试'),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    final timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!completer.isCompleted) {
+        logState.error('❌ 左触控事件检测超时（15秒）');
+        subscription?.cancel();
+        statusInfo = '❌ 超时';
+        _setDialogState?.call(() {});
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) Navigator.of(context, rootNavigator: true).pop();
+          if (!completer.isCompleted) completer.complete(false);
+        });
+      }
+    });
+    
+    subscription = state.linuxBluetoothDataStream.listen((data) {
+      try {
+        final gtpResponse = GTPProtocol.parseGTPResponse(data);
+        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+          final payload = gtpResponse['payload'] as Uint8List;
+          if (payload.length >= 3 && 
+              payload[0] == ProductionTestCommands.cmdTouch && 
+              payload[1] == TouchTestConfig.touchLeft && 
+              TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
+            if (!testPassed) {
+              testPassed = true;
+              final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+              statusInfo = '✅ 检测到: $actionName';
+              logState.info('✅ 左触控事件通过！检测到: $actionName');
+              _setDialogState?.call(() {});
+              timeoutTimer.cancel();
+              subscription?.cancel();
+              Future.delayed(const Duration(seconds: 1), () {
+                if (mounted) Navigator.of(context, rootNavigator: true).pop();
+                if (!completer.isCompleted) completer.complete(true);
+              });
+            }
+          }
+        }
+      } catch (e) {
+        logState.warning('⚠️ 解析推送数据出错: $e');
+      }
+    });
+    
+    return completer.future;
   }
 
   Future<bool> _testProductionEnd(TestState state, LogState logState) async {

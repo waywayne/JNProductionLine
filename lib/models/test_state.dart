@@ -810,16 +810,17 @@ class TestState extends ChangeNotifier {
       {'name': '24. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
       {'name': '25. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
       {'name': '26. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '27. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '28. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '29. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '30. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '31. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '32. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '33. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '34. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '35. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '36. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '27. 左佩戴检测', 'type': 'Touch', 'executor': _autoTestLeftWearDetect, 'skippable': false},
+      {'name': '28. 左触控事件测试', 'type': 'Touch', 'executor': _autoTestLeftTouchEvent, 'skippable': false},
+      {'name': '29. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '30. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '31. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '32. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '36. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '37. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -4332,29 +4333,21 @@ class TestState extends ChangeNotifier {
   /// 初始化左Touch测试步骤
   void _initializeLeftTouchTestSteps() {
     _leftTouchTestSteps = [
-      // 注释掉单击测试
-      // TouchTestStep(
-      //   touchId: TouchTestConfig.touchLeft,
-      //   actionId: TouchTestConfig.leftActionSingleTap,
-      //   name: '单击测试',
-      //   description: '测试左侧Touch单击功能',
-      //   userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionSingleTap),
-      // ),
-      // 注释掉双击测试
-      // TouchTestStep(
-      //   touchId: TouchTestConfig.touchLeft,
-      //   actionId: TouchTestConfig.leftActionDoubleTap,
-      //   name: '双击测试',
-      //   description: '测试左侧Touch双击功能',
-      //   userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionDoubleTap),
-      // ),
-      // 只保留佩戴检测测试项
+      // 佩戴检测: 发送0x07+0x00+0x04, 监听0x07+0x00+0x04推送
       TouchTestStep(
         touchId: TouchTestConfig.touchLeft,
         actionId: TouchTestConfig.leftActionWearDetect,
         name: '佩戴检测',
         description: '测试左侧Touch佩戴检测功能',
         userPrompt: TouchTestConfig.getLeftActionPrompt(TouchTestConfig.leftActionWearDetect),
+      ),
+      // 左触控事件: 发送0x07+0x00+0x00, 监听0x07+0x00+(0x01/0x02/0x03/0x05)推送
+      TouchTestStep(
+        touchId: TouchTestConfig.touchLeft,
+        actionId: TouchTestConfig.leftActionUntouched,
+        name: '左触控事件测试',
+        description: '测试左侧Touch事件（单击/双击/长按/滑动）',
+        userPrompt: '请对左侧Touch区域执行任意操作（单击/双击/长按/滑动）',
       ),
     ];
     notifyListeners();
@@ -4537,13 +4530,15 @@ class TestState extends ChangeNotifier {
   }
   
   /// 执行单次左Touch步骤
+  /// 佩戴检测: 发送0x07+0x00+0x04 → 收到ACK → 监听0x07+0x00+0x04推送
+  /// 左触控事件: 发送0x07+0x00+0x00 → 收到ACK → 监听0x07+0x00+(0x01/0x02/0x03/0x05)推送
   Future<bool> _executeSingleLeftTouchStep(TouchTestStep step, int stepIndex, int currentRetry) async {
     // 更新步骤状态为等待用户操作
     _leftTouchTestSteps[stepIndex] = step.copyWith(status: TouchStepStatus.userAction);
     notifyListeners();
     
     _logState?.info('👆 ${step.userPrompt}', type: LogType.debug);
-    _logState?.info('⏳ 等待用户操作中... (请在 10 秒内完成操作)', type: LogType.debug);
+    _logState?.info('⏳ 等待用户操作中... (请在 15 秒内完成操作)', type: LogType.debug);
     
     // 创建命令
     final command = ProductionTestCommands.createTouchCommand(step.touchId, step.actionId);
@@ -4552,61 +4547,106 @@ class TestState extends ChangeNotifier {
     final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
     _logState?.info('📤 发送: [$commandHex]', type: LogType.debug);
     
-    // 等待用户操作的时间
-    await Future.delayed(const Duration(seconds: 2));
-    
-    // 发送命令并等待响应（10秒超时）
+    // 发送命令并等待ACK响应
     final response = await _serialService.sendCommandAndWaitResponse(
       command,
-      timeout: const Duration(seconds: 10),
+      timeout: const Duration(seconds: 5),
       moduleId: ProductionTestCommands.moduleId,
       messageId: ProductionTestCommands.messageId,
     );
     
-    if (response != null && !response.containsKey('error')) {
-      if (response.containsKey('payload') && response['payload'] != null) {
-        final payload = response['payload'] as Uint8List;
-        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-        _logState?.info('📥 响应: [$payloadHex]', type: LogType.debug);
-        
-        // 解析Touch响应
-        final touchResult = ProductionTestCommands.parseTouchResponse(payload);
-        if (touchResult != null && touchResult['success'] == true) {
-          // 更新步骤状态
-          _leftTouchTestSteps[stepIndex] = step.copyWith(
-            status: TouchStepStatus.success,
-            currentRetry: currentRetry,
-          );
-          notifyListeners();
-          
-          _logState?.success('✅ ${step.name} 成功', type: LogType.debug);
-          return true;
-        } else {
-          final errorMsg = touchResult?['error'] ?? '解析响应失败';
-          
-          _leftTouchTestSteps[stepIndex] = step.copyWith(
-            status: TouchStepStatus.testing,
-            currentRetry: currentRetry,
-            errorMessage: errorMsg,
-          );
-          notifyListeners();
-          
-          _logState?.error('❌ ${step.name} 解析失败: $errorMsg', type: LogType.debug);
-          return false;
-        }
-      }
+    if (response == null || response.containsKey('error')) {
+      _logState?.error('❌ ${step.name} 命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
+      _leftTouchTestSteps[stepIndex] = step.copyWith(
+        status: TouchStepStatus.testing,
+        currentRetry: currentRetry,
+        errorMessage: '命令发送失败',
+      );
+      notifyListeners();
+      return false;
     }
     
-    // 超时或无响应
-    _leftTouchTestSteps[stepIndex] = step.copyWith(
-      status: TouchStepStatus.testing,
-      currentRetry: currentRetry,
-      errorMessage: '超时或无响应',
-    );
-    notifyListeners();
+    _logState?.info('✅ ${step.name} 命令已发送，开始监听推送数据...', type: LogType.debug);
     
-    _logState?.error('❌ ${step.name} 超时或无响应', type: LogType.debug);
-    return false;
+    // 判断期望的推送数据
+    final bool isWearDetect = (step.actionId == TouchTestConfig.leftActionWearDetect);
+    if (isWearDetect) {
+      _logState?.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...', type: LogType.debug);
+    } else {
+      _logState?.info('👂 等待触控事件 (单击0x01/双击0x02/长按0x03/滑动0x05)...', type: LogType.debug);
+    }
+    
+    // 监听推送数据
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    Timer? timeoutTimer;
+    
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!completer.isCompleted) {
+        _logState?.error('❌ ${step.name} 监听超时（15秒）', type: LogType.debug);
+        subscription?.cancel();
+        completer.complete(false);
+      }
+    });
+    
+    subscription = _serialService.dataStream.listen((data) {
+      try {
+        final gtpResponse = GTPProtocol.parseGTPResponse(data);
+        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+          final payload = gtpResponse['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
+          
+          // 检查是否为Touch推送: payload[0] == 0x07, payload[1] == 0x00 (左Touch)
+          if (payload.length >= 3 && 
+              payload[0] == ProductionTestCommands.cmdTouch && 
+              payload[1] == TouchTestConfig.touchLeft) {
+            
+            if (isWearDetect) {
+              // 佩戴检测: 检查 actionId == 0x04
+              if (payload[2] == TouchTestConfig.leftActionWearDetect) {
+                _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
+                timeoutTimer?.cancel();
+                subscription?.cancel();
+                if (!completer.isCompleted) completer.complete(true);
+              }
+            } else {
+              // 左触控事件: 检查 actionId ∈ {0x01, 0x02, 0x03, 0x05}
+              if (TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
+                final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+                _logState?.success('✅ 左触控事件通过！检测到: $actionName (0x${payload[2].toRadixString(16).padLeft(2, '0')})', type: LogType.debug);
+                timeoutTimer?.cancel();
+                subscription?.cancel();
+                if (!completer.isCompleted) completer.complete(true);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        _logState?.warning('⚠️ 解析推送数据出错: $e', type: LogType.debug);
+      }
+    });
+    
+    final success = await completer.future;
+    
+    if (success) {
+      _leftTouchTestSteps[stepIndex] = step.copyWith(
+        status: TouchStepStatus.success,
+        currentRetry: currentRetry,
+      );
+      notifyListeners();
+      _logState?.success('✅ ${step.name} 成功', type: LogType.debug);
+    } else {
+      _leftTouchTestSteps[stepIndex] = step.copyWith(
+        status: TouchStepStatus.testing,
+        currentRetry: currentRetry,
+        errorMessage: '超时或无响应',
+      );
+      notifyListeners();
+      _logState?.error('❌ ${step.name} 超时或无响应', type: LogType.debug);
+    }
+    
+    return success;
   }
   
   /// 等待右Touch用户操作并获取 CDC 值（带重试机制）
@@ -6199,16 +6239,17 @@ class TestState extends ChangeNotifier {
       {'name': '24. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
       {'name': '25. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
       {'name': '26. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
-      {'name': '27. 左触控测试', 'type': 'Touch', 'executor': _autoTestLeftTouch, 'skippable': false},
-      {'name': '28. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
-      {'name': '29. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
-      {'name': '30. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
-      {'name': '31. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '32. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '33. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '34. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '35. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '36. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '27. 左佩戴检测', 'type': 'Touch', 'executor': _autoTestLeftWearDetect, 'skippable': false},
+      {'name': '28. 左触控事件测试', 'type': 'Touch', 'executor': _autoTestLeftTouchEvent, 'skippable': false},
+      {'name': '29. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
+      {'name': '30. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
+      {'name': '31. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
+      {'name': '32. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
+      {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '36. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '37. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
@@ -6345,37 +6386,148 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 左侧Touch自动测试 - 结束时必须关闭弹窗
-  Future<bool> _autoTestLeftTouch() async {
+  /// 左佩戴检测自动测试
+  /// 流程: 发送 0x07+0x00+0x04 → 收到回复后 → 监听是否有 0x07+0x00+0x04 推送返回 → 有则通过
+  Future<bool> _autoTestLeftWearDetect() async {
     try {
-      // 开始左侧Touch测试
-      await testTouchLeft();
+      _logState?.info('👆 左佩戴检测开始', type: LogType.debug);
       
-      // 等待测试完成（最多30秒）
-      for (var i = 0; i < 60; i++) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        
-        // 检查是否所有步骤都完成
-        if (_leftTouchTestSteps.every((step) => 
-            step.status == TouchStepStatus.success || 
-            step.status == TouchStepStatus.failed)) {
-          break;
-        }
+      // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
+      final command = ProductionTestCommands.createTouchCommand(
+        TouchTestConfig.touchLeft, TouchTestConfig.leftActionWearDetect,
+      );
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送佩戴检测命令: [$commandHex]', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ 佩戴检测命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
+        return false;
       }
       
-      // 检查结果
-      final allPassed = _leftTouchTestSteps.every((step) => 
-          step.status == TouchStepStatus.success);
+      _logState?.info('✅ 佩戴检测命令已发送，开始监听推送数据...', type: LogType.debug);
+      _logState?.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...', type: LogType.debug);
       
-      return allPassed;
+      // 监听推送数据，等待 0x07+0x00+0x04 返回
+      final completer = Completer<bool>();
+      StreamSubscription<Uint8List>? subscription;
+      Timer? timeoutTimer;
+      
+      timeoutTimer = Timer(const Duration(seconds: 15), () {
+        if (!completer.isCompleted) {
+          _logState?.error('❌ 佩戴检测超时（15秒）', type: LogType.debug);
+          subscription?.cancel();
+          completer.complete(false);
+        }
+      });
+      
+      subscription = _serialService.dataStream.listen((data) {
+        try {
+          final gtpResponse = GTPProtocol.parseGTPResponse(data);
+          if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+            final payload = gtpResponse['payload'] as Uint8List;
+            final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+            _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
+            
+            // 检查是否为佩戴检测响应: 0x07 + 0x00 + 0x04
+            if (payload.length >= 3 && 
+                payload[0] == ProductionTestCommands.cmdTouch && 
+                payload[1] == TouchTestConfig.touchLeft && 
+                payload[2] == TouchTestConfig.leftActionWearDetect) {
+              _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
+              timeoutTimer?.cancel();
+              subscription?.cancel();
+              if (!completer.isCompleted) completer.complete(true);
+            }
+          }
+        } catch (e) {
+          _logState?.warning('⚠️ 解析推送数据出错: $e', type: LogType.debug);
+        }
+      });
+      
+      return await completer.future;
     } catch (e) {
-      _logState?.error('左侧Touch测试异常: $e', type: LogType.debug);
+      _logState?.error('佩戴检测异常: $e', type: LogType.debug);
       return false;
-    } finally {
-      // 无论成功失败，都必须关闭弹窗
-      _logState?.info('🛑 左侧Touch测试结束，关闭弹窗', type: LogType.debug);
-      closeTouchDialog();
-      await Future.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  /// 左触控事件自动测试
+  /// 流程: 发送 0x07+0x00+0x00 → 监听任何 0x07+0x00+0x01/0x02/0x03/0x05 推送 → 收到任一则通过
+  Future<bool> _autoTestLeftTouchEvent() async {
+    try {
+      _logState?.info('👆 左触控事件测试开始', type: LogType.debug);
+      
+      // 发送左触控命令: 0x07 + 0x00(左Touch) + 0x00(未触摸/查询)
+      final command = ProductionTestCommands.createTouchCommand(
+        TouchTestConfig.touchLeft, TouchTestConfig.leftActionUntouched,
+      );
+      final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+      _logState?.info('📤 发送左触控事件命令: [$commandHex]', type: LogType.debug);
+      
+      final response = await _serialService.sendCommandAndWaitResponse(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+      
+      if (response == null || response.containsKey('error')) {
+        _logState?.error('❌ 左触控事件命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
+        return false;
+      }
+      
+      _logState?.info('✅ 左触控事件命令已发送，开始监听推送数据...', type: LogType.debug);
+      _logState?.info('👂 等待触控事件 (单击0x01/双击0x02/长按0x03/滑动0x05)...', type: LogType.debug);
+      
+      // 监听推送数据，等待 0x07+0x00+0x01/0x02/0x03/0x05 返回
+      final completer = Completer<bool>();
+      StreamSubscription<Uint8List>? subscription;
+      Timer? timeoutTimer;
+      
+      timeoutTimer = Timer(const Duration(seconds: 15), () {
+        if (!completer.isCompleted) {
+          _logState?.error('❌ 左触控事件检测超时（15秒）', type: LogType.debug);
+          subscription?.cancel();
+          completer.complete(false);
+        }
+      });
+      
+      subscription = _serialService.dataStream.listen((data) {
+        try {
+          final gtpResponse = GTPProtocol.parseGTPResponse(data);
+          if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+            final payload = gtpResponse['payload'] as Uint8List;
+            final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+            _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
+            
+            // 检查是否为左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
+            if (payload.length >= 3 && 
+                payload[0] == ProductionTestCommands.cmdTouch && 
+                payload[1] == TouchTestConfig.touchLeft && 
+                TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
+              final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+              _logState?.success('✅ 左触控事件通过！检测到: $actionName (0x${payload[2].toRadixString(16).padLeft(2, '0')})', type: LogType.debug);
+              timeoutTimer?.cancel();
+              subscription?.cancel();
+              if (!completer.isCompleted) completer.complete(true);
+            }
+          }
+        } catch (e) {
+          _logState?.warning('⚠️ 解析推送数据出错: $e', type: LogType.debug);
+        }
+      });
+      
+      return await completer.future;
+    } catch (e) {
+      _logState?.error('左触控事件测试异常: $e', type: LogType.debug);
+      return false;
     }
   }
 
