@@ -4540,6 +4540,16 @@ class TestState extends ChangeNotifier {
     _logState?.info('👆 ${step.userPrompt}', type: LogType.debug);
     _logState?.info('⏳ 等待用户操作中... (请在 15 秒内完成操作)', type: LogType.debug);
     
+    // 检查连接状态：优先使用蓝牙SPP，其次串口
+    final bool useLinuxBluetooth = _linuxBtService.isConnected;
+    final bool useSerial = _serialService.isConnected;
+    
+    if (!useLinuxBluetooth && !useSerial) {
+      _logState?.error('❌ 未连接到设备（串口或蓝牙均未连接）', type: LogType.debug);
+      return false;
+    }
+    _logState?.info('🔌 通信方式: ${useLinuxBluetooth ? "Linux蓝牙SPP" : "串口"}', type: LogType.debug);
+    
     // 创建命令
     final command = ProductionTestCommands.createTouchCommand(step.touchId, step.actionId);
     
@@ -4548,12 +4558,19 @@ class TestState extends ChangeNotifier {
     _logState?.info('📤 发送: [$commandHex]', type: LogType.debug);
     
     // 发送命令并等待ACK响应
-    final response = await _serialService.sendCommandAndWaitResponse(
-      command,
-      timeout: const Duration(seconds: 5),
-      moduleId: ProductionTestCommands.moduleId,
-      messageId: ProductionTestCommands.messageId,
-    );
+    final response = useLinuxBluetooth
+        ? await _linuxBtService.sendCommandAndWaitResponse(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          )
+        : await _serialService.sendCommandAndWaitResponse(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
     
     if (response == null || response.containsKey('error')) {
       _logState?.error('❌ ${step.name} 命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
@@ -4589,7 +4606,10 @@ class TestState extends ChangeNotifier {
       }
     });
     
-    subscription = _serialService.dataStream.listen((data) {
+    // 根据通信方式选择数据流
+    final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+    
+    subscription = dataStream.listen((data) {
       try {
         final gtpResponse = GTPProtocol.parseGTPResponse(data);
         if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
@@ -6396,7 +6416,17 @@ class TestState extends ChangeNotifier {
   /// 流程: 发送 0x07+0x00+0x04 → 收到回复后 → 监听是否有 0x07+0x00+0x04 推送返回 → 有则通过
   Future<bool> _autoTestLeftWearDetect() async {
     try {
+      // 检查连接状态：优先使用蓝牙SPP，其次串口
+      final bool useLinuxBluetooth = _linuxBtService.isConnected;
+      final bool useSerial = _serialService.isConnected;
+      
+      if (!useLinuxBluetooth && !useSerial) {
+        _logState?.error('❌ 未连接到设备（串口或蓝牙均未连接）', type: LogType.debug);
+        return false;
+      }
+      
       _logState?.info('👆 左佩戴检测开始', type: LogType.debug);
+      _logState?.info('🔌 通信方式: ${useLinuxBluetooth ? "Linux蓝牙SPP" : "串口"}', type: LogType.debug);
       
       // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
       final command = ProductionTestCommands.createTouchCommand(
@@ -6405,12 +6435,19 @@ class TestState extends ChangeNotifier {
       final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📤 发送佩戴检测命令: [$commandHex]', type: LogType.debug);
       
-      final response = await _serialService.sendCommandAndWaitResponse(
-        command,
-        timeout: const Duration(seconds: 5),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
+      final response = useLinuxBluetooth
+          ? await _linuxBtService.sendCommandAndWaitResponse(
+              command,
+              timeout: const Duration(seconds: 5),
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            )
+          : await _serialService.sendCommandAndWaitResponse(
+              command,
+              timeout: const Duration(seconds: 5),
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            );
       
       if (response == null || response.containsKey('error')) {
         _logState?.error('❌ 佩戴检测命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
@@ -6433,7 +6470,10 @@ class TestState extends ChangeNotifier {
         }
       });
       
-      subscription = _serialService.dataStream.listen((data) {
+      // 根据通信方式选择数据流
+      final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+      
+      subscription = dataStream.listen((data) {
         try {
           final gtpResponse = GTPProtocol.parseGTPResponse(data);
           if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
@@ -6468,7 +6508,17 @@ class TestState extends ChangeNotifier {
   /// 流程: 发送 0x07+0x00+0x00 → 监听任何 0x07+0x00+0x01/0x02/0x03/0x05 推送 → 收到任一则通过
   Future<bool> _autoTestLeftTouchEvent() async {
     try {
+      // 检查连接状态：优先使用蓝牙SPP，其次串口
+      final bool useLinuxBluetooth = _linuxBtService.isConnected;
+      final bool useSerial = _serialService.isConnected;
+      
+      if (!useLinuxBluetooth && !useSerial) {
+        _logState?.error('❌ 未连接到设备（串口或蓝牙均未连接）', type: LogType.debug);
+        return false;
+      }
+      
       _logState?.info('👆 左触控事件测试开始', type: LogType.debug);
+      _logState?.info('🔌 通信方式: ${useLinuxBluetooth ? "Linux蓝牙SPP" : "串口"}', type: LogType.debug);
       
       // 发送左触控命令: 0x07 + 0x00(左Touch) + 0x00(未触摸/查询)
       final command = ProductionTestCommands.createTouchCommand(
@@ -6477,12 +6527,19 @@ class TestState extends ChangeNotifier {
       final commandHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📤 发送左触控事件命令: [$commandHex]', type: LogType.debug);
       
-      final response = await _serialService.sendCommandAndWaitResponse(
-        command,
-        timeout: const Duration(seconds: 5),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
+      final response = useLinuxBluetooth
+          ? await _linuxBtService.sendCommandAndWaitResponse(
+              command,
+              timeout: const Duration(seconds: 5),
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            )
+          : await _serialService.sendCommandAndWaitResponse(
+              command,
+              timeout: const Duration(seconds: 5),
+              moduleId: ProductionTestCommands.moduleId,
+              messageId: ProductionTestCommands.messageId,
+            );
       
       if (response == null || response.containsKey('error')) {
         _logState?.error('❌ 左触控事件命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
@@ -6505,7 +6562,10 @@ class TestState extends ChangeNotifier {
         }
       });
       
-      subscription = _serialService.dataStream.listen((data) {
+      // 根据通信方式选择数据流
+      final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+      
+      subscription = dataStream.listen((data) {
         try {
           final gtpResponse = GTPProtocol.parseGTPResponse(data);
           if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
