@@ -9,6 +9,7 @@ class AutomationTestConfig {
   static bool skipLeakageCurrentTest = false;    // 跳过漏电流测试
   static bool skipPowerOnTest = false;           // 跳过上电测试
   static bool skipWorkingCurrentTest = false;    // 跳过工作电流测试
+  static bool skipBydMes = false;                 // 跳过BYD MES系统
   
   // 电源参数配置
   static const double defaultVoltage = 5.0;      // 默认电压 5V

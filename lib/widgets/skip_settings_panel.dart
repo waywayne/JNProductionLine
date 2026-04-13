@@ -17,7 +17,8 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
         AutomationTestConfig.skipGpibReadyCheck ||
         AutomationTestConfig.skipLeakageCurrentTest ||
         AutomationTestConfig.skipWorkingCurrentTest ||
-        AutomationTestConfig.skipPowerOnTest;
+        AutomationTestConfig.skipPowerOnTest ||
+        AutomationTestConfig.skipBydMes;
   }
 
   @override
@@ -112,6 +113,7 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
                               AutomationTestConfig.skipLeakageCurrentTest = true;
                               AutomationTestConfig.skipWorkingCurrentTest = true;
                               AutomationTestConfig.skipPowerOnTest = true;
+                              AutomationTestConfig.skipBydMes = true;
                             });
                           },
                           icon: const Icon(Icons.check_box, size: 18),
@@ -132,6 +134,7 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
                               AutomationTestConfig.skipLeakageCurrentTest = false;
                               AutomationTestConfig.skipPowerOnTest = false;
                               AutomationTestConfig.skipWorkingCurrentTest = false;
+                              AutomationTestConfig.skipBydMes = false;
                             });
                           },
                           icon: const Icon(Icons.refresh, size: 18),
@@ -198,6 +201,16 @@ class _SkipSettingsPanelState extends State<SkipSettingsPanel> {
                         onChanged: (value) {
                           setState(() {
                             AutomationTestConfig.skipPowerOnTest = value;
+                          });
+                        },
+                      ),
+                      _buildSkipSwitch(
+                        label: '跳过BYD MES',
+                        value: AutomationTestConfig.skipBydMes,
+                        icon: Icons.cloud_off,
+                        onChanged: (value) {
+                          setState(() {
+                            AutomationTestConfig.skipBydMes = value;
                           });
                         },
                       ),

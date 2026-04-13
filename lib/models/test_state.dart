@@ -15,6 +15,7 @@ import '../services/image_test_service.dart';
 import '../services/sn_manager_service.dart';
 import '../services/sn_api_service.dart';
 import '../services/product_sn_api.dart';
+import '../services/byd_mes_service.dart';
 import 'log_state.dart';
 import '../config/test_config.dart';
 import '../config/production_config.dart';
@@ -144,6 +145,7 @@ class TestState extends ChangeNotifier {
   final LinuxBluetoothSppService _linuxBtService = LinuxBluetoothSppService();
   final PythonBluetoothService _pythonBtService = PythonBluetoothService();
   final SNManagerService _snManager = SNManagerService();
+  final BydMesService _bydMesService = BydMesService();
   
   String? _selectedPort;
   bool _isRunningTest = false;
@@ -2548,6 +2550,27 @@ class TestState extends ChangeNotifier {
     }
   }
 
+  /// 构建WiFi连接数据（SSID + \0 + Password + \0）
+  /// 从通用配置中读取WiFi SSID和密码
+  List<int>? _buildWiFiConnectData() {
+    final config = ProductionConfig();
+    final ssid = config.wifiSsid;
+    final password = config.wifiPassword;
+    
+    if (ssid.isEmpty) {
+      _logState?.warning('⚠️ WiFi SSID未配置，连接热点将不发送SSID和密码', type: LogType.debug);
+      return null;
+    }
+    
+    _logState?.info('📡 WiFi配置 - SSID: "$ssid"', type: LogType.debug);
+    
+    // 格式: SSID bytes + \0 + Password bytes + \0
+    final data = <int>[];
+    data.addAll(WiFiConfig.stringToBytes(ssid));
+    data.addAll(WiFiConfig.stringToBytes(password));
+    return data;
+  }
+
   /// 初始化WiFi测试步骤
   void _initializeWiFiTestSteps() {
     _wifiTestSteps = List<WiFiTestStep>.from([
@@ -2559,8 +2582,8 @@ class TestState extends ChangeNotifier {
       WiFiTestStep(
         opt: WiFiConfig.optConnectAP,
         name: '连接热点',
-        description: '只发送CMD+OPT，不带数据',
-        data: null, // 不发送SSID和密码数据，只发送CMD 0x04 + OPT 0x01
+        description: '连接配置的WiFi热点',
+        data: _buildWiFiConnectData(),
       ),
       WiFiTestStep(
         opt: WiFiConfig.optTestRSSI,
@@ -6072,6 +6095,27 @@ class TestState extends ChangeNotifier {
     _scannedSN = scannedSN;
     if (_scannedSN != null && _scannedSN!.isNotEmpty) {
       _logState?.info('📋 扫码枪SN号: $_scannedSN', type: LogType.debug);
+      
+      // 调用 BYD MES 开始接口
+      if (AutomationTestConfig.skipBydMes) {
+        _logState?.warning('⏭️ 已跳过 BYD MES 开始接口（跳过BYD MES已启用）', type: LogType.debug);
+      } else {
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        _logState?.info('🏭 调用 BYD MES 开始接口...', type: LogType.debug);
+        _logState?.info('   SN: $_scannedSN', type: LogType.debug);
+        _logState?.info('   工站: ${_bydMesService.station}', type: LogType.debug);
+        
+        final mesStartResult = await _bydMesService.start(_scannedSN!);
+        if (mesStartResult['success'] == true) {
+          _logState?.success('✅ BYD MES 开始接口调用成功', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        } else {
+          _logState?.error('❌ BYD MES 开始接口调用失败: ${mesStartResult['error'] ?? '未知错误'}', type: LogType.debug);
+          _logState?.error('   请检查 MES 配置和网络连接', type: LogType.debug);
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          return;
+        }
+      }
     }
 
     // GPIB设备检测逻辑
@@ -6126,9 +6170,9 @@ class TestState extends ChangeNotifier {
     // 获取测试序列的总数
     final testSequence = _getTestSequence();
     
-    // 创建测试报告，SN号初始为"待分配"，后续在生成设备标识后更新
+    // 创建测试报告，使用扫码SN或"待分配"
     _currentTestReport = TestReport(
-      deviceSN: '待分配',
+      deviceSN: (_scannedSN != null && _scannedSN!.isNotEmpty) ? _scannedSN! : '待分配',
       bluetoothMAC: null,
       wifiMAC: null,
       startTime: DateTime.now(),
@@ -6155,6 +6199,65 @@ class TestState extends ChangeNotifier {
       _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.warning('⛔ 测试因失败而终止，生成失败报告', type: LogType.debug);
       _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    }
+    
+    // 调用 BYD MES 接口上报测试结果
+    if (_scannedSN != null && _scannedSN!.isNotEmpty) {
+      if (AutomationTestConfig.skipBydMes) {
+        _logState?.warning('⏭️ 已跳过 BYD MES 结果上报（跳过BYD MES已启用）', type: LogType.debug);
+      } else {
+        final testDuration = DateTime.now().difference(_currentTestReport?.startTime ?? DateTime.now());
+        final testTimeStr = testDuration.inSeconds.toString();
+        
+        if (_shouldStopTest) {
+          // 测试失败 → 调用不良品接口
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.info('🏭 调用 BYD MES 不良品接口...', type: LogType.debug);
+          
+          // 找到第一个失败的测试项作为不良信息
+          String failItem = '未知';
+          String failValue = '测试未通过';
+          for (final item in _testReportItems) {
+            if (item.status == TestReportStatus.fail) {
+              failItem = item.testName;
+              failValue = item.errorMessage ?? '测试未通过';
+              break;
+            }
+          }
+          
+          final mesNcResult = await _bydMesService.ncComplete(
+            _scannedSN!,
+            ncCode: 'NC001',
+            ncContext: '单板产测不良',
+            failItem: failItem,
+            failValue: failValue,
+            testTime: testTimeStr,
+          );
+          
+          if (mesNcResult['success'] == true) {
+            _logState?.success('✅ BYD MES 不良品接口调用成功', type: LogType.debug);
+          } else {
+            _logState?.error('❌ BYD MES 不良品接口调用失败: ${mesNcResult['error'] ?? '未知错误'}', type: LogType.debug);
+          }
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        } else {
+          // 测试全部通过 → 调用良品完成接口
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+          _logState?.info('🏭 调用 BYD MES 良品完成接口...', type: LogType.debug);
+          
+          final mesCompleteResult = await _bydMesService.complete(
+            _scannedSN!,
+            testTime: testTimeStr,
+          );
+          
+          if (mesCompleteResult['success'] == true) {
+            _logState?.success('✅ BYD MES 良品完成接口调用成功', type: LogType.debug);
+          } else {
+            _logState?.error('❌ BYD MES 良品完成接口调用失败: ${mesCompleteResult['error'] ?? '未知错误'}', type: LogType.debug);
+          }
+          _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        }
+      }
     }
     
     // 自动保存测试报告（无论成功还是失败都保存）
