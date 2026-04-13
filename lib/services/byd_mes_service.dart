@@ -35,11 +35,33 @@ class BydMesService {
   
   /// 初始化脚本路径
   void _initScriptPath() {
+    // 获取可执行文件所在目录，用于构建相对路径
+    final execDir = File(Platform.resolvedExecutable).parent.path;
+    
+    final currentDir = Directory.current.path;
+    
     final possiblePaths = [
+      // 当前工作目录
+      '$currentDir/scripts/byd_mes_client.py',
+      // 相对路径
       'scripts/byd_mes_client.py',
+      // 部署路径
       '/opt/jn-production-line/scripts/byd_mes_client.py',
+      // HOME 目录
       '${Platform.environment['HOME']}/git/JNProductionLine/scripts/byd_mes_client.py',
+      // 可执行文件相对路径
+      '$execDir/scripts/byd_mes_client.py',
+      '$execDir/../scripts/byd_mes_client.py',
+      '$execDir/../../scripts/byd_mes_client.py',
+      '$execDir/../../../scripts/byd_mes_client.py',
+      // Flutter 打包路径
+      '$execDir/data/flutter_assets/assets/scripts/byd_mes_client.py',
+      '$execDir/data/flutter_assets/scripts/byd_mes_client.py',
     ];
+    
+    _log('🔍 搜索 MES 脚本...');
+    _log('   工作目录: ${Directory.current.path}');
+    _log('   可执行文件: ${Platform.resolvedExecutable}');
     
     for (final path in possiblePaths) {
       if (File(path).existsSync()) {
@@ -50,7 +72,10 @@ class BydMesService {
     }
     
     if (_scriptPath == null) {
-      _log('❌ 未找到 MES 脚本');
+      _log('❌ 未找到 MES 脚本，已搜索以下路径:');
+      for (final path in possiblePaths) {
+        _log('   ❌ $path');
+      }
     }
   }
   
