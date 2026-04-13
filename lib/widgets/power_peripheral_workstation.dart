@@ -28,7 +28,7 @@ class _PowerPeripheralWorkstationState extends State<PowerPeripheralWorkstation>
   final List<TestStepResult> _stepResults = [];
   ProductSNInfo? _productInfo;
   BluetoothTestMethod _selectedMethod = BluetoothTestMethod.rfcommBind;
-  final BydMesService _mesService = BydMesService(station: 'STATION3');
+  final BydMesService _mesService = BydMesService();
   final ProductionConfig _config = ProductionConfig();
 
   @override

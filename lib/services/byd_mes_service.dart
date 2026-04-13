@@ -9,7 +9,6 @@ import '../config/production_config.dart';
 class BydMesService {
   // MES 配置 - 从 ProductionConfig 读取
   final ProductionConfig _config = ProductionConfig();
-  String _station = 'STATION1';
   
   // Python 脚本路径
   String? _scriptPath;
@@ -23,14 +22,12 @@ class BydMesService {
   // 获取配置中的 Client ID
   String get clientId => _config.bydMesClientId;
   
-  // 获取当前工站
-  String get station => _station;
+  // 获取当前工站（从配置读取）
+  String get station => _config.bydMesStation;
   
   BydMesService({
-    String? station,
     Function(String)? onLog,
   }) {
-    if (station != null) _station = station;
     _onLog = onLog;
     
     _initScriptPath();
@@ -57,10 +54,10 @@ class BydMesService {
     }
   }
   
-  /// 更新工站配置
-  void updateStation(String station) {
-    _station = station;
-    _log('🔧 MES 工站已更新: $_station');
+  /// 更新工站配置（现在通过 ProductionConfig 配置）
+  Future<void> updateStation(String station) async {
+    await _config.setBydMesStation(station);
+    _log('🔧 MES 工站已更新: $station');
   }
   
   /// 打印当前配置
@@ -68,7 +65,7 @@ class BydMesService {
     _log('🔧 MES 配置:');
     _log('   MES IP: $mesIp');
     _log('   Client ID: $clientId');
-    _log('   工站: $_station');
+    _log('   工站: ${_config.bydMesStation}');
   }
   
   /// 日志输出
@@ -95,7 +92,7 @@ class BydMesService {
         _scriptPath!,
         action,
         sn,
-        _station,
+        station,
         mesIp,
         clientId,
         ...extraArgs,
@@ -104,7 +101,7 @@ class BydMesService {
       _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       _log('📤 执行 MES 操作: ${action.toUpperCase()}');
       _log('   SN: $sn');
-      _log('   工站: $_station');
+      _log('   工站: $station');
       _log('   命令: python3 ${args.join(' ')}');
       
       final process = await Process.start('python3', args);

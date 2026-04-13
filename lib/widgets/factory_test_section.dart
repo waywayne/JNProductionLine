@@ -47,6 +47,114 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
     super.dispose();
   }
 
+  /// 显示SN扫码弹窗，扫描后开始自动化测试
+  Future<void> _showSNScanDialog(BuildContext context, TestState state) async {
+    final snController = TextEditingController();
+    final focusNode = FocusNode();
+
+    final scannedSN = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          focusNode.requestFocus();
+        });
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final hasInput = snController.text.trim().isNotEmpty;
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.qr_code_scanner, color: Colors.blue[700], size: 28),
+                  const SizedBox(width: 12),
+                  const Text('扫描 SN 码'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('请使用扫码枪扫描产品 SN 码',
+                      style: TextStyle(fontSize: 16, color: Colors.grey)),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: snController,
+                    focusNode: focusNode,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      labelText: 'SN 码',
+                      hintText: '等待扫码枪输入...',
+                      prefixIcon: const Icon(Icons.qr_code),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      suffixIcon: hasInput
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                snController.clear();
+                                setDialogState(() {});
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                    onSubmitted: (value) {
+                      if (value.trim().isNotEmpty) {
+                        Navigator.of(dialogContext).pop(value.trim());
+                      }
+                    },
+                  ),
+                  if (hasInput) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                          const SizedBox(width: 8),
+                          Text('已扫描: ${snController.text.trim()}',
+                              style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(null),
+                  child: const Text('取消'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: hasInput
+                      ? () => Navigator.of(dialogContext).pop(snController.text.trim())
+                      : null,
+                  icon: const Icon(Icons.arrow_forward),
+                  label: const Text('开始测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green[600],
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    snController.dispose();
+    focusNode.dispose();
+
+    if (scannedSN != null && scannedSN.isNotEmpty) {
+      await state.startAutoTest(scannedSN: scannedSN);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -308,7 +416,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                       ],
                     )
                   : ElevatedButton(
-                      onPressed: () => state.startAutoTest(),
+                      onPressed: () => _showSNScanDialog(context, state),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green[600],
                         foregroundColor: Colors.white,

@@ -171,6 +171,9 @@ class TestState extends ChangeNotifier {
   // 当前设备标识信息
   Map<String, String>? _currentDeviceIdentity;
 
+  // 扫码枪扫描的SN号（开始产测前扫描）
+  String? _scannedSN;
+
   // WiFi测试步骤状态
   List<WiFiTestStep> _wifiTestSteps = [];
   
@@ -283,6 +286,9 @@ class TestState extends ChangeNotifier {
   
   // 获取当前设备标识信息
   Map<String, String>? get currentDeviceIdentity => _currentDeviceIdentity;
+
+  // 获取扫码枪扫描的SN号
+  String? get scannedSN => _scannedSN;
 
   // 获取WiFi测试步骤
   List<WiFiTestStep> get wifiTestSteps => _wifiTestSteps;
@@ -800,8 +806,8 @@ class TestState extends ChangeNotifier {
       {'name': '8. 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       
       // ========== 优先处理：SN、MAC 地址、硬件版本号 ==========
-      {'name': '9. SN码读取', 'type': 'SN', 'executor': _autoTestReadSN, 'skippable': false},
-      {'name': '10. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '9. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '10. SN码读取校验', 'type': 'SN', 'executor': _autoTestReadSN, 'skippable': false},
       {'name': '11. 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
       {'name': '12. 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
       {'name': '13. WiFi MAC写入', 'type': 'WiFi', 'executor': _autoTestWiFiMACWrite, 'skippable': false},
@@ -6050,15 +6056,22 @@ class TestState extends ChangeNotifier {
   // ==================== 自动化测试流程 ====================
 
   /// 开始自动化测试
-  Future<void> startAutoTest() async {
+  /// [scannedSN] 扫码枪扫描的SN号（可选），如果提供则用于SN码写入
+  Future<void> startAutoTest({String? scannedSN}) async {
     if (_isAutoTesting) {
       _logState?.warning('自动化测试已在进行中', type: LogType.debug);
       return;
     }
 
-    if (!_serialService.isConnected) {
-      _logState?.error('串口未连接，无法开始自动化测试', type: LogType.debug);
+    if (!_serialService.isConnected && !_linuxBtService.isConnected) {
+      _logState?.error('设备未连接（串口和蓝牙均未连接），无法开始自动化测试', type: LogType.debug);
       return;
+    }
+
+    // 保存扫码枪扫描的SN号
+    _scannedSN = scannedSN;
+    if (_scannedSN != null && _scannedSN!.isNotEmpty) {
+      _logState?.info('📋 扫码枪SN号: $_scannedSN', type: LogType.debug);
     }
 
     // GPIB设备检测逻辑
@@ -6266,8 +6279,8 @@ class TestState extends ChangeNotifier {
       {'name': '8. 产测开始', 'type': '指令', 'executor': _autoTestProductionStart, 'skippable': false},
       
       // ========== 优先处理：SN、MAC 地址、硬件版本号 ==========
-      {'name': '9. SN码读取', 'type': 'SN', 'executor': _autoTestReadSN, 'skippable': false},
-      {'name': '10. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '9. SN码写入', 'type': 'SN', 'executor': _autoTestWriteSN, 'skippable': false},
+      {'name': '10. SN码读取校验', 'type': 'SN', 'executor': _autoTestReadSN, 'skippable': false},
       {'name': '11. 蓝牙MAC写入', 'type': '蓝牙', 'executor': _autoTestBluetoothMACWrite, 'skippable': false},
       {'name': '12. 蓝牙MAC读取', 'type': '蓝牙', 'executor': _autoTestBluetoothMACRead, 'skippable': false},
       {'name': '13. WiFi MAC写入', 'type': 'WiFi', 'executor': _autoTestWiFiMACWrite, 'skippable': false},
@@ -9362,11 +9375,18 @@ class TestState extends ChangeNotifier {
     }
   }
 
-  /// 30. SN码读取
+  /// 10. SN码读取校验（读取设备SN并与扫码枪扫描的SN比对）
   Future<bool> _autoTestReadSN() async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      _logState?.info('📖 开始SN码读取', type: LogType.debug);
+      _logState?.info('📖 开始SN码读取校验', type: LogType.debug);
+      
+      // 检查是否有扫码枪扫描的SN号用于比对
+      if (_scannedSN == null || _scannedSN!.isEmpty) {
+        _logState?.error('❌ SN码校验失败：未扫描SN号，无法比对', type: LogType.debug);
+        return false;
+      }
+      _logState?.info('   期望SN码（扫码枪）: $_scannedSN', type: LogType.debug);
       
       // 创建SN码读取命令
       final readSNCmd = ProductionTestCommands.createReadSNCommand();
@@ -9382,102 +9402,63 @@ class TestState extends ChangeNotifier {
       );
       
       if (response == null || response.containsKey('error')) {
-        _logState?.warning('⚠️ SN码读取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
-        _logState?.info('   设备可能未写入SN码，将在下一步写入', type: LogType.debug);
+        _logState?.error('❌ SN码读取失败: ${response?['error'] ?? '无响应'}', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true; // 返回true继续流程，在写入步骤处理
+        return false;
       }
       
       // 解析响应中的SN码
       final payload = response['payload'] as Uint8List?;
       if (payload == null) {
-        _logState?.warning('⚠️ SN码读取响应无payload', type: LogType.debug);
+        _logState?.error('❌ SN码读取失败：响应无payload', type: LogType.debug);
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true;
-      }
-      
-      final snCode = ProductionTestCommands.parseReadSNResponse(payload);
-      if (snCode == null || snCode.isEmpty) {
-        _logState?.warning('⚠️ 设备未写入SN码', type: LogType.debug);
-        _logState?.info('   将从服务端获取新的SN码和MAC地址', type: LogType.debug);
-        
-        // 从服务端获取新的设备标识（不传入现有SN）
-        await generateDeviceIdentity();
-        
-        if (_currentDeviceIdentity != null) {
-          _logState?.success('✅ 已从服务端获取设备标识', type: LogType.debug);
-          _logState?.info('   新SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
-          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
-          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
-        } else {
-          _logState?.error('❌ 从服务端获取设备标识失败', type: LogType.debug);
-          return false;
-        }
-        
-        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-        return true;
-      }
-      
-      _logState?.success('✅ SN码读取成功: $snCode', type: LogType.debug);
-      
-      // 将读取到的SN发送给服务端，由服务端决定是使用现有SN还是分配新SN
-      _logState?.info('📤 将读取到的SN发送给服务端验证', type: LogType.debug);
-      _logState?.info('   读取的SN: $snCode', type: LogType.debug);
-      
-      // 调用API，传入读取到的SN
-      await generateDeviceIdentity(existingSn: snCode);
-      
-      if (_currentDeviceIdentity != null) {
-        _logState?.success('✅ 服务端已确认设备标识', type: LogType.debug);
-        _logState?.info('   SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
-        _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
-        _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
-      } else {
-        _logState?.error('❌ 从服务端获取设备标识失败', type: LogType.debug);
         return false;
       }
       
-      // 更新测试报告中的设备信息
-      if (_currentTestReport != null && _currentDeviceIdentity != null) {
-        _currentTestReport = TestReport(
-          deviceSN: _currentDeviceIdentity!['sn'] ?? 'UNKNOWN',
-          bluetoothMAC: _currentDeviceIdentity!['bluetoothMac'],
-          wifiMAC: _currentDeviceIdentity!['wifiMac'],
-          startTime: _currentTestReport!.startTime,
-          endTime: _currentTestReport!.endTime,
-          expectedTotalTests: _currentTestReport!.expectedTotalTests,
-          items: List.from(_testReportItems),
-        );
-        _logState?.info('📝 已更新测试报告设备信息', type: LogType.debug);
-        _logState?.info('   SN: ${_currentDeviceIdentity!["sn"]}', type: LogType.debug);
-        _logState?.info('   蓝牙MAC: ${_currentDeviceIdentity!["bluetoothMac"]}', type: LogType.debug);
-        _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!["wifiMac"]}', type: LogType.debug);
-        notifyListeners(); // 通知UI更新
+      final readSN = ProductionTestCommands.parseReadSNResponse(payload);
+      if (readSN == null || readSN.isEmpty) {
+        _logState?.error('❌ SN码读取失败：设备返回空SN', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
       }
       
-      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
-      return true;
+      _logState?.info('📥 设备返回SN码: $readSN', type: LogType.debug);
+      
+      // 比对读取的SN与扫码枪扫描的SN
+      if (readSN == _scannedSN) {
+        _logState?.success('✅ SN码校验通过！读取值与扫描值一致', type: LogType.debug);
+        _logState?.info('   扫描SN: $_scannedSN', type: LogType.debug);
+        _logState?.info('   读取SN: $readSN', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return true;
+      } else {
+        _logState?.error('❌ SN码校验失败：读取值与扫描值不一致', type: LogType.debug);
+        _logState?.error('   扫描SN: $_scannedSN', type: LogType.debug);
+        _logState?.error('   读取SN: $readSN', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
     } catch (e) {
-      _logState?.error('SN码读取异常: $e', type: LogType.debug);
+      _logState?.error('SN码读取校验异常: $e', type: LogType.debug);
       return false;
     }
   }
 
-  /// 31. SN码写入
+  /// 9. SN码写入（使用扫码枪扫描的SN号）
   Future<bool> _autoTestWriteSN() async {
     try {
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📝 开始SN码写入', type: LogType.debug);
       
-      // 检查是否有生成的SN码
-      if (_currentDeviceIdentity == null || _currentDeviceIdentity!['sn'] == null) {
-        _logState?.error('❌ SN码写入失败：未找到SN码', type: LogType.debug);
-        _logState?.info('   提示：请先生成设备标识', type: LogType.debug);
+      // 使用扫码枪扫描的SN号
+      if (_scannedSN == null || _scannedSN!.isEmpty) {
+        _logState?.error('❌ SN码写入失败：未扫描SN号', type: LogType.debug);
+        _logState?.info('   提示：请在开始测试前扫描SN码', type: LogType.debug);
         return false;
       }
       
-      final snCode = _currentDeviceIdentity!['sn']!;
-      _logState?.info('   SN码: $snCode', type: LogType.debug);
+      final snCode = _scannedSN!;
+      _logState?.info('   扫码枪SN码: $snCode', type: LogType.debug);
       
       // 创建SN码写入命令
       final writeSNCmd = ProductionTestCommands.createWriteSNCommand(snCode);
@@ -9517,6 +9498,35 @@ class TestState extends ChangeNotifier {
         _logState?.success('✅ SN码写入成功！写入值与返回值一致', type: LogType.debug);
         _logState?.info('   写入: $snCode', type: LogType.debug);
         _logState?.info('   返回: $responseSN', type: LogType.debug);
+        
+        // 使用扫码枪的SN向服务端获取设备标识（MAC地址等）
+        _logState?.info('📤 使用扫描SN向服务端获取设备标识...', type: LogType.debug);
+        await generateDeviceIdentity(existingSn: snCode);
+        
+        if (_currentDeviceIdentity != null) {
+          _logState?.success('✅ 服务端已确认设备标识', type: LogType.debug);
+          _logState?.info('   SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
+          
+          // 更新测试报告中的设备信息
+          if (_currentTestReport != null) {
+            _currentTestReport = TestReport(
+              deviceSN: _currentDeviceIdentity!['sn'] ?? 'UNKNOWN',
+              bluetoothMAC: _currentDeviceIdentity!['bluetoothMac'],
+              wifiMAC: _currentDeviceIdentity!['wifiMac'],
+              startTime: _currentTestReport!.startTime,
+              endTime: _currentTestReport!.endTime,
+              expectedTotalTests: _currentTestReport!.expectedTotalTests,
+              items: List.from(_testReportItems),
+            );
+            _logState?.info('📝 已更新测试报告设备信息', type: LogType.debug);
+            notifyListeners();
+          }
+        } else {
+          _logState?.warning('⚠️ 从服务端获取设备标识失败，继续测试流程', type: LogType.debug);
+        }
+        
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         return true;
       } else {

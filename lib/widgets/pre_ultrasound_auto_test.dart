@@ -44,7 +44,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final List<TestStepResult> _stepResults3 = [];
   ProductSNInfo? _productInfo3;
   BluetoothTestMethod _selectedMethod3 = BluetoothTestMethod.rfcommBind;
-  final BydMesService _mesService3 = BydMesService(station: 'STATION3');
+  final BydMesService _mesService3 = BydMesService();
   final ProductionConfig _config = ProductionConfig();
 
   @override

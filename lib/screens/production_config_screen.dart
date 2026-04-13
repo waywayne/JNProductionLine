@@ -32,6 +32,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _wifiPasswordController;
   late TextEditingController _bydMesIpController;
   late TextEditingController _bydMesClientIdController;
+  late TextEditingController _bydMesStationController;
 
   @override
   void initState() {
@@ -57,6 +58,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _wifiPasswordController = TextEditingController(text: _config.wifiPassword);
     _bydMesIpController = TextEditingController(text: _config.bydMesIp);
     _bydMesClientIdController = TextEditingController(text: _config.bydMesClientId);
+    _bydMesStationController = TextEditingController(text: _config.bydMesStation);
   }
 
   @override
@@ -78,6 +80,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _wifiPasswordController.dispose();
     _bydMesIpController.dispose();
     _bydMesClientIdController.dispose();
+    _bydMesStationController.dispose();
     super.dispose();
   }
 
@@ -100,6 +103,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setWifiPassword(_wifiPasswordController.text);
       await _config.setBydMesIp(_bydMesIpController.text);
       await _config.setBydMesClientId(_bydMesClientIdController.text);
+      await _config.setBydMesStation(_bydMesStationController.text);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -380,6 +384,16 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               icon: Icons.badge,
               inputType: TextInputType.text,
               helperText: 'BYD MES 系统客户端标识',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _bydMesStationController,
+              label: 'MES 站点名称',
+              hint: '例如: STATION1',
+              suffix: '',
+              icon: Icons.location_on,
+              inputType: TextInputType.text,
+              helperText: 'BYD MES 系统站点名称',
             ),
             const SizedBox(height: 32),
 
