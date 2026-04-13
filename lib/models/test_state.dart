@@ -4285,33 +4285,24 @@ class TestState extends ChangeNotifier {
       StreamSubscription? dataSubscription;
       bool receivedData = false;
       
-      // 根据连接方式选择数据流
-      final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+      // 根据连接方式选择数据流（使用已解析的 pushPayloadStream）
+      final pushStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.pushPayloadStream;
       
-      dataSubscription = dataStream.listen((data) {
+      dataSubscription = pushStream.listen((payload) {
         try {
-          // 解析GTP响应
-          final gtpResponse = GTPProtocol.parseGTPResponse(data);
-          if (gtpResponse != null && !gtpResponse.containsKey('error')) {
-            final cliResponse = gtpResponse;
-            if (cliResponse != null && cliResponse.containsKey('payload')) {
-              final payload = cliResponse['payload'] as Uint8List;
-              
-              // 检查是否是IMU数据 (第一个字节是0x0B)
-              if (payload.isNotEmpty && payload[0] == ProductionTestCommands.cmdIMU) {
-                dataCount++;
-                receivedData = true;
-                
-                final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-                _logState?.info('📥 IMU数据 #$dataCount: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
-                
-                // 解析IMU数据
-                final imuData = ProductionTestCommands.parseIMUResponse(payload);
-                if (imuData != null) {
-                  _logState?.info('   📊 加速度: X=${imuData['accel_x']?.toStringAsFixed(3)}, Y=${imuData['accel_y']?.toStringAsFixed(3)}, Z=${imuData['accel_z']?.toStringAsFixed(3)}', type: LogType.debug);
-                  _logState?.info('   🔄 陀螺仪: X=${imuData['gyro_x']?.toStringAsFixed(3)}, Y=${imuData['gyro_y']?.toStringAsFixed(3)}, Z=${imuData['gyro_z']?.toStringAsFixed(3)}', type: LogType.debug);
-                }
-              }
+          // 检查是否是IMU数据 (第一个字节是0x0B)
+          if (payload.isNotEmpty && payload[0] == ProductionTestCommands.cmdIMU) {
+            dataCount++;
+            receivedData = true;
+            
+            final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+            _logState?.info('📥 IMU数据 #$dataCount: [$payloadHex] (${payload.length} bytes)', type: LogType.debug);
+            
+            // 解析IMU数据
+            final imuData = ProductionTestCommands.parseIMUResponse(payload);
+            if (imuData != null) {
+              _logState?.info('   📊 加速度: X=${imuData['accel_x']?.toStringAsFixed(3)}, Y=${imuData['accel_y']?.toStringAsFixed(3)}, Z=${imuData['accel_z']?.toStringAsFixed(3)}', type: LogType.debug);
+              _logState?.info('   🔄 陀螺仪: X=${imuData['gyro_x']?.toStringAsFixed(3)}, Y=${imuData['gyro_y']?.toStringAsFixed(3)}, Z=${imuData['gyro_z']?.toStringAsFixed(3)}', type: LogType.debug);
             }
           }
         } catch (e) {
@@ -4662,39 +4653,35 @@ class TestState extends ChangeNotifier {
       }
     });
     
-    // 根据通信方式选择数据流
-    final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+    // 根据通信方式选择数据流（使用已解析的 pushPayloadStream）
+    final pushStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.pushPayloadStream;
     
-    subscription = dataStream.listen((data) {
+    subscription = pushStream.listen((payload) {
       try {
-        final gtpResponse = GTPProtocol.parseGTPResponse(data);
-        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
-          final payload = gtpResponse['payload'] as Uint8List;
-          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-          _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
+        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
+        
+        // 检查是否为Touch推送: payload[0] == 0x07, payload[1] == 0x00 (左Touch)
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft) {
           
-          // 检查是否为Touch推送: payload[0] == 0x07, payload[1] == 0x00 (左Touch)
-          if (payload.length >= 3 && 
-              payload[0] == ProductionTestCommands.cmdTouch && 
-              payload[1] == TouchTestConfig.touchLeft) {
-            
-            if (isWearDetect) {
-              // 佩戴检测: 检查 actionId == 0x04
-              if (payload[2] == TouchTestConfig.leftActionWearDetect) {
-                _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
-                timeoutTimer?.cancel();
-                subscription?.cancel();
-                if (!completer.isCompleted) completer.complete(true);
-              }
-            } else {
-              // 左触控事件: 检查 actionId ∈ {0x01, 0x02, 0x03, 0x05}
-              if (TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
-                final actionName = TouchTestConfig.getLeftActionName(payload[2]);
-                _logState?.success('✅ 左触控事件通过！检测到: $actionName (0x${payload[2].toRadixString(16).padLeft(2, '0')})', type: LogType.debug);
-                timeoutTimer?.cancel();
-                subscription?.cancel();
-                if (!completer.isCompleted) completer.complete(true);
-              }
+          if (isWearDetect) {
+            // 佩戴检测: 检查 actionId == 0x04
+            if (payload[2] == TouchTestConfig.leftActionWearDetect) {
+              _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
+              timeoutTimer?.cancel();
+              subscription?.cancel();
+              if (!completer.isCompleted) completer.complete(true);
+            }
+          } else {
+            // 左触控事件: 检查 actionId ∈ {0x01, 0x02, 0x03, 0x05}
+            if (TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
+              final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+              _logState?.success('✅ 左触控事件通过！检测到: $actionName (0x${payload[2].toRadixString(16).padLeft(2, '0')})', type: LogType.debug);
+              timeoutTimer?.cancel();
+              subscription?.cancel();
+              if (!completer.isCompleted) completer.complete(true);
             }
           }
         }
@@ -5165,7 +5152,7 @@ class TestState extends ChangeNotifier {
     await Future.delayed(const Duration(milliseconds: 100));
     
     _logState?.info('🎯 启动Sensor数据监听器...', type: LogType.debug);
-    _sensorDataSubscription = _serialService.dataStream.listen(
+    _sensorDataSubscription = _serialService.pushPayloadStream.listen(
       (data) async {
         try {
           _logState?.info('📨 Sensor监听器收到数据事件！', type: LogType.debug);
@@ -5844,7 +5831,7 @@ class TestState extends ChangeNotifier {
 
   /// 开始监听IMU数据
   void _startIMUDataListener() {
-    _imuDataSubscription = _serialService.dataStream.listen((data) async {
+    _imuDataSubscription = _serialService.pushPayloadStream.listen((data) async {
       try {
         // 打印所有接收到的裸数据
         final rawDataHex = data.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
@@ -6767,27 +6754,24 @@ class TestState extends ChangeNotifier {
       });
       
       // 根据通信方式选择数据流
-      final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
+      // 使用已解析的 pushPayloadStream
+      final pushStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.pushPayloadStream;
       
-      subscription = dataStream.listen((data) {
+      subscription = pushStream.listen((payload) {
         try {
-          final gtpResponse = GTPProtocol.parseGTPResponse(data);
-          if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
-            final payload = gtpResponse['payload'] as Uint8List;
-            final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-            _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
-            
-            // 检查是否为左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
-            if (payload.length >= 3 && 
-                payload[0] == ProductionTestCommands.cmdTouch && 
-                payload[1] == TouchTestConfig.touchLeft && 
-                TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
-              final actionName = TouchTestConfig.getLeftActionName(payload[2]);
-              _logState?.success('✅ 左触控事件通过！检测到: $actionName (0x${payload[2].toRadixString(16).padLeft(2, '0')})', type: LogType.debug);
-              timeoutTimer?.cancel();
-              subscription?.cancel();
-              if (!completer.isCompleted) completer.complete(true);
-            }
+          final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
+          
+          // 检查是否为左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
+          if (payload.length >= 3 && 
+              payload[0] == ProductionTestCommands.cmdTouch && 
+              payload[1] == TouchTestConfig.touchLeft && 
+              TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
+            final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+            _logState?.success('✅ 左触控事件通过！检测到: $actionName (0x${payload[2].toRadixString(16).padLeft(2, '0')})', type: LogType.debug);
+            timeoutTimer?.cancel();
+            subscription?.cancel();
+            if (!completer.isCompleted) completer.complete(true);
           }
         } catch (e) {
           _logState?.warning('⚠️ 解析推送数据出错: $e', type: LogType.debug);
