@@ -226,6 +226,10 @@ class TestState extends ChangeNotifier {
   double? _currentPowerValue; // 当前功耗数值
   Completer<bool>? _powerConsumptionTestCompleter; // 用于等待用户确认
   
+  // 佩戴检测弹窗状态
+  bool _showWearDetectDialog = false;
+  Completer<bool>? _wearDetectCompleter; // 用于等待佩戴检测结果
+  
   // LED测试弹窗状态
   bool _showLEDDialog = false;
   String? _currentLEDType; // "内侧" 或 "外侧"
@@ -328,6 +332,9 @@ class TestState extends ChangeNotifier {
   bool get showPowerConsumptionDialog => _showPowerConsumptionDialog;
   int? get currentPowerConsumptionOpt => _currentPowerConsumptionOpt;
   double? get currentPowerValue => _currentPowerValue;
+  
+  // 佩戴检测弹窗状态getter
+  bool get showWearDetectDialog => _showWearDetectDialog;
   
   // LED测试状态getter
   bool get showLEDDialog => _showLEDDialog;
@@ -1061,6 +1068,7 @@ class TestState extends ChangeNotifier {
     _showSensorDialog = false;
     _showImageQualityDialog = false;
     _showLEDDialog = false;
+    _showWearDetectDialog = false;
     _showTouchDialog = false;
     _showTestReportDialog = false;
     
@@ -1090,6 +1098,12 @@ class TestState extends ChangeNotifier {
       }
       _sensorTestCompleter = null;
     }
+    
+    // 清理佩戴检测状态
+    if (_wearDetectCompleter != null && !_wearDetectCompleter!.isCompleted) {
+      _wearDetectCompleter?.complete(false);
+    }
+    _wearDetectCompleter = null;
     
     // 清理LED测试状态
     if (_ledTestCompleter != null && !_ledTestCompleter!.isCompleted) {
@@ -6576,7 +6590,7 @@ class TestState extends ChangeNotifier {
   Future<bool> testLeftTouchEvent() => _autoTestLeftTouchEvent();
 
   /// 左佩戴检测自动测试
-  /// 流程: 发送 0x07+0x00+0x04 → 收到回复后 → 监听是否有 0x07+0x00+0x04 推送返回 → 有则通过
+  /// 流程: 弹窗提示用户触摸佩戴检测 → 发送 0x07+0x00+0x04 → 监听推送 → 有则通过
   Future<bool> _autoTestLeftWearDetect() async {
     try {
       // 检查连接状态：优先使用蓝牙SPP，其次串口
@@ -6590,6 +6604,13 @@ class TestState extends ChangeNotifier {
       
       _logState?.info('👆 左佩戴检测开始', type: LogType.debug);
       _logState?.info('🔌 通信方式: ${useLinuxBluetooth ? "Linux蓝牙SPP" : "串口"}', type: LogType.debug);
+      
+      // 显示弹窗提示用户触摸佩戴检测区域
+      _wearDetectCompleter = Completer<bool>();
+      _showWearDetectDialog = true;
+      notifyListeners();
+      
+      _logState?.info('📢 等待用户触摸佩戴检测区域...', type: LogType.debug);
       
       // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
       final command = ProductionTestCommands.createTouchCommand(
@@ -6614,6 +6635,9 @@ class TestState extends ChangeNotifier {
       
       if (response == null || response.containsKey('error')) {
         _logState?.error('❌ 佩戴检测命令发送失败: ${response?['error'] ?? '超时'}', type: LogType.debug);
+        _showWearDetectDialog = false;
+        _wearDetectCompleter = null;
+        notifyListeners();
         return false;
       }
       
@@ -6621,15 +6645,14 @@ class TestState extends ChangeNotifier {
       _logState?.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...', type: LogType.debug);
       
       // 监听推送数据，等待 0x07+0x00+0x04 返回
-      final completer = Completer<bool>();
       StreamSubscription<Uint8List>? subscription;
       Timer? timeoutTimer;
       
-      timeoutTimer = Timer(const Duration(seconds: 15), () {
-        if (!completer.isCompleted) {
-          _logState?.error('❌ 佩戴检测超时（15秒）', type: LogType.debug);
+      timeoutTimer = Timer(const Duration(seconds: 30), () {
+        if (_wearDetectCompleter != null && !_wearDetectCompleter!.isCompleted) {
+          _logState?.error('❌ 佩戴检测超时（30秒）', type: LogType.debug);
           subscription?.cancel();
-          completer.complete(false);
+          _wearDetectCompleter!.complete(false);
         }
       });
       
@@ -6652,7 +6675,9 @@ class TestState extends ChangeNotifier {
               _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
               timeoutTimer?.cancel();
               subscription?.cancel();
-              if (!completer.isCompleted) completer.complete(true);
+              if (_wearDetectCompleter != null && !_wearDetectCompleter!.isCompleted) {
+                _wearDetectCompleter!.complete(true);
+              }
             }
           }
         } catch (e) {
@@ -6660,10 +6685,30 @@ class TestState extends ChangeNotifier {
         }
       });
       
-      return await completer.future;
+      final result = await _wearDetectCompleter!.future;
+      
+      // 关闭弹窗
+      timeoutTimer?.cancel();
+      subscription?.cancel();
+      _showWearDetectDialog = false;
+      _wearDetectCompleter = null;
+      notifyListeners();
+      
+      return result;
     } catch (e) {
       _logState?.error('佩戴检测异常: $e', type: LogType.debug);
+      _showWearDetectDialog = false;
+      _wearDetectCompleter = null;
+      notifyListeners();
       return false;
+    }
+  }
+  
+  /// 用户手动取消佩戴检测
+  void cancelWearDetect() {
+    if (_wearDetectCompleter != null && !_wearDetectCompleter!.isCompleted) {
+      _logState?.warning('⚠️ 用户取消佩戴检测', type: LogType.debug);
+      _wearDetectCompleter!.complete(false);
     }
   }
 

@@ -89,6 +89,48 @@ class _HomeScreenState extends State<HomeScreen> {
             if (testState.showIMUDialog)
               const IMUDataDialog(),
             
+            // 佩戴检测提示弹窗
+            if (testState.showWearDetectDialog)
+              Dialog(
+                child: Container(
+                  width: 400,
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.touch_app, color: Colors.orange, size: 64),
+                      const SizedBox(height: 16),
+                      const Text(
+                        '佩戴检测',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        '请用手指触摸左镜腿内侧的佩戴检测区域',
+                        style: TextStyle(fontSize: 16),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '检测到触摸后将自动通过',
+                        style: TextStyle(fontSize: 14, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 20),
+                      const SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      const SizedBox(height: 20),
+                      TextButton(
+                        onPressed: () => testState.cancelWearDetect(),
+                        child: const Text('取消', style: TextStyle(color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            
             // LED测试弹窗
             if (testState.showLEDDialog && testState.currentLEDType != null)
               LEDTestDialog(
