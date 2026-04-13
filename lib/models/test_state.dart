@@ -6659,25 +6659,22 @@ class TestState extends ChangeNotifier {
       // 根据通信方式选择数据流
       final dataStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.dataStream;
       
+      // dataStream 推送的是已解析的原始 payload 字节（非完整 GTP 包），直接检查即可
       subscription = dataStream.listen((data) {
         try {
-          final gtpResponse = GTPProtocol.parseGTPResponse(data);
-          if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
-            final payload = gtpResponse['payload'] as Uint8List;
-            final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-            _logState?.info('📥 收到推送: [$payloadHex]', type: LogType.debug);
-            
-            // 检查是否为佩戴检测响应: 0x07 + 0x00 + 0x04
-            if (payload.length >= 3 && 
-                payload[0] == ProductionTestCommands.cmdTouch && 
-                payload[1] == TouchTestConfig.touchLeft && 
-                payload[2] == TouchTestConfig.leftActionWearDetect) {
-              _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
-              timeoutTimer?.cancel();
-              subscription?.cancel();
-              if (_wearDetectCompleter != null && !_wearDetectCompleter!.isCompleted) {
-                _wearDetectCompleter!.complete(true);
-              }
+          final payloadHex = data.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+          _logState?.info('📥 收到推送: [$payloadHex] (${data.length} bytes)', type: LogType.debug);
+          
+          // 检查是否为佩戴检测响应: 0x07 + 0x00 + 0x04
+          if (data.length >= 3 && 
+              data[0] == ProductionTestCommands.cmdTouch && 
+              data[1] == TouchTestConfig.touchLeft && 
+              data[2] == TouchTestConfig.leftActionWearDetect) {
+            _logState?.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04', type: LogType.debug);
+            timeoutTimer?.cancel();
+            subscription?.cancel();
+            if (_wearDetectCompleter != null && !_wearDetectCompleter!.isCompleted) {
+              _wearDetectCompleter!.complete(true);
             }
           }
         } catch (e) {
