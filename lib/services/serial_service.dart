@@ -357,39 +357,28 @@ class SerialService {
                         return;
                       }
                       
-                      if (isAckResponse || isTypeResponse || hasPendingRequest) {
+                      // 无论 flags 如何，都尝试匹配待处理响应或推送到 pushPayloadStream
+                      if (_pendingResponses.containsKey(sn)) {
                         isResponse = true;
-                        
-                        // 尝试匹配待处理的响应
-                        if (_pendingResponses.containsKey(sn)) {
-                          final completer = _pendingResponses.remove(sn);
-                          if (completer != null && !completer.isCompleted) {
-                            // 简化日志：只显示SN匹配
-                            _logState?.success('✅ SN: $sn', type: LogType.debug);
-                            completer.complete({
-                              'moduleId': moduleId,
-                              'messageId': messageId,
-                              'sn': sn,
-                              'result': result,
-                              'payloadLength': payloadLength,
-                              'payload': payload,  // 包含payload
-                            });
-                          } else {
-                            _logState?.warning('⚠️  Completer 已完成或为空 (SN: $sn)', type: LogType.debug);
-                          }
+                        final completer = _pendingResponses.remove(sn);
+                        if (completer != null && !completer.isCompleted) {
+                          _logState?.success('✅ SN: $sn', type: LogType.debug);
+                          completer.complete({
+                            'moduleId': moduleId,
+                            'messageId': messageId,
+                            'sn': sn,
+                            'result': result,
+                            'payloadLength': payloadLength,
+                            'payload': payload,
+                          });
                         } else {
-                          _logState?.info('🔍 没有匹配的待处理响应 (SN: $sn)，检查是否为主动推送数据...', type: LogType.debug);
-                          _logState?.info('🔍 Payload状态检查: payload=${payload != null ? 'not null' : 'null'}, isEmpty=${payload?.isEmpty ?? true}', type: LogType.debug);
-                          
-                          if (payload != null && payload.isNotEmpty) {
-                            _logState?.info('✅ Payload有数据，推送到dataStream和pushPayloadStream...', type: LogType.debug);
-                            _dataController.add(payload);
-                            _pushPayloadController.add(payload);
-                            _logState?.info('✅ Payload已推送', type: LogType.debug);
-                          } else {
-                            _logState?.warning('❌ Payload为null或为空，无法进行主动推送数据处理', type: LogType.debug);
-                          }
+                          _logState?.warning('⚠️  Completer 已完成或为空 (SN: $sn)', type: LogType.debug);
                         }
+                      }
+                      
+                      // 始终推送已解析的 payload 到 pushPayloadStream（供佩戴检测等功能监听）
+                      if (payload != null && payload.isNotEmpty) {
+                        _pushPayloadController.add(payload);
                       }
                     }
                   }
