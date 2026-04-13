@@ -229,25 +229,20 @@ class SNApiService {
     LogState? logState,
   }) async {
     try {
-      final url = Uri.parse('$baseUrl$productSnInfoEndpoint');
-      
-      final body = {
-        'sn': sn,
-      };
+      final url = Uri.parse('$baseUrl$productSnInfoEndpoint?sn=$sn');
       
       logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       logState?.info('📡 获取SN详情API', type: LogType.debug);
+      logState?.info('   请求方式: GET', type: LogType.debug);
       logState?.info('   URL: $url', type: LogType.debug);
       logState?.info('   SN: $sn', type: LogType.debug);
       
-      final response = await http.post(
+      final response = await http.get(
         url,
         headers: {
-          'Content-Type': 'application/json',
           'Token': token,
           'User-Agent': userAgent,
         },
-        body: json.encode(body),
       ).timeout(
         const Duration(seconds: 10),
         onTimeout: () {
