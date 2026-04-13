@@ -7,7 +7,7 @@
 ## API规格
 
 ### 接口信息
-- **URL**: `http://api.jiananai.com/api/v1/product-sn/fetch-sn`
+- **URL**: `http://test.jiananai.com/api/v1/product-sn/fetch-sn`
 - **方法**: POST
 - **Content-Type**: application/json
 

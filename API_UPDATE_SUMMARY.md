@@ -30,7 +30,7 @@
 ### 2. 新增 update-sn-status 接口
 
 #### 接口信息
-- **URL**: `http://api.jiananai.com/api/v1/product-sn/update-sn-status`
+- **URL**: `http://test.jiananai.com/api/v1/product-sn/update-sn-status`
 - **方法**: POST
 - **Content-Type**: application/json
 
@@ -140,7 +140,7 @@ if (_currentTestReport!.allTestsPassed && deviceSN != '待分配' && deviceSN !=
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📡 请求SN码API
-   URL: http://api.jiananai.com/api/v1/product-sn/fetch-sn
+   URL: http://test.jiananai.com/api/v1/product-sn/fetch-sn
    产品线: 637
    工厂: 1
    产线: 1
@@ -171,7 +171,7 @@ if (_currentTestReport!.allTestsPassed && deviceSN != '待分配' && deviceSN !=
    📁 文件: ~/Documents/JNProductionLine/device_records.csv
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📤 更新服务端SN状态...
-   URL: http://api.jiananai.com/api/v1/product-sn/update-sn-status
+   URL: http://test.jiananai.com/api/v1/product-sn/update-sn-status
    SN: 6371603071000025951
    状态: 4
    状态码: 200

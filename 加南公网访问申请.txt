@@ -9,7 +9,7 @@
 用于生产过程中 SN 校验、产位 SN 状态同步，设备产测数据上传
 
 3. 域名：
-api.jiananai.com
+test.jiananai.com
 （产测机通过 hosts 绑定到目标IP）
 
 4. 数据格式：

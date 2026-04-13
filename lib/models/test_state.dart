@@ -6260,6 +6260,23 @@ class TestState extends ChangeNotifier {
       }
     }
     
+    // 所有测试通过时，更新SN状态为 4（单板产测通过）
+    if (!_shouldStopTest && _scannedSN != null && _scannedSN!.isNotEmpty) {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      _logState?.info('📤 更新SN状态为「单板产测通过」...', type: LogType.debug);
+      final statusUpdated = await SNApiService.updateSNStatus(
+        sn: _scannedSN!,
+        status: 4,
+        logState: _logState,
+      );
+      if (statusUpdated) {
+        _logState?.success('✅ SN状态已更新为「单板产测通过」', type: LogType.debug);
+      } else {
+        _logState?.warning('⚠️ 更新SN状态失败', type: LogType.debug);
+      }
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    }
+    
     // 自动保存测试报告（无论成功还是失败都保存）
     _logState?.info('💾 自动保存测试报告...', type: LogType.debug);
     final savedPath = await saveTestReport();
@@ -9563,12 +9580,41 @@ class TestState extends ChangeNotifier {
       final snCode = _scannedSN!;
       _logState?.info('   扫码枪SN码: $snCode', type: LogType.debug);
       
-      // 创建SN码写入命令
+      // 1. 先调用服务端查询SN详情，确认SN有效
+      _logState?.info('📤 调用SN详情接口验证SN...', type: LogType.debug);
+      final snInfo = await SNApiService.fetchSNInfo(
+        sn: snCode,
+        logState: _logState,
+      );
+      
+      if (snInfo == null) {
+        _logState?.error('❌ 服务端查询SN详情失败，无法继续写入', type: LogType.debug);
+        _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return false;
+      }
+      
+      // 更新本地 _currentDeviceIdentity
+      _currentDeviceIdentity = {
+        'sn': snInfo['sn']!,
+        'wifiMac': snInfo['wifiMac']!,
+        'bluetoothMac': snInfo['bluetoothMac']!,
+        'hardwareVersion': snInfo['hardwareVersion'] ?? '',
+        'productLine': snInfo['productLine'] ?? '',
+        'factory': snInfo['factory'] ?? '',
+        'productionLine': snInfo['productionLine'] ?? '',
+      };
+      
+      _logState?.success('✅ SN详情获取成功', type: LogType.debug);
+      _logState?.info('   SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
+      _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
+      _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
+      _logState?.info('   硬件版本: ${_currentDeviceIdentity!['hardwareVersion']}', type: LogType.debug);
+      
+      // 2. 服务端确认SN有效后，写入设备
       final writeSNCmd = ProductionTestCommands.createWriteSNCommand(snCode);
       final cmdHex = writeSNCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
       _logState?.info('📤 发送SN码写入命令: [$cmdHex]', type: LogType.debug);
       
-      // 发送命令并等待响应
       final response = await _serialService.sendCommandAndWaitResponse(
         writeSNCmd,
         moduleId: ProductionTestCommands.moduleId,
@@ -9581,7 +9627,6 @@ class TestState extends ChangeNotifier {
         return false;
       }
       
-      // 解析响应中的SN码
       final payload = response['payload'] as Uint8List?;
       if (payload == null) {
         _logState?.error('❌ SN码写入失败：响应无payload', type: LogType.debug);
@@ -9596,38 +9641,38 @@ class TestState extends ChangeNotifier {
       
       _logState?.info('📥 设备返回SN码: $responseSN', type: LogType.debug);
       
-      // 对比写入的SN码和响应的SN码
+      // 3. 对比写入的SN码和响应的SN码
       if (responseSN == snCode) {
         _logState?.success('✅ SN码写入成功！写入值与返回值一致', type: LogType.debug);
         _logState?.info('   写入: $snCode', type: LogType.debug);
         _logState?.info('   返回: $responseSN', type: LogType.debug);
         
-        // 使用扫码枪的SN向服务端获取设备标识（MAC地址等）
-        _logState?.info('📤 使用扫描SN向服务端获取设备标识...', type: LogType.debug);
-        await generateDeviceIdentity(existingSn: snCode);
+        // 更新测试报告中的设备信息
+        if (_currentTestReport != null) {
+          _currentTestReport = TestReport(
+            deviceSN: _currentDeviceIdentity!['sn'] ?? 'UNKNOWN',
+            bluetoothMAC: _currentDeviceIdentity!['bluetoothMac'],
+            wifiMAC: _currentDeviceIdentity!['wifiMac'],
+            startTime: _currentTestReport!.startTime,
+            endTime: _currentTestReport!.endTime,
+            expectedTotalTests: _currentTestReport!.expectedTotalTests,
+            items: List.from(_testReportItems),
+          );
+          _logState?.info('📝 已更新测试报告设备信息', type: LogType.debug);
+          notifyListeners();
+        }
         
-        if (_currentDeviceIdentity != null) {
-          _logState?.success('✅ 服务端已确认设备标识', type: LogType.debug);
-          _logState?.info('   SN码: ${_currentDeviceIdentity!['sn']}', type: LogType.debug);
-          _logState?.info('   WiFi MAC: ${_currentDeviceIdentity!['wifiMac']}', type: LogType.debug);
-          _logState?.info('   蓝牙 MAC: ${_currentDeviceIdentity!['bluetoothMac']}', type: LogType.debug);
-          
-          // 更新测试报告中的设备信息
-          if (_currentTestReport != null) {
-            _currentTestReport = TestReport(
-              deviceSN: _currentDeviceIdentity!['sn'] ?? 'UNKNOWN',
-              bluetoothMAC: _currentDeviceIdentity!['bluetoothMac'],
-              wifiMAC: _currentDeviceIdentity!['wifiMac'],
-              startTime: _currentTestReport!.startTime,
-              endTime: _currentTestReport!.endTime,
-              expectedTotalTests: _currentTestReport!.expectedTotalTests,
-              items: List.from(_testReportItems),
-            );
-            _logState?.info('📝 已更新测试报告设备信息', type: LogType.debug);
-            notifyListeners();
-          }
+        // 4. 更新SN状态为 3（单板产测中）
+        _logState?.info('📤 更新SN状态为「单板产测中」...', type: LogType.debug);
+        final statusUpdated = await SNApiService.updateSNStatus(
+          sn: snCode,
+          status: 3,
+          logState: _logState,
+        );
+        if (statusUpdated) {
+          _logState?.success('✅ SN状态已更新为「单板产测中」', type: LogType.debug);
         } else {
-          _logState?.warning('⚠️ 从服务端获取设备标识失败，继续测试流程', type: LogType.debug);
+          _logState?.warning('⚠️ 更新SN状态失败，继续测试流程', type: LogType.debug);
         }
         
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);

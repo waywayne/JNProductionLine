@@ -7,6 +7,7 @@ class SNApiService {
   static const String baseUrl = 'http://test.jiananai.com/api/v1/product-sn';
   static const String fetchSnEndpoint = '/fetch-sn';
   static const String updateSnStatusEndpoint = '/update-sn-status';
+  static const String productSnInfoEndpoint = '/product-sn-info';
   
   // Token和User-Agent（可以根据需要配置）
   static const String token = '7f0052b35618d1533f1e235b7d1f5928'; // TODO: 配置实际的Token
@@ -216,6 +217,112 @@ class SNApiService {
     }
   }
   
+  /// 获取SN详情信息
+  /// 
+  /// [sn] SN码
+  /// [logState] 日志状态对象
+  /// 
+  /// 返回包含完整SN信息的Map（sn, wifiMac, bluetoothMac, hardwareVersion 等）
+  /// 如果请求失败，返回null
+  static Future<Map<String, String>?> fetchSNInfo({
+    required String sn,
+    LogState? logState,
+  }) async {
+    try {
+      final url = Uri.parse('$baseUrl$productSnInfoEndpoint');
+      
+      final body = {
+        'sn': sn,
+      };
+      
+      logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      logState?.info('📡 获取SN详情API', type: LogType.debug);
+      logState?.info('   URL: $url', type: LogType.debug);
+      logState?.info('   SN: $sn', type: LogType.debug);
+      
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Token': token,
+          'User-Agent': userAgent,
+        },
+        body: json.encode(body),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          logState?.error('❌ API请求超时（10秒）', type: LogType.debug);
+          throw Exception('请求超时');
+        },
+      );
+      
+      logState?.info('   状态码: ${response.statusCode}', type: LogType.debug);
+      logState?.info('   响应体: ${response.body}', type: LogType.debug);
+      
+      if (response.statusCode != 200) {
+        logState?.error('❌ API请求失败: HTTP ${response.statusCode}', type: LogType.debug);
+        logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return null;
+      }
+      
+      final responseData = json.decode(response.body);
+      
+      final errorCode = responseData['error_code'];
+      if (errorCode != 0) {
+        final msg = responseData['msg'] ?? '未知错误';
+        logState?.error('❌ API返回错误: $msg (错误码: $errorCode)', type: LogType.debug);
+        logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return null;
+      }
+      
+      final data = responseData['data'];
+      if (data == null) {
+        logState?.error('❌ API响应中没有data字段', type: LogType.debug);
+        logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return null;
+      }
+      
+      final snCode = (data['sn_code'] ?? '').toString();
+      final bluetoothAddress = (data['bluetooth_address'] ?? '').toString();
+      final macAddress = (data['mac_address'] ?? '').toString();
+      final hardwareVersion = (data['hardware_version'] ?? '').toString();
+      final productLine = (data['product_line'] ?? '').toString();
+      final factoryCode = (data['factory_code'] ?? '').toString();
+      final lineCode = (data['line_code'] ?? '').toString();
+      
+      if (snCode.isEmpty || bluetoothAddress.isEmpty || macAddress.isEmpty) {
+        logState?.error('❌ API响应数据不完整', type: LogType.debug);
+        logState?.error('   sn_code: $snCode', type: LogType.debug);
+        logState?.error('   bluetooth_address: $bluetoothAddress', type: LogType.debug);
+        logState?.error('   mac_address: $macAddress', type: LogType.debug);
+        logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+        return null;
+      }
+      
+      logState?.success('✅ 成功获取SN详情', type: LogType.debug);
+      logState?.info('   SN: $snCode', type: LogType.debug);
+      logState?.info('   蓝牙MAC: $bluetoothAddress', type: LogType.debug);
+      logState?.info('   WiFi MAC: $macAddress', type: LogType.debug);
+      logState?.info('   硬件版本: $hardwareVersion', type: LogType.debug);
+      logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      
+      return {
+        'sn': snCode,
+        'bluetoothMac': _formatMacAddress(bluetoothAddress),
+        'wifiMac': _formatMacAddress(macAddress),
+        'hardwareVersion': hardwareVersion,
+        'productLine': productLine,
+        'factory': factoryCode,
+        'productionLine': lineCode,
+      };
+    } catch (e, stackTrace) {
+      logState?.error('❌ 获取SN详情API异常: $e', type: LogType.debug);
+      logState?.error('   堆栈跟踪: $stackTrace', type: LogType.debug);
+      logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+      return null;
+    }
+  }
+
   /// 格式化MAC地址
   /// 将 "48-08-EB-60-00-02" 格式转换为 "48:08:EB:60:00:02"
   static String _formatMacAddress(String mac) {

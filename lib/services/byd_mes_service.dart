@@ -92,8 +92,13 @@ class BydMesService {
     final url = 'http://$mesIp/Service.action?method=GetSfcInfo&param='
         '{"LOGIN_ID":"-1","CLIENT_ID":"$clientId","SFC":"$sn"}';
     
-    _log('   获取 SFC 信息: $sn');
-    _log('   URL: $url');
+    _log('   📡 接口: GetSfcInfo');
+    _log('   请求方式: HTTP GET');
+    _log('   参数:');
+    _log('      LOGIN_ID: -1');
+    _log('      CLIENT_ID: $clientId');
+    _log('      SFC: $sn');
+    _log('   完整URL: $url');
     
     final data = await _httpGet(url);
     if (data == null) {
@@ -122,12 +127,12 @@ class BydMesService {
   
   /// MES 开始
   Future<Map<String, dynamic>> start(String sn) async {
-    _log('🚀 MES 开始: $sn');
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _log('📤 执行 MES 操作: START');
+    _log('� 执行 MES 操作: START');
     _log('   SN: $sn');
     _log('   工站: $station');
     _log('   MES IP: $mesIp');
+    _log('   Client ID: $clientId');
     
     try {
       // 1. 获取 SFC 信息
@@ -147,8 +152,18 @@ class BydMesService {
           '"STATION_NAME":"$station","LINE":"$line","SHOPORDER":"$shoporder",'
           '"SCHEDULING_ID":"$schedulingId","WORK_STATION":"$station"}';
       
-      _log('   开始测试: $sn @ $station');
-      _log('   URL: $url');
+      _log('   📡 接口: Start');
+      _log('   请求方式: HTTP GET');
+      _log('   参数:');
+      _log('      LOGIN_ID: -1');
+      _log('      CLIENT_ID: $clientId');
+      _log('      SFC: $sn');
+      _log('      STATION_NAME: $station');
+      _log('      LINE: $line');
+      _log('      SHOPORDER: $shoporder');
+      _log('      SCHEDULING_ID: $schedulingId');
+      _log('      WORK_STATION: $station');
+      _log('   完整URL: $url');
       
       final data = await _httpGet(url);
       if (data == null) {
@@ -177,11 +192,13 @@ class BydMesService {
   
   /// MES 完成（良品）
   Future<Map<String, dynamic>> complete(String sn, {String testTime = '0'}) async {
-    _log('✅ MES 完成（良品）: $sn');
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _log('📤 执行 MES 操作: COMPLETE');
+    _log('✅ 执行 MES 操作: COMPLETE（良品）');
     _log('   SN: $sn');
     _log('   工站: $station');
+    _log('   MES IP: $mesIp');
+    _log('   Client ID: $clientId');
+    _log('   测试时间: $testTime 秒');
     
     try {
       // 1. 获取 SFC 信息
@@ -202,8 +219,19 @@ class BydMesService {
           '"SCHEDULING_ID":"$schedulingId","TEST_TIME":"$testTime",'
           '"WORK_STATION":"$station"}';
       
-      _log('   完成测试（良品）: $sn @ $station');
-      _log('   URL: $url');
+      _log('   📡 接口: Complete');
+      _log('   请求方式: HTTP GET');
+      _log('   参数:');
+      _log('      LOGIN_ID: -1');
+      _log('      CLIENT_ID: $clientId');
+      _log('      SFC: $sn');
+      _log('      STATION_NAME: $station');
+      _log('      LINE: $line');
+      _log('      SHOPORDER: $shoporder');
+      _log('      SCHEDULING_ID: $schedulingId');
+      _log('      TEST_TIME: $testTime');
+      _log('      WORK_STATION: $station');
+      _log('   完整URL: $url');
       
       final data = await _httpGet(url);
       if (data == null) {
@@ -239,13 +267,17 @@ class BydMesService {
     required String failValue,
     String testTime = '0',
   }) async {
-    _log('❌ MES 完成（不良品）: $sn');
-    _log('   不良代码: $ncCode');
-    _log('   不良描述: $ncContext');
     _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _log('📤 执行 MES 操作: NC_COMPLETE');
+    _log('❌ 执行 MES 操作: NC_COMPLETE（不良品）');
     _log('   SN: $sn');
     _log('   工站: $station');
+    _log('   MES IP: $mesIp');
+    _log('   Client ID: $clientId');
+    _log('   测试时间: $testTime 秒');
+    _log('   不良代码: $ncCode');
+    _log('   不良描述: $ncContext');
+    _log('   失败项目: $failItem');
+    _log('   失败值: $failValue');
     
     try {
       // 1. 获取 SFC 信息
@@ -265,8 +297,22 @@ class BydMesService {
           '"NC_TYPE":"$station","FAIL_ITEM":"$failItem","FAIL_VALUE":"$failValue",'
           '"WORK_STATION":"$station"}';
       
-      _log('   完成测试（不良品）: $sn @ $station');
-      _log('   URL: $url');
+      _log('   📡 接口: NcComplete');
+      _log('   请求方式: HTTP GET');
+      _log('   参数:');
+      _log('      LOGIN_ID: -1');
+      _log('      CLIENT_ID: $clientId');
+      _log('      SFC: $sn');
+      _log('      STATION_NAME: $station');
+      _log('      SCHEDULING_ID: $schedulingId');
+      _log('      TEST_TIME: $testTime');
+      _log('      NC_CODE: $ncCode');
+      _log('      NC_CONTEXT: $ncContext');
+      _log('      NC_TYPE: $station');
+      _log('      FAIL_ITEM: $failItem');
+      _log('      FAIL_VALUE: $failValue');
+      _log('      WORK_STATION: $station');
+      _log('   完整URL: $url');
       
       final data = await _httpGet(url);
       if (data == null) {
