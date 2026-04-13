@@ -14,6 +14,7 @@ class SerialService {
   SerialPortReader? _reader;
   StreamSubscription? _subscription;
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
+  final StreamController<Uint8List> _pushPayloadController = StreamController<Uint8List>.broadcast();
   
   String? _currentPortName;
   bool _isConnected = false;
@@ -45,6 +46,9 @@ class SerialService {
   
   /// Get data stream
   Stream<Uint8List> get dataStream => _dataController.stream;
+  
+  /// Get parsed push payload stream (only CLI payloads from GTP packets without matching pending request)
+  Stream<Uint8List> get pushPayloadStream => _pushPayloadController.stream;
   
   /// Connect to serial port with dual-line UART initialization
   /// First sends 16 zeros at 9600 baud, then switches to 2000000 baud
@@ -378,9 +382,10 @@ class SerialService {
                           _logState?.info('🔍 Payload状态检查: payload=${payload != null ? 'not null' : 'null'}, isEmpty=${payload?.isEmpty ?? true}', type: LogType.debug);
                           
                           if (payload != null && payload.isNotEmpty) {
-                            _logState?.info('✅ Payload有数据，推送到dataStream...', type: LogType.debug);
+                            _logState?.info('✅ Payload有数据，推送到dataStream和pushPayloadStream...', type: LogType.debug);
                             _dataController.add(payload);
-                            _logState?.info('✅ Payload已推送到dataController', type: LogType.debug);
+                            _pushPayloadController.add(payload);
+                            _logState?.info('✅ Payload已推送', type: LogType.debug);
                           } else {
                             _logState?.warning('❌ Payload为null或为空，无法进行主动推送数据处理', type: LogType.debug);
                           }
@@ -806,5 +811,6 @@ class SerialService {
   void dispose() {
     disconnect();
     _dataController.close();
+    _pushPayloadController.close();
   }
 }
