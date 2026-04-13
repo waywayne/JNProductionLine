@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as path;
 import '../config/production_config.dart';
 
 /// BYD MES 系统服务
@@ -35,47 +36,51 @@ class BydMesService {
   
   /// 初始化脚本路径
   void _initScriptPath() {
-    // 获取可执行文件所在目录，用于构建相对路径
-    final execDir = File(Platform.resolvedExecutable).parent.path;
+    const scriptName = 'byd_mes_client.py';
     
+    // 获取可执行文件所在目录
+    final execDir = path.dirname(Platform.resolvedExecutable);
     final currentDir = Directory.current.path;
+    // Windows 使用 USERPROFILE，Linux/macOS 使用 HOME
+    final homeDir = Platform.environment['HOME'] ?? 
+                    Platform.environment['USERPROFILE'] ?? '';
     
     final possiblePaths = [
       // 当前工作目录
-      '$currentDir/scripts/byd_mes_client.py',
-      // 相对路径
-      'scripts/byd_mes_client.py',
-      // 部署路径
-      '/opt/jn-production-line/scripts/byd_mes_client.py',
+      path.join(currentDir, 'scripts', scriptName),
+      // 部署路径 (Linux)
+      path.join('/opt', 'jn-production-line', 'scripts', scriptName),
       // HOME 目录
-      '${Platform.environment['HOME']}/git/JNProductionLine/scripts/byd_mes_client.py',
-      // 可执行文件相对路径
-      '$execDir/scripts/byd_mes_client.py',
-      '$execDir/../scripts/byd_mes_client.py',
-      '$execDir/../../scripts/byd_mes_client.py',
-      '$execDir/../../../scripts/byd_mes_client.py',
+      if (homeDir.isNotEmpty)
+        path.join(homeDir, 'git', 'JNProductionLine', 'scripts', scriptName),
+      // 可执行文件相对路径（向上逐级查找）
+      path.join(execDir, 'scripts', scriptName),
+      path.join(execDir, '..', 'scripts', scriptName),
+      path.join(execDir, '..', '..', 'scripts', scriptName),
+      path.join(execDir, '..', '..', '..', 'scripts', scriptName),
+      path.join(execDir, '..', '..', '..', '..', 'scripts', scriptName),
       // Flutter 打包路径
-      '$execDir/data/flutter_assets/assets/scripts/byd_mes_client.py',
-      '$execDir/data/flutter_assets/scripts/byd_mes_client.py',
+      path.join(execDir, 'data', 'flutter_assets', 'assets', 'scripts', scriptName),
+      path.join(execDir, 'data', 'flutter_assets', 'scripts', scriptName),
     ];
     
     _log('🔍 搜索 MES 脚本...');
-    _log('   工作目录: ${Directory.current.path}');
-    _log('   可执行文件: ${Platform.resolvedExecutable}');
+    _log('   工作目录: $currentDir');
+    _log('   可执行文件目录: $execDir');
+    _log('   HOME目录: $homeDir');
     
-    for (final path in possiblePaths) {
-      if (File(path).existsSync()) {
-        _scriptPath = path;
-        _log('✅ 找到 MES 脚本: $path');
-        break;
+    for (final p in possiblePaths) {
+      final normalized = path.normalize(p);
+      if (File(normalized).existsSync()) {
+        _scriptPath = normalized;
+        _log('✅ 找到 MES 脚本: $normalized');
+        return;
       }
     }
     
-    if (_scriptPath == null) {
-      _log('❌ 未找到 MES 脚本，已搜索以下路径:');
-      for (final path in possiblePaths) {
-        _log('   ❌ $path');
-      }
+    _log('❌ 未找到 MES 脚本，已搜索以下路径:');
+    for (final p in possiblePaths) {
+      _log('   ❌ ${path.normalize(p)}');
     }
   }
   
@@ -106,9 +111,13 @@ class BydMesService {
     List<String> extraArgs,
   ) async {
     if (_scriptPath == null) {
+      // 重试一次搜索脚本
+      _initScriptPath();
+    }
+    if (_scriptPath == null) {
       return {
         'success': false,
-        'error': 'MES 脚本不存在',
+        'error': 'MES 脚本不存在，工作目录: ${Directory.current.path}',
       };
     }
     
@@ -127,9 +136,10 @@ class BydMesService {
       _log('📤 执行 MES 操作: ${action.toUpperCase()}');
       _log('   SN: $sn');
       _log('   工站: $station');
-      _log('   命令: python3 ${args.join(' ')}');
+      final pythonCmd = Platform.isWindows ? 'python' : 'python3';
+      _log('   命令: $pythonCmd ${args.join(' ')}');
       
-      final process = await Process.start('python3', args);
+      final process = await Process.start(pythonCmd, args);
       
       final stdout = <String>[];
       final stderr = <String>[];
@@ -231,9 +241,12 @@ class BydMesService {
     
     // 只获取 SFC 信息，不执行实际操作
     if (_scriptPath == null) {
+      _initScriptPath();
+    }
+    if (_scriptPath == null) {
       return {
         'success': false,
-        'error': 'MES 脚本不存在',
+        'error': 'MES 脚本不存在，工作目录: ${Directory.current.path}',
       };
     }
     
