@@ -6298,8 +6298,8 @@ class TestState extends ChangeNotifier {
       // {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
       // {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
       // {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '33. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '34. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      // {'name': '36. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '33. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
