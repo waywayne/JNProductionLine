@@ -76,6 +76,15 @@ if (Test-Path "install_gpib_dependencies.bat") {
     Copy-Item -Path "install_gpib_dependencies.bat" -Destination "$packageDir/"
 }
 
+# 复制 Python 脚本
+Write-Host "   - 复制 Python 脚本..." -ForegroundColor Gray
+if (Test-Path "scripts") {
+    New-Item -ItemType Directory -Force -Path "$packageDir/scripts" | Out-Null
+    Copy-Item -Path "scripts/*.py" -Destination "$packageDir/scripts/" -ErrorAction SilentlyContinue
+    Copy-Item -Path "scripts/*.sh" -Destination "$packageDir/scripts/" -ErrorAction SilentlyContinue
+    Copy-Item -Path "scripts/*.bat" -Destination "$packageDir/scripts/" -ErrorAction SilentlyContinue
+}
+
 # 创建使用说明
 Write-Host "   - 生成使用说明..." -ForegroundColor Gray
 $buildTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
