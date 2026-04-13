@@ -560,9 +560,11 @@ class TestState extends ChangeNotifier {
     }
     
     _shouldStopTest = true;
+    _isRunningTest = false;
     _logState?.warning('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
     _logState?.warning('🛑 用户请求停止自动化测试', type: LogType.debug);
     _logState?.warning('正在停止所有测试和监听...', type: LogType.debug);
+    notifyListeners();
     
     // 停止所有正在进行的测试
     try {
@@ -586,12 +588,23 @@ class TestState extends ChangeNotifier {
         await stopMICTest();
       }
       
+      // 停止 Touch 测试
+      if (_isLeftTouchTesting) {
+        _isLeftTouchTesting = false;
+        _showTouchDialog = false;
+      }
+      if (_isRightTouchTesting) {
+        _isRightTouchTesting = false;
+        _showTouchDialog = false;
+      }
+      
       // 关闭所有弹窗
       _showIMUDialog = false;
       _showSensorDialog = false;
       _showImageQualityDialog = false;
       _showBluetoothDialog = false;
       _showMICDialog = false;
+      _showTouchDialog = false;
       
     } catch (e) {
       _logState?.error('停止测试时出错: $e', type: LogType.debug);
@@ -816,11 +829,11 @@ class TestState extends ChangeNotifier {
       {'name': '30. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
       {'name': '31. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
       {'name': '32. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '36. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '37. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      // {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      // {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      // {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      // {'name': '36. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '33. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -6176,6 +6189,12 @@ class TestState extends ChangeNotifier {
     }
     
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      // 每次重试前检查是否已请求停止测试
+      if (_shouldStopTest) {
+        _logState?.warning('🛑 $testName 已被用户停止，终止重试', type: LogType.debug);
+        return false;
+      }
+      
       try {
         // 使用timeout包装执行
         final result = await executor().timeout(
@@ -6192,6 +6211,11 @@ class TestState extends ChangeNotifier {
           }
           return true;
         } else {
+          // 失败后再次检查停止标志，避免无意义重试
+          if (_shouldStopTest) {
+            _logState?.warning('🛑 $testName 已被用户停止，终止重试', type: LogType.debug);
+            return false;
+          }
           
           if (attempt < maxRetries) {
             _logState?.warning('⚠️  $testName 失败，准备重试 (尝试 $attempt/$maxRetries)', type: LogType.debug);
@@ -6207,6 +6231,12 @@ class TestState extends ChangeNotifier {
         // 如果是用户取消异常，直接返回失败，不重试
         if (e.toString().contains('USER_CANCELLED')) {
           _logState?.error('❌ $testName 被用户取消，不进行重试', type: LogType.debug);
+          return false;
+        }
+        
+        // 检查停止标志
+        if (_shouldStopTest) {
+          _logState?.warning('🛑 $testName 已被用户停止，终止重试', type: LogType.debug);
           return false;
         }
         
@@ -6265,17 +6295,17 @@ class TestState extends ChangeNotifier {
       {'name': '30. LED灯(内侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('内侧'), 'skippable': false},
       {'name': '31. 左SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(0), 'skippable': false},
       {'name': '32. 右SPK测试', 'type': 'SPK', 'executor': () => _autoTestSPK(1), 'skippable': false},
-      {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
-      {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
-      {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      {'name': '36. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '37. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      // {'name': '33. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
+      // {'name': '34. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
+      // {'name': '35. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
+      {'name': '33. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '34. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
-      // 检查串口连接状态和停止标志
-      if (!_serialService.isConnected) {
-        _logState?.error('❌ 串口已断开，停止自动化测试', type: LogType.debug);
+      // 检查连接状态和停止标志（串口或蓝牙至少一个连接）
+      if (!_serialService.isConnected && !_linuxBtService.isConnected) {
+        _logState?.error('❌ 设备已断开（串口和蓝牙均未连接），停止自动化测试', type: LogType.debug);
         _shouldStopTest = true;
         break;
       }
