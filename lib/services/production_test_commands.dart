@@ -29,6 +29,7 @@ class ProductionTestCommands {
   static const int cmdBluetooth = 0x0D; // 蓝牙测试
   static const int cmdEMMC = 0x0E; // EMMC容量检测
   static const int cmdPowerConsumption = 0x0F; // 功耗测试
+  static const int cmdOTA = 0xFA; // OTA升级
   static const int cmdReadHardwareVersion = 0xFB; // 硬件版本号读取
   static const int cmdWriteHardwareVersion = 0xFC; // 硬件版本号写入
   static const int cmdReadSN = 0xFD; // SN码读取
@@ -144,6 +145,50 @@ class ProductionTestCommands {
   /// 3. CHARGER_MODE_DONE
   static Uint8List createGetChargeStatusCommand() {
     return Uint8List.fromList([cmdGetChargeStatus]);
+  }
+  
+  // OTA升级子命令
+  static const int otaSubRequest = 0x00; // OTA请求 (发送OTA路径)
+  static const int otaSubStatus = 0x01;  // OTA状态通知 (设备推送)
+  
+  // OTA状态枚举
+  static const int otaStatusSigmaStart = 0x04;  // sigma升级开始
+  static const int otaStatusSigmaEnd = 0x05;    // sigma升级结束
+  static const int otaStatusComplete = 0x06;    // ota升级操作完成
+  static const int otaStatusSuccess = 0x07;     // 升级成功(预留)
+  static const int otaStatusUploadFail = 0xFB;  // OTA文件上传失败
+  static const int otaStatusCheckFail = 0xFC;   // OTA文件检查失败
+  static const int otaStatusUnzipFail = 0xFD;   // OTA解压失败
+  static const int otaStatusRollback = 0xFE;    // OTA升级失败回滚
+  static const int otaStatusTimeout = 0xFF;     // OTA升级超时
+  
+  /// 获取OTA状态描述
+  static String getOTAStatusName(int status) {
+    switch (status) {
+      case otaStatusSigmaStart: return 'Sigma升级开始';
+      case otaStatusSigmaEnd: return 'Sigma升级结束';
+      case otaStatusComplete: return 'OTA升级操作完成';
+      case otaStatusSuccess: return '升级成功';
+      case otaStatusUploadFail: return 'OTA文件上传失败';
+      case otaStatusCheckFail: return 'OTA文件检查失败';
+      case otaStatusUnzipFail: return 'OTA解压失败';
+      case otaStatusRollback: return 'OTA升级失败回滚';
+      case otaStatusTimeout: return 'OTA升级超时';
+      default: return '未知状态 (0x${status.toRadixString(16).toUpperCase()})';
+    }
+  }
+  
+  /// 判断OTA状态是否为错误
+  static bool isOTAError(int status) {
+    return status >= 0xFB;
+  }
+  
+  /// 创建OTA请求命令: 0xFA + 0x00 + 路径字符串 + \0
+  static Uint8List createOTARequestCommand(String filePath) {
+    List<int> command = [cmdOTA, otaSubRequest];
+    command.addAll(filePath.codeUnits);
+    command.add(0x00); // 字符串结尾加\0
+    return Uint8List.fromList(command);
   }
   
   /// Create control WiFi command (0x04)

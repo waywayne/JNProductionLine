@@ -290,6 +290,10 @@ class TestState extends ChangeNotifier {
 
   List<String> get availablePorts => SerialService.getAvailablePorts();
   
+  // 暴露通信服务引用（供OTA等外部模块使用）
+  SerialService get serialService => _serialService;
+  LinuxBluetoothSppService get linuxBtService => _linuxBtService;
+  
   // 获取当前设备标识信息
   Map<String, String>? get currentDeviceIdentity => _currentDeviceIdentity;
 

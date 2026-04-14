@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'screens/home_screen.dart';
 import 'models/test_state.dart';
 import 'models/log_state.dart';
+import 'models/ota_state.dart';
 import 'config/production_config.dart';
 
 void main() async {
@@ -23,6 +24,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => LogState()),
         ChangeNotifierProvider(create: (_) => TestState()),
+        ChangeNotifierProvider(create: (_) => OTAState()),
       ],
       child: MaterialApp(
         title: 'JN Production Line',

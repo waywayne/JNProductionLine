@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/test_state.dart';
 import '../models/log_state.dart';
+import '../models/ota_state.dart';
 import '../widgets/menu_bar_widget.dart';
 import '../widgets/factory_test_section.dart';
 import '../widgets/serial_port_section.dart';
@@ -37,8 +38,13 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final logState = context.read<LogState>();
       final testState = context.read<TestState>();
+      final otaState = context.read<OTAState>();
       testState.setLogState(logState);
       testState.initializeSNMacConfig();
+      
+      // 初始化OTA状态
+      otaState.setLogState(logState);
+      otaState.setServices(testState.serialService, testState.linuxBtService);
       
       logState.info('应用启动');
     });
