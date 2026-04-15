@@ -29,6 +29,7 @@ class ProductionTestCommands {
   static const int cmdBluetooth = 0x0D; // 蓝牙测试
   static const int cmdEMMC = 0x0E; // EMMC容量检测
   static const int cmdPowerConsumption = 0x0F; // 功耗测试
+  static const int cmdIMUCalibration = 0x10; // IMU校准
   static const int cmdOTA = 0xFA; // OTA升级
   static const int cmdReadHardwareVersion = 0xFB; // 硬件版本号读取
   static const int cmdWriteHardwareVersion = 0xFC; // 硬件版本号写入
@@ -91,7 +92,13 @@ class ProductionTestCommands {
   static const int powerConsumptionOptWifi = 0x03; // 开启物奇、Sigma以及WiFi
   static const int powerConsumptionOptEnd = 0x04; // 功耗测试结束
   
-  // EMMC operations (0x10)
+  // IMU calibration status (0x10)
+  static const int imuCalibStatusBooting = 0x00; // 设备IMU启动中
+  static const int imuCalibStatusOrientation = 0x01; // 设备朝向检测中
+  static const int imuCalibStatusCalibrating = 0x02; // 设备校准中
+  static const int imuCalibStatusComplete = 0x03; // 设备校准完成
+  
+  // EMMC operations
   static const int emmcOptGetCapacity = 0x00; // 获取EMMC容量
   static const int emmcOptRepair = 0x01; // 修复EMMC容量问题
   
@@ -284,6 +291,49 @@ class ProductionTestCommands {
       command.addAll(calibrationData);
     }
     return Uint8List.fromList(command);
+  }
+  
+  /// Create IMU calibration command (0x10)
+  /// IMU校准 - 发送后设备开始校准流程，会持续返回状态
+  static Uint8List createIMUCalibrationCommand() {
+    return Uint8List.fromList([cmdIMUCalibration]);
+  }
+  
+  /// Parse IMU calibration response
+  /// 设备返回格式：[CMD(0x10)] + [状态码] + [校准结果(可选)]
+  /// 状态码：0x00=IMU启动中, 0x01=朝向检测中, 0x02=校准中, 0x03=校准完成
+  static Map<String, dynamic>? parseIMUCalibrationResponse(Uint8List payload) {
+    if (payload.isEmpty) return null;
+    
+    int offset = payload[0] == cmdIMUCalibration ? 1 : 0;
+    if (payload.length < offset + 1) return null;
+    
+    final status = payload[offset];
+    final result = <String, dynamic>{
+      'status': status,
+      'statusName': getIMUCalibStatusName(status),
+    };
+    
+    if (status == imuCalibStatusComplete && payload.length > offset + 1) {
+      final calibResult = payload[offset + 1];
+      result['calibResult'] = calibResult;
+      result['success'] = calibResult == 0x00;
+    } else {
+      result['success'] = status != imuCalibStatusComplete;
+    }
+    
+    return result;
+  }
+  
+  /// 获取IMU校准状态名称
+  static String getIMUCalibStatusName(int status) {
+    switch (status) {
+      case imuCalibStatusBooting: return '设备IMU启动中';
+      case imuCalibStatusOrientation: return '设备朝向检测中';
+      case imuCalibStatusCalibrating: return '设备校准中';
+      case imuCalibStatusComplete: return '设备校准完成';
+      default: return '未知状态(0x${status.toRadixString(16)})';
+    }
   }
   
   /// Create sensor command (0x0C)

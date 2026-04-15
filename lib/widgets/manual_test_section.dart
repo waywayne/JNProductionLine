@@ -271,6 +271,13 @@ class ManualTestSection extends StatelessWidget {
               _buildIMUToggleButton(context, state),
               _buildTestButton(
                 context,
+                'IMU校准',
+                Icons.compass_calibration,
+                () => _testIMUCalibration(context, state),
+                color: Colors.deepOrange,
+              ),
+              _buildTestButton(
+                context,
                 '摄像头棋盘格',
                 Icons.grid_on,
                 () => _testCameraChessboard(context, state),
@@ -925,6 +932,46 @@ class ManualTestSection extends StatelessWidget {
     );
   }
 
+  /// IMU校准测试
+  /// 发送0x10命令后持续监听设备状态：0x00启动中→0x01朝向检测→0x02校准中→0x03校准完成
+  Future<void> _testIMUCalibration(BuildContext context, TestState state) async {
+    final logState = context.read<LogState>();
+
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+    logState.info('🔧 IMU校准测试开始', type: LogType.debug);
+
+    // 确定通信方式
+    final useLinuxBluetooth = state.isLinuxBluetoothConnected;
+    final useSerial = state.serialService.isConnected;
+
+    if (!useLinuxBluetooth && !useSerial) {
+      logState.error('❌ 未连接（串口或蓝牙）', type: LogType.debug);
+      return;
+    }
+
+    final connectionType = useLinuxBluetooth ? 'Linux 蓝牙 SPP' : '串口';
+    logState.info('📡 通信方式: $connectionType', type: LogType.debug);
+
+    final command = ProductionTestCommands.createIMUCalibrationCommand();
+
+    // 弹窗显示校准进度
+    if (!context.mounted) return;
+    await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return _IMUCalibrationDialog(
+          state: state,
+          logState: logState,
+          command: command,
+          useLinuxBluetooth: useLinuxBluetooth,
+        );
+      },
+    );
+
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
+  }
+
   /// 摄像头棋盘格测试
   Future<void> _testCameraChessboard(BuildContext context, TestState state) async {
     final logState = context.read<LogState>();
@@ -1125,5 +1172,313 @@ class ManualTestSection extends StatelessWidget {
         );
       }
     }
+  }
+}
+
+/// IMU校准进度弹窗
+class _IMUCalibrationDialog extends StatefulWidget {
+  final TestState state;
+  final LogState logState;
+  final Uint8List command;
+  final bool useLinuxBluetooth;
+
+  const _IMUCalibrationDialog({
+    required this.state,
+    required this.logState,
+    required this.command,
+    required this.useLinuxBluetooth,
+  });
+
+  @override
+  State<_IMUCalibrationDialog> createState() => _IMUCalibrationDialogState();
+}
+
+class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
+  int _currentStatus = -1; // -1=未开始
+  String _statusText = '正在发送校准命令...';
+  bool _isRunning = true;
+  bool _isSuccess = false;
+  bool _isFailed = false;
+  int? _calibResult;
+
+  static const _statusSteps = [
+    {'status': 0x00, 'label': '设备IMU启动中', 'icon': Icons.power_settings_new},
+    {'status': 0x01, 'label': '设备朝向检测中', 'icon': Icons.screen_rotation},
+    {'status': 0x02, 'label': '设备校准中', 'icon': Icons.tune},
+    {'status': 0x03, 'label': '设备校准完成', 'icon': Icons.check_circle},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _startCalibration();
+  }
+
+  Future<Map<String, dynamic>?> _sendAndWait() async {
+    if (widget.useLinuxBluetooth) {
+      return await widget.state.sendCommandViaLinuxBluetooth(
+        widget.command,
+        timeout: const Duration(seconds: 30),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+    } else {
+      return await widget.state.serialService.sendCommandAndWaitResponse(
+        widget.command,
+        timeout: const Duration(seconds: 30),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+    }
+  }
+
+  Future<void> _startCalibration() async {
+    widget.logState.info('📤 发送IMU校准命令(0x10)', type: LogType.debug);
+
+    // 持续发送/轮询直到收到0x03或超时
+    const maxAttempts = 20;
+    for (int i = 0; i < maxAttempts && _isRunning; i++) {
+      try {
+        final response = await _sendAndWait();
+
+        if (!_isRunning) break;
+
+        if (response == null) {
+          widget.logState.warning('⏱️  IMU校准: 等待响应超时 (${i + 1}/$maxAttempts)', type: LogType.debug);
+          if (mounted) {
+            setState(() => _statusText = '等待设备响应... (${i + 1}/$maxAttempts)');
+          }
+          continue;
+        }
+
+        if (response.containsKey('error')) {
+          widget.logState.error('❌ IMU校准: ${response['error']}', type: LogType.debug);
+          continue;
+        }
+
+        // 解析响应
+        if (response.containsKey('payload') && response['payload'] != null) {
+          final payload = response['payload'] as Uint8List;
+          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+          widget.logState.info('📦 IMU校准响应: [$payloadHex]', type: LogType.debug);
+
+          final parsed = ProductionTestCommands.parseIMUCalibrationResponse(payload);
+          if (parsed != null) {
+            final status = parsed['status'] as int;
+            final statusName = parsed['statusName'] as String;
+            widget.logState.info('📊 IMU状态: $statusName (0x${status.toRadixString(16)})', type: LogType.debug);
+
+            if (mounted) {
+              setState(() {
+                _currentStatus = status;
+                _statusText = statusName;
+              });
+            }
+
+            if (status == ProductionTestCommands.imuCalibStatusComplete) {
+              _calibResult = parsed['calibResult'] as int?;
+              final success = parsed['success'] == true;
+              widget.logState.info(
+                success
+                    ? '✅ IMU校准完成，校准结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"}'
+                    : '❌ IMU校准完成，但校准失败 (结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"})',
+                type: LogType.debug,
+              );
+              if (mounted) {
+                setState(() {
+                  _isRunning = false;
+                  _isSuccess = success;
+                  _isFailed = !success;
+                  _statusText = success ? '✅ 校准成功' : '❌ 校准失败';
+                });
+              }
+              return;
+            }
+          }
+        }
+
+        // 短暂延迟后继续轮询
+        await Future.delayed(const Duration(seconds: 1));
+      } catch (e) {
+        widget.logState.error('❌ IMU校准异常: $e', type: LogType.debug);
+        if (mounted) {
+          setState(() => _statusText = '异常: $e');
+        }
+      }
+    }
+
+    // 超过最大轮询次数
+    if (_isRunning && mounted) {
+      widget.logState.error('❌ IMU校准: 轮询超时', type: LogType.debug);
+      setState(() {
+        _isRunning = false;
+        _isFailed = true;
+        _statusText = '❌ 校准超时';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(
+            _isSuccess ? Icons.check_circle : (_isFailed ? Icons.error : Icons.compass_calibration),
+            color: _isSuccess ? Colors.green : (_isFailed ? Colors.red : Colors.deepOrange),
+            size: 28,
+          ),
+          const SizedBox(width: 12),
+          const Text('IMU校准'),
+        ],
+      ),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 状态步骤指示
+            ..._statusSteps.map((step) {
+              final stepStatus = step['status'] as int;
+              final label = step['label'] as String;
+              final icon = step['icon'] as IconData;
+              final isActive = stepStatus == _currentStatus;
+              final isDone = _currentStatus > stepStatus ||
+                  (_currentStatus == ProductionTestCommands.imuCalibStatusComplete && stepStatus == _currentStatus);
+              final isPending = _currentStatus < stepStatus;
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  children: [
+                    // 状态图标
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: isDone
+                            ? Colors.green[50]
+                            : (isActive ? Colors.deepOrange[50] : Colors.grey[100]),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDone
+                              ? Colors.green
+                              : (isActive ? Colors.deepOrange : Colors.grey[300]!),
+                          width: isActive ? 2 : 1,
+                        ),
+                      ),
+                      child: Center(
+                        child: isDone
+                            ? const Icon(Icons.check, color: Colors.green, size: 20)
+                            : (isActive
+                                ? SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.deepOrange[600],
+                                    ),
+                                  )
+                                : Icon(icon, color: Colors.grey[400], size: 18)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                        color: isDone
+                            ? Colors.green[700]
+                            : (isActive ? Colors.deepOrange[800] : (isPending ? Colors.grey[400] : Colors.black87)),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+
+            const SizedBox(height: 16),
+
+            // 校准结果
+            if (_isSuccess || _isFailed)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _isSuccess ? Colors.green[50] : Colors.red[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _isSuccess ? Colors.green : Colors.red),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isSuccess ? Icons.check_circle : Icons.cancel,
+                      color: _isSuccess ? Colors.green[700] : Colors.red[700],
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _isSuccess ? '校准成功' : '校准失败',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: _isSuccess ? Colors.green[800] : Colors.red[800],
+                            ),
+                          ),
+                          if (_calibResult != null)
+                            Text(
+                              '校准结果: 0x${_calibResult!.toRadixString(16).toUpperCase().padLeft(2, '0')}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontFamily: 'monospace',
+                                color: _isSuccess ? Colors.green[700] : Colors.red[700],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            // 进行中提示
+            if (_isRunning)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _statusText,
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        if (_isRunning)
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _isRunning = false;
+                _isFailed = true;
+                _statusText = '已取消';
+              });
+              widget.logState.warning('⚠️ IMU校准: 用户取消', type: LogType.debug);
+              Navigator.of(context).pop(false);
+            },
+            child: const Text('取消', style: TextStyle(color: Colors.red)),
+          ),
+        if (!_isRunning)
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(_isSuccess),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isSuccess ? Colors.green : Colors.grey,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('关闭'),
+          ),
+      ],
+    );
   }
 }
