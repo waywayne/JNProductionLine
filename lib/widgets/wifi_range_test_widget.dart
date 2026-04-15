@@ -74,7 +74,9 @@ class _WiFiRangeTestWidgetState extends State<WiFiRangeTestWidget> {
       return null;
     }
 
+    final connectionType = state.serialService.isConnected ? '串口' : 'Linux 蓝牙 SPP';
     logState.info('📶 发送WiFi拉距命令(0x06)');
+    logState.info('   通信方式: $connectionType');
     logState.info('   SSID: $ssid');
 
     final ssidBytes = ssid.codeUnits + [0x00];
@@ -89,12 +91,23 @@ class _WiFiRangeTestWidgetState extends State<WiFiRangeTestWidget> {
       }
 
       try {
-        final response = await state.sendCommandViaLinuxBluetooth(
-          wifiCommand,
-          timeout: const Duration(seconds: 15),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
+        // 串口优先，否则使用蓝牙SPP
+        Map<String, dynamic>? response;
+        if (state.serialService.isConnected) {
+          response = await state.serialService.sendCommandAndWaitResponse(
+            wifiCommand,
+            timeout: const Duration(seconds: 15),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+        } else {
+          response = await state.sendCommandViaLinuxBluetooth(
+            wifiCommand,
+            timeout: const Duration(seconds: 15),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+        }
 
         if (response != null && !response.containsKey('error')) {
           if (response.containsKey('payload') && response['payload'] != null) {
