@@ -1214,106 +1214,181 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
     _startCalibration();
   }
 
-  Future<Map<String, dynamic>?> _sendAndWait() async {
-    if (widget.useLinuxBluetooth) {
-      return await widget.state.sendCommandViaLinuxBluetooth(
-        widget.command,
-        timeout: const Duration(seconds: 30),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-    } else {
-      return await widget.state.serialService.sendCommandAndWaitResponse(
-        widget.command,
-        timeout: const Duration(seconds: 30),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
+  /// 发送IMU校准命令（不等待响应）
+  Future<bool> _sendCommand() async {
+    try {
+      if (widget.useLinuxBluetooth) {
+        return await widget.state.sendCommandViaLinuxBluetooth(
+          widget.command,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        ).then((r) => r != null && !r.containsKey('error'));
+      } else {
+        final response = await widget.state.serialService.sendCommandAndWaitResponse(
+          widget.command,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+        return response != null && !response.containsKey('error');
+      }
+    } catch (e) {
+      widget.logState.error('❌ 发送IMU校准命令失败: $e', type: LogType.debug);
+      return false;
     }
   }
 
+  /// 监听一次设备状态推送
+  Future<Map<String, dynamic>?> _listenForStatus() async {
+    try {
+      if (widget.useLinuxBluetooth) {
+        // 蓝牙: 发送同一命令来接收下一个响应
+        return await widget.state.sendCommandViaLinuxBluetooth(
+          widget.command,
+          timeout: const Duration(seconds: 30),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+      } else {
+        // 串口: 发送同一命令来接收下一个响应
+        return await widget.state.serialService.sendCommandAndWaitResponse(
+          widget.command,
+          timeout: const Duration(seconds: 30),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+      }
+    } catch (e) {
+      widget.logState.warning('⚠️ 监听状态异常: $e', type: LogType.debug);
+      return null;
+    }
+  }
+
+  /// 处理收到的响应payload
+  bool _handlePayload(Uint8List payload) {
+    final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+    widget.logState.info('📦 IMU校准响应: [$payloadHex]', type: LogType.debug);
+
+    final parsed = ProductionTestCommands.parseIMUCalibrationResponse(payload);
+    if (parsed == null) return false;
+
+    final status = parsed['status'] as int;
+    final statusName = parsed['statusName'] as String;
+    widget.logState.info('📊 IMU状态: $statusName (0x${status.toRadixString(16)})', type: LogType.debug);
+
+    if (mounted) {
+      setState(() {
+        _currentStatus = status;
+        _statusText = statusName;
+      });
+    }
+
+    if (status == ProductionTestCommands.imuCalibStatusComplete) {
+      _calibResult = parsed['calibResult'] as int?;
+      final success = parsed['success'] == true;
+      widget.logState.info(
+        success
+            ? '✅ IMU校准完成，校准结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"}'
+            : '❌ IMU校准完成，但校准失败 (结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"})',
+        type: LogType.debug,
+      );
+      if (mounted) {
+        setState(() {
+          _isRunning = false;
+          _isSuccess = success;
+          _isFailed = !success;
+          _statusText = success ? '✅ 校准成功' : '❌ 校准失败';
+        });
+      }
+      return true; // 校准流程结束
+    }
+    return false; // 继续监听
+  }
+
   Future<void> _startCalibration() async {
-    widget.logState.info('📤 发送IMU校准命令(0x10)', type: LogType.debug);
+    const maxRetries = 10;
 
-    // 持续发送/轮询直到收到0x03或超时
-    const maxAttempts = 20;
-    for (int i = 0; i < maxAttempts && _isRunning; i++) {
-      try {
-        final response = await _sendAndWait();
+    for (int sendAttempt = 0; sendAttempt < maxRetries && _isRunning; sendAttempt++) {
+      // === 第一步：发送IMU校准命令 ===
+      if (sendAttempt > 0) {
+        widget.logState.info('🔄 重新发送IMU校准命令 (${sendAttempt + 1}/$maxRetries)', type: LogType.debug);
+      } else {
+        widget.logState.info('📤 发送IMU校准命令(0x10)', type: LogType.debug);
+      }
 
-        if (!_isRunning) break;
+      if (mounted) {
+        setState(() => _statusText = sendAttempt == 0 ? '正在发送校准命令...' : '重新发送校准命令 (${sendAttempt + 1}/$maxRetries)...');
+      }
 
-        if (response == null) {
-          widget.logState.warning('⏱️  IMU校准: 等待响应超时 (${i + 1}/$maxAttempts)', type: LogType.debug);
-          if (mounted) {
-            setState(() => _statusText = '等待设备响应... (${i + 1}/$maxAttempts)');
-          }
-          continue;
-        }
+      final sent = await _sendCommand();
+      if (!_isRunning) return;
 
-        if (response.containsKey('error')) {
-          widget.logState.error('❌ IMU校准: ${response['error']}', type: LogType.debug);
-          continue;
-        }
-
-        // 解析响应
-        if (response.containsKey('payload') && response['payload'] != null) {
-          final payload = response['payload'] as Uint8List;
-          final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
-          widget.logState.info('📦 IMU校准响应: [$payloadHex]', type: LogType.debug);
-
-          final parsed = ProductionTestCommands.parseIMUCalibrationResponse(payload);
-          if (parsed != null) {
-            final status = parsed['status'] as int;
-            final statusName = parsed['statusName'] as String;
-            widget.logState.info('📊 IMU状态: $statusName (0x${status.toRadixString(16)})', type: LogType.debug);
-
-            if (mounted) {
-              setState(() {
-                _currentStatus = status;
-                _statusText = statusName;
-              });
-            }
-
-            if (status == ProductionTestCommands.imuCalibStatusComplete) {
-              _calibResult = parsed['calibResult'] as int?;
-              final success = parsed['success'] == true;
-              widget.logState.info(
-                success
-                    ? '✅ IMU校准完成，校准结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"}'
-                    : '❌ IMU校准完成，但校准失败 (结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"})',
-                type: LogType.debug,
-              );
-              if (mounted) {
-                setState(() {
-                  _isRunning = false;
-                  _isSuccess = success;
-                  _isFailed = !success;
-                  _statusText = success ? '✅ 校准成功' : '❌ 校准失败';
-                });
-              }
-              return;
-            }
-          }
-        }
-
-        // 短暂延迟后继续轮询
+      if (!sent) {
+        widget.logState.warning('⚠️ IMU校准命令发送失败，1秒后重试', type: LogType.debug);
         await Future.delayed(const Duration(seconds: 1));
-      } catch (e) {
-        widget.logState.error('❌ IMU校准异常: $e', type: LogType.debug);
+        continue;
+      }
+
+      widget.logState.success('✅ IMU校准命令发送成功，开始监听设备状态...', type: LogType.debug);
+      if (mounted) {
+        setState(() => _statusText = '等待设备响应...');
+      }
+
+      // === 第二步：监听设备状态推送（30s超时） ===
+      final response = await _listenForStatus();
+      if (!_isRunning) return;
+
+      if (response == null) {
+        widget.logState.warning('⏱️ IMU校准: 监听超时 (30s)，将重新发送命令 (${sendAttempt + 1}/$maxRetries)', type: LogType.debug);
         if (mounted) {
-          setState(() => _statusText = '异常: $e');
+          setState(() => _statusText = '监听超时，重新发送... (${sendAttempt + 1}/$maxRetries)');
+        }
+        continue; // 超时 → 重新发送
+      }
+
+      if (response.containsKey('error')) {
+        widget.logState.error('❌ IMU校准: ${response['error']}', type: LogType.debug);
+        continue;
+      }
+
+      // 收到响应 → 解析并处理
+      if (response.containsKey('payload') && response['payload'] != null) {
+        final payload = response['payload'] as Uint8List;
+        final done = _handlePayload(payload);
+        if (done) return; // 收到0x03，校准结束
+      }
+
+      // 收到了非0x03的状态，继续监听后续状态
+      while (_isRunning) {
+        final nextResponse = await _listenForStatus();
+        if (!_isRunning) return;
+
+        if (nextResponse == null) {
+          widget.logState.warning('⏱️ IMU校准: 后续监听超时 (30s)', type: LogType.debug);
+          break; // 超时 → 跳出内层循环，外层会重新发送
+        }
+
+        if (nextResponse.containsKey('error')) {
+          widget.logState.error('❌ IMU校准: ${nextResponse['error']}', type: LogType.debug);
+          break;
+        }
+
+        if (nextResponse.containsKey('payload') && nextResponse['payload'] != null) {
+          final payload = nextResponse['payload'] as Uint8List;
+          final done = _handlePayload(payload);
+          if (done) return; // 收到0x03，校准结束
         }
       }
     }
 
-    // 超过最大轮询次数
+    // 超过最大重试次数
     if (_isRunning && mounted) {
-      widget.logState.error('❌ IMU校准: 轮询超时', type: LogType.debug);
+      widget.logState.error('❌ IMU校准: 重试次数已用尽 ($maxRetries次)', type: LogType.debug);
       setState(() {
         _isRunning = false;
         _isFailed = true;
-        _statusText = '❌ 校准超时';
+        _statusText = '❌ 校准超时（已重试$maxRetries次）';
       });
     }
   }
