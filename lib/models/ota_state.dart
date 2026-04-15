@@ -338,6 +338,33 @@ class OTAState extends ChangeNotifier {
         }
         
         if (result.exitCode == 0) {
+          _logState?.success('✅ FTP上传完成，等待设备同步写入...', type: LogType.debug);
+          _statusMessage = '等待设备同步写入...';
+          notifyListeners();
+          
+          // 上传完成后发送 SITE SYNC 命令让嵌入式设备刷新文件到存储
+          try {
+            final syncArgs = [
+              '--ftp-pasv',
+              '--disable-epsv',
+              '-Q', 'SITE SYNC',
+              '--connect-timeout', '10',
+              '--max-time', '30',
+              'ftp://$_deviceIP:21/',
+            ];
+            _logState?.info('🔄 发送 SITE SYNC 命令...', type: LogType.debug);
+            final syncResult = await Process.run('curl', syncArgs);
+            if (syncResult.exitCode == 0) {
+              _logState?.success('✅ 设备同步完成', type: LogType.debug);
+            } else {
+              _logState?.warning('⚠️ SITE SYNC 命令返回非0 (${syncResult.exitCode})，等待5秒让设备完成写入...', type: LogType.debug);
+              await Future.delayed(const Duration(seconds: 5));
+            }
+          } catch (e) {
+            _logState?.warning('⚠️ SITE SYNC 异常: $e，等待5秒让设备完成写入...', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 5));
+          }
+          
           _logState?.success('✅ FTP上传成功！', type: LogType.debug);
           return true;
         } else {
