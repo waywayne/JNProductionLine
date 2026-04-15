@@ -209,7 +209,7 @@ class OTAState extends ChangeNotifier {
   }
   
   /// 步骤1: 连接WiFi获取设备IP
-  /// 复用现有WiFi多步骤流程：开始测试(0x00) → 等待10秒 → 连接热点(0x01 + SSID\0 + PWD\0) → 获取IP
+  /// 使用 0x04 + 0x05 方式直接连接热点并获取IP
   Future<bool> _connectWiFiAndGetIP() async {
     final config = ProductionConfig();
     final ssid = config.wifiSsid;
@@ -222,33 +222,13 @@ class OTAState extends ChangeNotifier {
     
     _logState?.info('📶 连接WiFi - SSID: "$ssid"', type: LogType.debug);
     
-    // 第一步：发送WiFi开始测试指令 (0x04 + 0x00)
-    _statusMessage = '发送WiFi开始测试...';
-    notifyListeners();
+    // 构造WiFi连接命令 (0x04 + 0x05 + SSID\0 + PWD\0)
+    final ssidBytes = ssid.codeUnits + [0x00];
+    final pwdBytes = password.codeUnits + [0x00];
+    final wifiPayload = [...ssidBytes, ...pwdBytes];
+    final command = ProductionTestCommands.createControlWifiCommand(0x05, data: wifiPayload);
     
-    final startCommand = ProductionTestCommands.createControlWifiCommand(0x00);
-    final startResponse = await _sendCommand(startCommand, timeout: const Duration(seconds: 5));
-    
-    if (startResponse == null || startResponse.containsKey('error')) {
-      _logState?.error('❌ WiFi开始测试指令失败', type: LogType.debug);
-      return false;
-    }
-    _logState?.success('✅ WiFi开始测试成功', type: LogType.debug);
-    
-    // 等待10秒让WiFi模块初始化
-    _statusMessage = '等待WiFi模块初始化 (10秒)...';
-    notifyListeners();
-    _logState?.info('⏳ 等待10秒让WiFi模块初始化...', type: LogType.debug);
-    await Future.delayed(const Duration(seconds: 10));
-    
-    // 第二步：连接热点 (0x04 + 0x01 + SSID\0 + PWD\0)
-    final ssidBytes = ssid.codeUnits.toList();
-    ssidBytes.add(0x00);
-    final pwdBytes = password.codeUnits.toList();
-    pwdBytes.add(0x00);
-    final wifiData = [...ssidBytes, ...pwdBytes];
-    final connectCommand = ProductionTestCommands.createControlWifiCommand(0x01, data: wifiData);
-    
+    // 重试机制：最多尝试3次
     for (int retry = 0; retry < 3; retry++) {
       if (retry > 0) {
         _logState?.info('   WiFi连接重试 ($retry/3)...', type: LogType.debug);
@@ -259,17 +239,23 @@ class OTAState extends ChangeNotifier {
       
       _statusMessage = '正在连接WiFi热点...';
       notifyListeners();
+      _logState?.info('📤 发送WiFi连接命令 (0x05)...', type: LogType.debug);
       
       try {
         final response = await _sendCommand(
-          connectCommand,
-          timeout: const Duration(seconds: 15),
+          command,
+          timeout: const Duration(seconds: 10),
         );
         
         if (response != null && !response.containsKey('error')) {
           if (response.containsKey('payload') && response['payload'] != null) {
             final responsePayload = response['payload'] as Uint8List;
-            final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x01);
+            final payloadHex = responsePayload
+                .map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0'))
+                .join(' ');
+            _logState?.info('📥 响应: [$payloadHex] (${responsePayload.length} bytes)', type: LogType.debug);
+            
+            final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x05);
             
             if (wifiResult != null && wifiResult['success'] == true && wifiResult.containsKey('ip')) {
               _deviceIP = wifiResult['ip'];
@@ -278,21 +264,23 @@ class OTAState extends ChangeNotifier {
               notifyListeners();
               return true;
             } else if (wifiResult != null && wifiResult['success'] == true) {
-              // 连接成功但没有返回IP，可能需要等待
-              _logState?.info('⏳ WiFi连接成功但未返回IP，等待...', type: LogType.debug);
+              _logState?.warning('⚠️ 响应成功但未包含IP地址', type: LogType.debug);
+            } else {
+              _logState?.warning('⚠️ WiFi响应解析失败或返回失败', type: LogType.debug);
             }
+          } else {
+            _logState?.warning('⚠️ 响应中无payload数据', type: LogType.debug);
           }
+        } else {
+          final errorMsg = response?['error'] ?? '未知错误';
+          _logState?.warning('⚠️ 命令响应失败: $errorMsg', type: LogType.debug);
         }
       } catch (e) {
         _logState?.warning('⚠️ WiFi连接异常: $e', type: LogType.debug);
       }
     }
     
-    // 最后发送WiFi结束测试指令
-    _logState?.info('🛑 WiFi连接失败，发送结束指令...', type: LogType.debug);
-    final endCommand = ProductionTestCommands.createControlWifiCommand(0xFF);
-    await _sendCommand(endCommand, timeout: const Duration(seconds: 2));
-    
+    _logState?.error('❌ WiFi连接失败，未获取到设备IP', type: LogType.debug);
     return false;
   }
   
