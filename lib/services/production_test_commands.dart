@@ -190,9 +190,9 @@ class ProductionTestCommands {
     return status >= 0xFB;
   }
   
-  /// 创建OTA请求命令: 0xFA + 0x00 + 路径字符串 + \0
+  /// 创建OTA请求命令: 0xFA + 路径字符串 + \0
   static Uint8List createOTARequestCommand(String filePath) {
-    List<int> command = [cmdOTA, otaSubRequest];
+    List<int> command = [cmdOTA];
     command.addAll(filePath.codeUnits);
     command.add(0x00); // 字符串结尾加\0
     return Uint8List.fromList(command);
