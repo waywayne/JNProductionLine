@@ -357,12 +357,12 @@ class OTAState extends ChangeNotifier {
             if (syncResult.exitCode == 0) {
               _logState?.success('✅ 设备同步完成', type: LogType.debug);
             } else {
-              _logState?.warning('⚠️ SITE SYNC 命令返回非0 (${syncResult.exitCode})，等待5秒让设备完成写入...', type: LogType.debug);
-              await Future.delayed(const Duration(seconds: 5));
+              _logState?.warning('⚠️ SITE SYNC 命令返回非0 (${syncResult.exitCode})，等待10秒让设备完成写入...', type: LogType.debug);
+              await Future.delayed(const Duration(seconds: 10));
             }
           } catch (e) {
-            _logState?.warning('⚠️ SITE SYNC 异常: $e，等待5秒让设备完成写入...', type: LogType.debug);
-            await Future.delayed(const Duration(seconds: 5));
+            _logState?.warning('⚠️ SITE SYNC 异常: $e，等待10秒让设备完成写入...', type: LogType.debug);
+            await Future.delayed(const Duration(seconds: 10));
           }
           
           _logState?.success('✅ FTP上传成功！', type: LogType.debug);
