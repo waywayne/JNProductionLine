@@ -338,96 +338,112 @@ class ManualTestSection extends StatelessWidget {
     );
   }
 
-  /// 处理测试按钮点击，先检查SPP连接
+  /// 处理测试按钮点击：串口已连接则直接执行，否则检查蓝牙SPP，未连接则弹窗扫描SN→查询蓝牙MAC→连接蓝牙
   Future<void> _handleTestButtonPress(
     BuildContext context,
     TestState state,
     String testName,
     VoidCallback onPressed,
   ) async {
-    // 检查是否已连接Linux蓝牙SPP
-    if (!state.isLinuxBluetoothConnected) {
-      // 未连接，弹窗提示并输入SN
-      final confirmed = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.bluetooth_disabled, color: Colors.orange),
-              SizedBox(width: 12),
-              Text('蓝牙未连接'),
-            ],
+    // 1. 串口已连接 → 直接执行
+    if (state.serialService.isConnected) {
+      onPressed();
+      return;
+    }
+    
+    // 2. 蓝牙SPP已连接 → 直接执行
+    if (state.isLinuxBluetoothConnected) {
+      onPressed();
+      return;
+    }
+    
+    // 3. 均未连接 → 弹窗扫描SN，查询蓝牙MAC后连接
+    final connected = await _ensureConnection(context, state);
+    if (!connected) return;
+
+    // 连接成功，执行测试
+    onPressed();
+  }
+  
+  /// 确保设备已连接（弹窗扫描SN → 查询蓝牙MAC → 连接蓝牙）
+  /// 返回 true 表示连接成功
+  Future<bool> _ensureConnection(BuildContext context, TestState state) async {
+    // 再次检查（可能在等待期间已连接）
+    if (state.serialService.isConnected || state.isLinuxBluetoothConnected) {
+      return true;
+    }
+    
+    // 弹窗扫描SN
+    final productInfo = await showDialog<ProductSNInfo>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const SNInputDialog(),
+    );
+
+    if (productInfo == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ 未获取到设备信息，无法执行测试'),
+            backgroundColor: Colors.red,
           ),
-          content: const Text('执行手动测试前需要先连接蓝牙SPP。\n\n请输入SN码以获取设备信息并连接蓝牙。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('输入SN'),
-            ),
-          ],
-        ),
-      );
-
-      if (confirmed != true) return;
-
-      // 显示SN输入对话框
-      final productInfo = await showDialog<ProductSNInfo>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const SNInputDialog(),
-      );
-
-      if (productInfo == null) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ 未获取到设备信息，无法执行测试'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
+        );
       }
-
-      // 连接蓝牙SPP
-      final bluetoothAddress = productInfo.bluetoothAddress;
-      if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ 设备信息中无蓝牙地址'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      // 使用 Linux 蓝牙 SPP 连接
-      final connected = await state.testLinuxBluetooth(
-        deviceAddress: bluetoothAddress,
-      );
-
-      if (!connected) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ 蓝牙连接失败'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
+      return false;
     }
 
-    // SPP已连接，执行测试
-    onPressed();
+    // 获取蓝牙MAC地址
+    final bluetoothAddress = productInfo.bluetoothAddress;
+    if (bluetoothAddress.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ 设备蓝牙地址为空，无法连接'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+
+    // 提示正在连接
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('🔵 正在连接蓝牙 $bluetoothAddress ...'),
+          backgroundColor: Colors.blue,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    // 使用 Linux 蓝牙 SPP 连接
+    final connected = await state.testLinuxBluetooth(
+      deviceAddress: bluetoothAddress,
+    );
+
+    if (!connected) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('❌ 蓝牙连接失败'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return false;
+    }
+    
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ 蓝牙连接成功'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+    return true;
   }
 
   Widget _buildLEDTestButton(
@@ -469,7 +485,7 @@ class ManualTestSection extends StatelessWidget {
           width: 140,
           height: 80,
           child: ElevatedButton(
-            onPressed: () => _showLEDTestDialog(context, ledType),
+            onPressed: () => _handleTestButtonPress(context, state, 'LED灯($ledType)', () => _showLEDTestDialog(context, ledType)),
             style: ElevatedButton.styleFrom(
               backgroundColor: backgroundColor,
               foregroundColor: foregroundColor,
@@ -545,7 +561,7 @@ class ManualTestSection extends StatelessWidget {
       width: 140,
       height: 80,
       child: ElevatedButton(
-        onPressed: () => state.toggleMicState(micNumber),
+        onPressed: () => _handleTestButtonPress(context, state, label, () => state.toggleMicState(micNumber)),
         style: ElevatedButton.styleFrom(
           backgroundColor: isOn ? Colors.green[400] : Colors.grey[300],
           foregroundColor: isOn ? Colors.white : Colors.black87,
@@ -589,13 +605,13 @@ class ManualTestSection extends StatelessWidget {
       width: 120,
       height: 80,
       child: ElevatedButton(
-        onPressed: () async {
+        onPressed: () => _handleTestButtonPress(context, state, 'IMU数据', () async {
           if (isTesting) {
             await state.stopIMUDataStream();
           } else {
             await state.startIMUDataStream();
           }
-        },
+        }),
         style: ElevatedButton.styleFrom(
           backgroundColor: isTesting ? Colors.blue[400] : Colors.blue[50],
           foregroundColor: isTesting ? Colors.white : Colors.blue[700],
@@ -637,13 +653,13 @@ class ManualTestSection extends StatelessWidget {
       width: 140,
       height: 80,
       child: ElevatedButton(
-        onPressed: () async {
+        onPressed: () => _handleTestButtonPress(context, state, 'Sensor图片', () async {
           if (isTesting) {
             await state.stopSensorTest();
           } else {
             await state.startSensorTest();
           }
-        },
+        }),
         style: ElevatedButton.styleFrom(
           backgroundColor: isTesting ? Colors.orange[400] : Colors.grey[300],
           foregroundColor: isTesting ? Colors.white : Colors.black87,
@@ -913,95 +929,10 @@ class ManualTestSection extends StatelessWidget {
   Future<void> _testCameraChessboard(BuildContext context, TestState state) async {
     final logState = context.read<LogState>();
 
-    // ========== 步骤1: 检查蓝牙连接，未连接则弹窗输入MAC并连接 ==========
-    if (!state.isLinuxBluetoothConnected) {
-      final macController = TextEditingController();
-      final macAddress = await showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.bluetooth_disabled, color: Colors.orange),
-              SizedBox(width: 12),
-              Text('蓝牙未连接'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('摄像头棋盘格测试需要先连接蓝牙。'),
-              const SizedBox(height: 8),
-              const Text('请输入设备蓝牙 MAC 地址:'),
-              const SizedBox(height: 12),
-              TextField(
-                controller: macController,
-                decoration: const InputDecoration(
-                  hintText: '例如: AA:BB:CC:DD:EE:FF',
-                  labelText: '蓝牙 MAC 地址',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.bluetooth),
-                ),
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 16),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('取消'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.of(context).pop(macController.text.trim()),
-              icon: const Icon(Icons.bluetooth_connected),
-              label: const Text('连接'),
-            ),
-          ],
-        ),
-      );
-
-      if (macAddress == null || macAddress.isEmpty) {
-        return;
-      }
-
-      // 连接蓝牙
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('🔵 正在连接蓝牙 $macAddress ...'),
-            backgroundColor: Colors.blue,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-
-      logState.info('🔵 手动棋盘格测试: 连接蓝牙 $macAddress', type: LogType.debug);
-      final connected = await state.testLinuxBluetooth(
-        deviceAddress: macAddress,
-      );
-
-      if (!connected) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ 蓝牙连接失败'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ 蓝牙连接成功'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 1),
-          ),
-        );
-      }
+    // ========== 步骤1: 确保设备已连接（串口优先，否则SN扫码→蓝牙连接） ==========
+    if (!state.serialService.isConnected && !state.isLinuxBluetoothConnected) {
+      final connected = await _ensureConnection(context, state);
+      if (!connected) return;
     }
 
     // ========== 步骤2: 连接WiFi获取设备IP ==========

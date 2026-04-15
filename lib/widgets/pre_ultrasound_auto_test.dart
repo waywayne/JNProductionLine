@@ -8,6 +8,7 @@ import '../services/product_sn_api.dart';
 import '../services/production_test_commands.dart';
 import '../services/byd_mes_service.dart';
 import '../services/linux_bluetooth_spp_service.dart';
+import '../services/sn_api_service.dart';
 import '../config/wifi_config.dart';
 import '../config/production_config.dart';
 import '../models/touch_test_step.dart';
@@ -36,13 +37,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final List<TestStepResult> _stepResults1 = [];
   ProductSNInfo? _productInfo1;
   String? _deviceIP1;
+  String? _scannedSN1;
   BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommBind;
+  final BydMesService _mesService1 = BydMesService();
   
   // 工位3状态
   bool _isAutoTesting3 = false;
   int _currentStep3 = 0;
   final List<TestStepResult> _stepResults3 = [];
   ProductSNInfo? _productInfo3;
+  String? _scannedSN3;
   BluetoothTestMethod _selectedMethod3 = BluetoothTestMethod.rfcommBind;
   final BydMesService _mesService3 = BydMesService();
   final ProductionConfig _config = ProductionConfig();
@@ -65,12 +69,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     _stepResults1.clear();
     _stepResults1.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 2, name: '产测开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '光敏传感器测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: 'IMU传感器测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '光敏传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: 'IMU传感器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -78,20 +83,21 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     _stepResults3.clear();
     _stepResults3.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 2, name: '产测开始', status: TestStepStatus.pending),
-      // TestStepResult(stepNumber: 3, name: '设备电压测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '电量检测测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '充电状态测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: '右触控-TK1测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: '右触控-TK2测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: '右触控-TK3测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '左佩戴检测', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '左触控事件测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '结束产测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
+      // TestStepResult(stepNumber: N, name: '设备电压测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '电量检测测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '充电状态测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '右触控-TK1测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '右触控-TK2测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '右触控-TK3测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '左佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '左触控事件测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '结束产测', status: TestStepStatus.pending),
     ]);
   }
 
@@ -711,26 +717,47 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<void> _startAutoTest1(TestState state) async {
     final logState = context.read<LogState>();
     
-    // 先弹窗输入SN号或MAC地址，并选择连接方案
+    // 绑定 MES 日志
+    _mesService1.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
+    
+    // 弹窗扫描SN（同步单板产测）
     if (!mounted) return;
-    final options = await showDialog<_AutoTestOptions>(
+    final snResult = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _AutoTestInputDialog(defaultMethod: _selectedMethod1),
+      builder: (context) => _SNScanDialog(title: '工位1: 射频图像测试'),
     );
     
-    if (options == null) {
-      logState.warning('用户取消输入');
+    if (snResult == null || snResult.isEmpty) {
+      logState.warning('用户取消输入SN');
       return;
     }
     
-    _productInfo1 = options.productInfo;
-    _selectedMethod1 = options.method;
+    _scannedSN1 = snResult;
+    logState.info('📋 扫码SN: $_scannedSN1');
     
-    logState.info('获取到设备信息: SN=${_productInfo1!.snCode}');
-    logState.info('蓝牙地址: ${_productInfo1!.bluetoothAddress}');
-    logState.info('WiFi MAC: ${_productInfo1!.macAddress}');
-    logState.info('连接方案: ${_getMethodName(_selectedMethod1)}');
+    // 通过SN查询接口获取蓝牙MAC
+    logState.info('📡 查询SN信息获取蓝牙MAC...');
+    try {
+      final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN1!);
+      if (productInfo == null) {
+        logState.error('❌ SN查询失败，无法获取蓝牙地址');
+        return;
+      }
+      _productInfo1 = productInfo;
+      logState.info('✅ 获取到设备信息:');
+      logState.info('   SN: ${productInfo.snCode}');
+      logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
+      logState.info('   WiFi MAC: ${productInfo.macAddress}');
+      
+      if (productInfo.bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙地址为空，无法继续');
+        return;
+      }
+    } catch (e) {
+      logState.error('❌ SN查询异常: $e');
+      return;
+    }
     
     setState(() {
       _isAutoTesting1 = true;
@@ -740,7 +767,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.info('🔧 工位1: 射频图像测试');
+    logState.info('   SN: $_scannedSN1');
+    logState.info('   蓝牙: ${_productInfo1!.bluetoothAddress}');
+    logState.info('   连接方案: ${_getMethodName(_selectedMethod1)}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    bool hasFailure = false;
+    String? failItem;
+    String? failValue;
 
     // 执行测试步骤
     for (int i = 0; i < _stepResults1.length; i++) {
@@ -761,33 +795,39 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             success = await _testBluetoothConnection1(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
             break;
-          case 1: // 产测开始
-            logState.info('步骤2: 产测开始');
+          case 1: // BYD MES 开始
+            logState.info('步骤2: BYD MES 开始');
+            final mesResult = await _mesService1.start(_scannedSN1!);
+            success = mesResult['success'] == true;
+            message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            break;
+          case 2: // 产测开始
+            logState.info('步骤3: 产测开始');
             success = await _testProductionStart(state, logState);
             message = success ? '产测开始命令发送成功' : '产测开始命令失败';
             break;
-          case 2: // WIFI连接热点并获取IP
-            logState.info('步骤3: WIFI连接热点并获取IP');
+          case 3: // WIFI连接热点并获取IP
+            logState.info('步骤4: WIFI连接热点并获取IP');
             success = await _testWiFiConnectionWithIP(state, logState);
             message = success ? 'WiFi连接成功，IP: $_deviceIP1' : 'WiFi连接失败';
             break;
-          case 3: // 光敏传感器测试
-            logState.info('步骤4: 光敏传感器测试');
+          case 4: // 光敏传感器测试
+            logState.info('步骤5: 光敏传感器测试');
             success = await _testLightSensor(state, logState);
             message = success ? '获取到光敏值' : '光敏传感器测试失败';
             break;
-          case 4: // IMU传感器测试
-            logState.info('步骤5: IMU传感器测试');
+          case 5: // IMU传感器测试
+            logState.info('步骤6: IMU传感器测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
             break;
-          case 5: // 摄像头棋盘格测试
-            logState.info('步骤6: 摄像头棋盘格测试');
+          case 6: // 摄像头棋盘格测试
+            logState.info('步骤7: 摄像头棋盘格测试');
             success = await _testCameraChessboard(state, logState);
             message = success ? '摄像头测试通过' : '摄像头测试失败';
             break;
-          case 6: // 产测结束
-            logState.info('步骤7: 产测结束');
+          case 7: // 产测结束
+            logState.info('步骤8: 产测结束');
             success = await _testProductionEnd(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -807,6 +847,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       if (!success) {
         logState.error('❌ 步骤${i + 1}失败: $message');
+        if (!hasFailure) {
+          hasFailure = true;
+          failItem = _stepResults1[i].name;
+          failValue = message ?? '测试未通过';
+        }
         if (!_debugMode1) {
           break;
         } else {
@@ -825,13 +870,56 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     final passedCount = _stepResults1.where((s) => s.status == TestStepStatus.passed).length;
     final totalCount = _stepResults1.length;
+    final allPassed = passedCount == totalCount;
     
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    if (passedCount == totalCount) {
-      logState.info('🎉 工位1测试全部通过！($passedCount/$totalCount)');
-    } else {
-      logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项');
+
+    // BYD MES 结果上报 + SN状态更新
+    if (_scannedSN1 != null && _scannedSN1!.isNotEmpty) {
+      if (allPassed) {
+        // 全部通过 → BYD MES 良品完成
+        logState.info('🏭 调用 BYD MES 良品完成接口...');
+        final mesResult = await _mesService1.complete(_scannedSN1!);
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 良品完成成功');
+        } else {
+          logState.error('❌ BYD MES 良品完成失败: ${mesResult['error']}');
+        }
+        
+        // 更新SN状态为5（超声前整机产测通过）
+        logState.info('📤 更新SN状态为「超声前整机产测通过」(status=5)...');
+        final statusUpdated = await SNApiService.updateSNStatus(
+          sn: _scannedSN1!,
+          status: 5,
+          logState: logState,
+        );
+        if (statusUpdated) {
+          logState.success('✅ SN状态更新成功');
+        } else {
+          logState.error('❌ SN状态更新失败');
+        }
+        
+        logState.info('🎉 工位1测试全部通过！($passedCount/$totalCount)');
+      } else {
+        // 有失败 → BYD MES 不良品
+        logState.info('🏭 调用 BYD MES 不良品接口...');
+        final mesResult = await _mesService1.ncComplete(
+          _scannedSN1!,
+          ncCode: 'NC001',
+          ncContext: '超声前整机产测不良',
+          failItem: failItem ?? '未知',
+          failValue: failValue ?? '测试未通过',
+        );
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 不良品上报成功');
+        } else {
+          logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
+        }
+        
+        logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项');
+      }
     }
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
   /// 构建方案测试按钮
@@ -1121,33 +1209,64 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<void> _startAutoTest3(TestState state) async {
     final logState = context.read<LogState>();
     
+    // 绑定 MES 日志
+    _mesService3.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
+    
+    // 弹窗扫描SN（同步单板产测）
     if (!mounted) return;
-    final options = await showDialog<_AutoTestOptions>(
+    final snResult = await showDialog<String>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => _AutoTestInputDialog(defaultMethod: _selectedMethod3),
+      builder: (context) => _SNScanDialog(title: '工位3: 电源外设测试'),
     );
     
-    if (options == null) {
-      logState.warning('用户取消输入');
+    if (snResult == null || snResult.isEmpty) {
+      logState.warning('用户取消输入SN');
       return;
     }
     
-    _productInfo3 = options.productInfo;
-    _selectedMethod3 = options.method;
+    _scannedSN3 = snResult;
+    logState.info('📋 扫码SN: $_scannedSN3');
     
-    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logState.info('🔧 工位3: 电源外设测试');
-    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logState.info('SN: ${_productInfo3!.snCode}');
-    logState.info('蓝牙地址: ${_productInfo3!.bluetoothAddress}');
-    logState.info('连接方案: ${_getMethodName(_selectedMethod3)}');
+    // 通过SN查询接口获取蓝牙MAC
+    logState.info('📡 查询SN信息获取蓝牙MAC...');
+    try {
+      final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN3!);
+      if (productInfo == null) {
+        logState.error('❌ SN查询失败，无法获取蓝牙地址');
+        return;
+      }
+      _productInfo3 = productInfo;
+      logState.info('✅ 获取到设备信息:');
+      logState.info('   SN: ${productInfo.snCode}');
+      logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
+      logState.info('   WiFi MAC: ${productInfo.macAddress}');
+      
+      if (productInfo.bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙地址为空，无法继续');
+        return;
+      }
+    } catch (e) {
+      logState.error('❌ SN查询异常: $e');
+      return;
+    }
     
     setState(() {
       _isAutoTesting3 = true;
       _currentStep3 = 0;
       _initializeSteps3();
     });
+
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔧 工位3: 电源外设测试');
+    logState.info('   SN: $_scannedSN3');
+    logState.info('   蓝牙: ${_productInfo3!.bluetoothAddress}');
+    logState.info('   连接方案: ${_getMethodName(_selectedMethod3)}');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    bool hasFailure = false;
+    String? failItem;
+    String? failValue;
 
     for (int i = 0; i < _stepResults3.length; i++) {
       if (!_isAutoTesting3) break;
@@ -1166,7 +1285,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             success = await _testBluetoothConnection3(state, logState);
             message = success ? '蓝牙连接成功' : '蓝牙连接失败';
             break;
-          case 1: // 产测开始
+          case 1: // BYD MES 开始
+            logState.info('步骤2: BYD MES 开始');
+            final mesResult = await _mesService3.start(_scannedSN3!);
+            success = mesResult['success'] == true;
+            message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            break;
+          case 2: // 产测开始
             success = await _testProductionStart(state, logState);
             message = success ? '产测开始成功' : '产测开始失败';
             break;
@@ -1175,53 +1300,53 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           //   success = result['success'] as bool;
           //   message = result['message'] as String?;
           //   break;
-          case 2: // 电量检测测试
+          case 3: // 电量检测测试
             final result = await _testBattery3(state, logState);
             success = result['success'] as bool;
             message = result['message'] as String?;
             break;
-          case 3: // 充电状态测试
+          case 4: // 充电状态测试
             final result = await _testChargeStatus3(state, logState);
             success = result['success'] as bool;
             message = result['message'] as String?;
             break;
-          case 4: // LED灯(外侧)开启
+          case 5: // LED灯(外侧)开启
             success = await _testLED3(state, logState, isOuter: true, turnOn: true);
             message = success ? 'LED外侧开启成功' : 'LED外侧开启失败';
             break;
-          case 5: // LED灯(外侧)关闭
+          case 6: // LED灯(外侧)关闭
             success = await _testLED3(state, logState, isOuter: true, turnOn: false);
             message = success ? 'LED外侧关闭成功' : 'LED外侧关闭失败';
             break;
-          case 6: // LED灯(内侧)开启
+          case 7: // LED灯(内侧)开启
             success = await _testLED3(state, logState, isOuter: false, turnOn: true);
             message = success ? 'LED内侧开启成功' : 'LED内侧开启失败';
             break;
-          case 7: // LED灯(内侧)关闭
+          case 8: // LED灯(内侧)关闭
             success = await _testLED3(state, logState, isOuter: false, turnOn: false);
             message = success ? 'LED内侧关闭成功' : 'LED内侧关闭失败';
             break;
-          case 8: // 右触控-TK1测试
+          case 9: // 右触控-TK1测试
             success = await _testTouch3(state, logState, touchType: 'TK1');
             message = success ? 'TK1测试通过' : 'TK1测试失败';
             break;
-          case 9: // 右触控-TK2测试
+          case 10: // 右触控-TK2测试
             success = await _testTouch3(state, logState, touchType: 'TK2');
             message = success ? 'TK2测试通过' : 'TK2测试失败';
             break;
-          case 10: // 右触控-TK3测试
+          case 11: // 右触控-TK3测试
             success = await _testTouch3(state, logState, touchType: 'TK3');
             message = success ? 'TK3测试通过' : 'TK3测试失败';
             break;
-          case 11: // 左佩戴检测
+          case 12: // 左佩戴检测
             success = await _testLeftWearDetect3(state, logState);
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 12: // 左触控事件测试
+          case 13: // 左触控事件测试
             success = await _testLeftTouchEvent3(state, logState);
             message = success ? '左触控事件通过' : '左触控事件失败';
             break;
-          case 13: // 结束产测
+          case 14: // 结束产测
             success = await _testProductionEnd3(state, logState);
             message = success ? '产测结束成功' : '产测结束失败';
             break;
@@ -1239,6 +1364,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       if (!success) {
         logState.error('❌ 步骤${i + 1}失败: $message');
+        if (!hasFailure) {
+          hasFailure = true;
+          failItem = _stepResults3[i].name;
+          failValue = message ?? '测试未通过';
+        }
         if (!_debugMode3) {
           break;
         } else {
@@ -1256,16 +1386,60 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     final passedCount = _stepResults3.where((s) => s.status == TestStepStatus.passed).length;
     final totalCount = _stepResults3.length;
     final allPassed = passedCount == totalCount;
-    if (allPassed) {
-      logState.info('✅ 工位3测试全部通过');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ 工位3测试全部通过'), backgroundColor: Colors.green),
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // BYD MES 结果上报 + SN状态更新
+    if (_scannedSN3 != null && _scannedSN3!.isNotEmpty) {
+      if (allPassed) {
+        // 全部通过 → BYD MES 良品完成
+        logState.info('🏭 调用 BYD MES 良品完成接口...');
+        final mesResult = await _mesService3.complete(_scannedSN3!);
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 良品完成成功');
+        } else {
+          logState.error('❌ BYD MES 良品完成失败: ${mesResult['error']}');
+        }
+        
+        // 更新SN状态为5（超声前整机产测通过）
+        logState.info('📤 更新SN状态为「超声前整机产测通过」(status=5)...');
+        final statusUpdated = await SNApiService.updateSNStatus(
+          sn: _scannedSN3!,
+          status: 5,
+          logState: logState,
         );
+        if (statusUpdated) {
+          logState.success('✅ SN状态更新成功');
+        } else {
+          logState.error('❌ SN状态更新失败');
+        }
+        
+        logState.info('🎉 工位3测试全部通过！($passedCount/$totalCount)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ 工位3测试全部通过'), backgroundColor: Colors.green),
+          );
+        }
+      } else {
+        // 有失败 → BYD MES 不良品
+        logState.info('🏭 调用 BYD MES 不良品接口...');
+        final mesResult = await _mesService3.ncComplete(
+          _scannedSN3!,
+          ncCode: 'NC001',
+          ncContext: '超声前整机产测不良',
+          failItem: failItem ?? '未知',
+          failValue: failValue ?? '测试未通过',
+        );
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 不良品上报成功');
+        } else {
+          logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
+        }
+        
+        logState.warning('⚠️ 工位3测试完成，通过 $passedCount/$totalCount 项');
       }
-    } else {
-      logState.error('❌ 工位3测试未通过');
     }
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
   // ========== 工位3: 蓝牙连接测试（与工位1一致） ==========
@@ -1310,15 +1484,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       if (success) {
         logState.info('✅ 蓝牙连接成功');
-        // 蓝牙连接成功后调用 BYD MES start
-        // logState.info('📤 调用 BYD MES start...');
-        // _mesService3.printConfig();
-        // final mesResult = await _mesService3.start(_productInfo3!.snCode);
-        // if (mesResult['success'] == true) {
-        //   logState.info('✅ MES start 成功');
-        // } else {
-        //   logState.warning('⚠️ MES start 失败: ${mesResult['error']}');
-        // }
       }
 
       return success;
@@ -1997,7 +2162,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   // ========== 工位3: 结束产测 ==========
   Future<bool> _testProductionEnd3(TestState state, LogState logState) async {
-    logState.info('🏁 步骤17: 结束产测');
+    logState.info('🏁 结束产测');
     
     final command = ProductionTestCommands.createEndTestCommand();
     final response = await state.sendCommandViaLinuxBluetooth(
@@ -2010,15 +2175,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     if (response == null || response.containsKey('error')) {
       logState.error('❌ 产测结束命令失败');
       return false;
-    }
-
-    // 调用 BYD MES complete
-    logState.info('📤 调用 BYD MES complete...');
-    final mesResult = await _mesService3.complete(_productInfo3!.snCode);
-    if (mesResult['success'] == true) {
-      logState.info('✅ MES complete 成功');
-    } else {
-      logState.warning('⚠️ MES complete 失败: ${mesResult['error']}');
     }
 
     logState.info('✅ 产测结束成功');
@@ -2645,6 +2801,116 @@ class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog
                     foregroundColor: Colors.white,
                   ),
                   child: const Text('开始测试'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// SN扫描对话框（同步单板产测流程，仅输入SN）
+class _SNScanDialog extends StatefulWidget {
+  final String title;
+  
+  const _SNScanDialog({required this.title});
+
+  @override
+  State<_SNScanDialog> createState() => _SNScanDialogState();
+}
+
+class _SNScanDialogState extends State<_SNScanDialog> {
+  final TextEditingController _snController = TextEditingController();
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _snController.dispose();
+    super.dispose();
+  }
+
+  void _handleConfirm() {
+    final sn = _snController.text.trim();
+    if (sn.isEmpty) {
+      setState(() => _errorMessage = '请输入或扫描 SN 码');
+      return;
+    }
+    Navigator.of(context).pop(sn);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 420,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[100],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.qr_code_scanner, size: 28, color: Colors.orange[700]),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '请扫描或输入设备 SN 码',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: _snController,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'SN 码',
+                hintText: '扫码枪扫描或手动输入',
+                prefixIcon: const Icon(Icons.tag),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                errorText: _errorMessage,
+              ),
+              onSubmitted: (_) => _handleConfirm(),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('取消'),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: _handleConfirm,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('开始测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
                 ),
               ],
             ),
