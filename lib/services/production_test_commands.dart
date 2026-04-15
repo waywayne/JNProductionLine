@@ -645,6 +645,7 @@ class ProductionTestCommands {
         
       case 0x01: // 连接热点 - 返回IP地址
       case 0x05: // WiFi连接命令 - 返回IP地址
+      case 0x06: // WiFi拉距测试 - 返回IP地址
         // responseData 中查找 IP 地址（ASCII 字符串）
         // 跳过前导非 ASCII 可打印字节（如状态码 0x00, 0x01 等）
         if (responseData.isNotEmpty) {
@@ -769,6 +770,8 @@ class ProductionTestCommands {
       case 0x02: return '测试RSSI';
       case 0x03: return '获取MAC地址';
       case 0x04: return '烧录MAC地址';
+      case 0x05: return 'WiFi连接';
+      case 0x06: return 'WiFi拉距测试';
       case 0xFF: return '结束测试';
       default: return 'UNKNOWN';
     }
