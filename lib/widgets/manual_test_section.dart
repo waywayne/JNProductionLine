@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -1200,6 +1201,12 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
   bool _isSuccess = false;
   bool _isFailed = false;
   int? _calibResult;
+  StreamSubscription<Uint8List>? _subscription;
+  Timer? _timeoutTimer;
+  int _sendAttempt = 0;
+
+  static const _maxRetries = 10;
+  static const _listenTimeout = Duration(seconds: 30);
 
   static const _statusSteps = [
     {'status': 0x00, 'label': '设备IMU启动中', 'icon': Icons.power_settings_new},
@@ -1214,58 +1221,132 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
     _startCalibration();
   }
 
-  /// 发送IMU校准命令（不等待响应）
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    _timeoutTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 发送IMU校准命令（仅发送，不阻塞等待响应）
   Future<bool> _sendCommand() async {
     try {
-      if (widget.useLinuxBluetooth) {
-        return await widget.state.sendCommandViaLinuxBluetooth(
-          widget.command,
-          timeout: const Duration(seconds: 5),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        ).then((r) => r != null && !r.containsKey('error'));
-      } else {
-        final response = await widget.state.serialService.sendCommandAndWaitResponse(
-          widget.command,
-          timeout: const Duration(seconds: 5),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
-        return response != null && !response.containsKey('error');
-      }
+      // 串口: 使用 sendCommand（fire-and-forget）
+      return await widget.state.serialService.sendCommand(
+        widget.command,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
     } catch (e) {
       widget.logState.error('❌ 发送IMU校准命令失败: $e', type: LogType.debug);
       return false;
     }
   }
 
-  /// 监听一次设备状态推送
-  Future<Map<String, dynamic>?> _listenForStatus() async {
+  /// 蓝牙: 发送命令并等待单次响应
+  Future<Map<String, dynamic>?> _btSendAndWait() async {
     try {
-      if (widget.useLinuxBluetooth) {
-        // 蓝牙: 发送同一命令来接收下一个响应
-        return await widget.state.sendCommandViaLinuxBluetooth(
-          widget.command,
-          timeout: const Duration(seconds: 30),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
-      } else {
-        // 串口: 发送同一命令来接收下一个响应
-        return await widget.state.serialService.sendCommandAndWaitResponse(
-          widget.command,
-          timeout: const Duration(seconds: 30),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
-      }
+      return await widget.state.sendCommandViaLinuxBluetooth(
+        widget.command,
+        timeout: _listenTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
     } catch (e) {
-      widget.logState.warning('⚠️ 监听状态异常: $e', type: LogType.debug);
+      widget.logState.warning('⚠️ 蓝牙命令异常: $e', type: LogType.debug);
       return null;
     }
   }
 
-  /// 处理收到的响应payload
+  /// 串口模式: 监听 pushPayloadStream 中的IMU状态推送
+  void _startSerialListening() {
+    _subscription?.cancel();
+    _resetTimeout();
+
+    _subscription = widget.state.serialService.pushPayloadStream.listen((payload) {
+      if (!_isRunning) return;
+
+      // 检查是否是IMU校准响应 (payload第一个字节应为0x10)
+      if (payload.isEmpty) return;
+      if (payload[0] != ProductionTestCommands.cmdIMUCalibration) return;
+
+      _resetTimeout(); // 收到有效数据，重置超时
+      _handlePayload(payload);
+    });
+  }
+
+  /// 蓝牙模式: 轮询式监听（发送命令→等待响应→再发送→再等待...）
+  Future<void> _startBluetoothPolling() async {
+    while (_isRunning) {
+      if (_sendAttempt > 0) {
+        widget.logState.info('🔄 蓝牙: 重新发送IMU校准命令 (${_sendAttempt + 1}/$_maxRetries)', type: LogType.debug);
+        if (mounted) {
+          setState(() => _statusText = '重新发送校准命令 (${_sendAttempt + 1}/$_maxRetries)...');
+        }
+      }
+
+      final response = await _btSendAndWait();
+      if (!_isRunning) return;
+
+      if (response == null || response.containsKey('error')) {
+        widget.logState.warning('⏱️ IMU校准: 蓝牙响应超时或失败', type: LogType.debug);
+        _sendAttempt++;
+        if (_sendAttempt >= _maxRetries) {
+          _onMaxRetriesExceeded();
+          return;
+        }
+        continue;
+      }
+
+      if (response.containsKey('payload') && response['payload'] != null) {
+        final payload = response['payload'] as Uint8List;
+        final done = _handlePayload(payload);
+        if (done) return;
+      }
+
+      // 继续轮询等待下一个状态
+    }
+  }
+
+  /// 重置30s超时定时器（串口模式使用）
+  void _resetTimeout() {
+    _timeoutTimer?.cancel();
+    _timeoutTimer = Timer(_listenTimeout, () {
+      if (!_isRunning) return;
+      widget.logState.warning('⏱️ IMU校准: 监听超时 (${_listenTimeout.inSeconds}s)', type: LogType.debug);
+      _retryOrFail();
+    });
+  }
+
+  /// 串口模式: 超时后重试或失败
+  void _retryOrFail() {
+    _subscription?.cancel();
+    _sendAttempt++;
+    if (_sendAttempt >= _maxRetries) {
+      _onMaxRetriesExceeded();
+      return;
+    }
+
+    widget.logState.info('🔄 重新发送IMU校准命令 (${_sendAttempt + 1}/$_maxRetries)', type: LogType.debug);
+    if (mounted) {
+      setState(() => _statusText = '重新发送校准命令 (${_sendAttempt + 1}/$_maxRetries)...');
+    }
+    _doSendAndListen();
+  }
+
+  /// 重试次数用尽
+  void _onMaxRetriesExceeded() {
+    widget.logState.error('❌ IMU校准: 重试次数已用尽 ($_maxRetries次)', type: LogType.debug);
+    if (mounted) {
+      setState(() {
+        _isRunning = false;
+        _isFailed = true;
+        _statusText = '❌ 校准超时（已重试$_maxRetries次）';
+      });
+    }
+  }
+
+  /// 处理收到的IMU校准payload，返回true表示校准流程结束
   bool _handlePayload(Uint8List payload) {
     final payloadHex = payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
     widget.logState.info('📦 IMU校准响应: [$payloadHex]', type: LogType.debug);
@@ -1293,6 +1374,9 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
             : '❌ IMU校准完成，但校准失败 (结果: ${_calibResult != null ? "0x${_calibResult!.toRadixString(16).toUpperCase()}" : "无"})',
         type: LogType.debug,
       );
+      // 校准结束，停止监听
+      _subscription?.cancel();
+      _timeoutTimer?.cancel();
       if (mounted) {
         setState(() {
           _isRunning = false;
@@ -1301,95 +1385,43 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
           _statusText = success ? '✅ 校准成功' : '❌ 校准失败';
         });
       }
-      return true; // 校准流程结束
+      return true;
     }
-    return false; // 继续监听
+    return false;
   }
 
-  Future<void> _startCalibration() async {
-    const maxRetries = 10;
+  /// 发送命令并开始监听（串口模式入口）
+  Future<void> _doSendAndListen() async {
+    final sent = await _sendCommand();
+    if (!_isRunning) return;
 
-    for (int sendAttempt = 0; sendAttempt < maxRetries && _isRunning; sendAttempt++) {
-      // === 第一步：发送IMU校准命令 ===
-      if (sendAttempt > 0) {
-        widget.logState.info('🔄 重新发送IMU校准命令 (${sendAttempt + 1}/$maxRetries)', type: LogType.debug);
-      } else {
-        widget.logState.info('📤 发送IMU校准命令(0x10)', type: LogType.debug);
-      }
-
-      if (mounted) {
-        setState(() => _statusText = sendAttempt == 0 ? '正在发送校准命令...' : '重新发送校准命令 (${sendAttempt + 1}/$maxRetries)...');
-      }
-
-      final sent = await _sendCommand();
-      if (!_isRunning) return;
-
-      if (!sent) {
-        widget.logState.warning('⚠️ IMU校准命令发送失败，1秒后重试', type: LogType.debug);
-        await Future.delayed(const Duration(seconds: 1));
-        continue;
-      }
-
-      widget.logState.success('✅ IMU校准命令发送成功，开始监听设备状态...', type: LogType.debug);
-      if (mounted) {
-        setState(() => _statusText = '等待设备响应...');
-      }
-
-      // === 第二步：监听设备状态推送（30s超时） ===
-      final response = await _listenForStatus();
-      if (!_isRunning) return;
-
-      if (response == null) {
-        widget.logState.warning('⏱️ IMU校准: 监听超时 (30s)，将重新发送命令 (${sendAttempt + 1}/$maxRetries)', type: LogType.debug);
-        if (mounted) {
-          setState(() => _statusText = '监听超时，重新发送... (${sendAttempt + 1}/$maxRetries)');
-        }
-        continue; // 超时 → 重新发送
-      }
-
-      if (response.containsKey('error')) {
-        widget.logState.error('❌ IMU校准: ${response['error']}', type: LogType.debug);
-        continue;
-      }
-
-      // 收到响应 → 解析并处理
-      if (response.containsKey('payload') && response['payload'] != null) {
-        final payload = response['payload'] as Uint8List;
-        final done = _handlePayload(payload);
-        if (done) return; // 收到0x03，校准结束
-      }
-
-      // 收到了非0x03的状态，继续监听后续状态
-      while (_isRunning) {
-        final nextResponse = await _listenForStatus();
-        if (!_isRunning) return;
-
-        if (nextResponse == null) {
-          widget.logState.warning('⏱️ IMU校准: 后续监听超时 (30s)', type: LogType.debug);
-          break; // 超时 → 跳出内层循环，外层会重新发送
-        }
-
-        if (nextResponse.containsKey('error')) {
-          widget.logState.error('❌ IMU校准: ${nextResponse['error']}', type: LogType.debug);
-          break;
-        }
-
-        if (nextResponse.containsKey('payload') && nextResponse['payload'] != null) {
-          final payload = nextResponse['payload'] as Uint8List;
-          final done = _handlePayload(payload);
-          if (done) return; // 收到0x03，校准结束
-        }
-      }
+    if (!sent) {
+      widget.logState.warning('⚠️ IMU校准命令发送失败，1秒后重试', type: LogType.debug);
+      await Future.delayed(const Duration(seconds: 1));
+      if (_isRunning) _retryOrFail();
+      return;
     }
 
-    // 超过最大重试次数
-    if (_isRunning && mounted) {
-      widget.logState.error('❌ IMU校准: 重试次数已用尽 ($maxRetries次)', type: LogType.debug);
-      setState(() {
-        _isRunning = false;
-        _isFailed = true;
-        _statusText = '❌ 校准超时（已重试$maxRetries次）';
-      });
+    widget.logState.success('✅ IMU校准命令发送成功，开始监听设备状态...', type: LogType.debug);
+    if (mounted) {
+      setState(() => _statusText = '等待设备响应...');
+    }
+
+    _startSerialListening();
+  }
+
+  /// 入口
+  Future<void> _startCalibration() async {
+    widget.logState.info('📤 发送IMU校准命令(0x10)', type: LogType.debug);
+
+    if (widget.useLinuxBluetooth) {
+      // 蓝牙模式: 使用 sendCommandAndWaitResponse 轮询
+      // 蓝牙的 dataStream 是原始字节流，需要通过GTP序列号匹配响应
+      _startBluetoothPolling();
+    } else {
+      // 串口模式: 发送一次，然后监听 pushPayloadStream
+      // pushPayloadStream 是已解析的CLI payload流
+      _doSendAndListen();
     }
   }
 
@@ -1417,9 +1449,14 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
               final stepStatus = step['status'] as int;
               final label = step['label'] as String;
               final icon = step['icon'] as IconData;
-              final isActive = stepStatus == _currentStatus;
-              final isDone = _currentStatus > stepStatus ||
-                  (_currentStatus == ProductionTestCommands.imuCalibStatusComplete && stepStatus == _currentStatus);
+              final isActive = stepStatus == _currentStatus && _isRunning;
+              // 0x03步骤的isDone取决于校准是否成功
+              final bool isDone;
+              if (stepStatus == ProductionTestCommands.imuCalibStatusComplete) {
+                isDone = _isSuccess; // 只有成功才显示绿色
+              } else {
+                isDone = _currentStatus > stepStatus;
+              }
               final isPending = _currentStatus < stepStatus;
 
               return Padding(
@@ -1433,28 +1470,30 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
                       decoration: BoxDecoration(
                         color: isDone
                             ? Colors.green[50]
-                            : (isActive ? Colors.deepOrange[50] : Colors.grey[100]),
+                            : (isActive ? Colors.deepOrange[50] : (_isFailed && stepStatus == _currentStatus ? Colors.red[50] : Colors.grey[100])),
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: isDone
                               ? Colors.green
-                              : (isActive ? Colors.deepOrange : Colors.grey[300]!),
+                              : (isActive ? Colors.deepOrange : (_isFailed && stepStatus == _currentStatus ? Colors.red : Colors.grey[300]!)),
                           width: isActive ? 2 : 1,
                         ),
                       ),
                       child: Center(
                         child: isDone
                             ? const Icon(Icons.check, color: Colors.green, size: 20)
-                            : (isActive
-                                ? SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.deepOrange[600],
-                                    ),
-                                  )
-                                : Icon(icon, color: Colors.grey[400], size: 18)),
+                            : (_isFailed && stepStatus == _currentStatus
+                                ? const Icon(Icons.close, color: Colors.red, size: 20)
+                                : (isActive
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.deepOrange[600],
+                                        ),
+                                      )
+                                    : Icon(icon, color: Colors.grey[400], size: 18))),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -1465,7 +1504,9 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
                         fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
                         color: isDone
                             ? Colors.green[700]
-                            : (isActive ? Colors.deepOrange[800] : (isPending ? Colors.grey[400] : Colors.black87)),
+                            : (_isFailed && stepStatus == _currentStatus
+                                ? Colors.red[700]
+                                : (isActive ? Colors.deepOrange[800] : (isPending ? Colors.grey[400] : Colors.black87))),
                       ),
                     ),
                   ],
@@ -1534,6 +1575,8 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
         if (_isRunning)
           TextButton(
             onPressed: () {
+              _subscription?.cancel();
+              _timeoutTimer?.cancel();
               setState(() {
                 _isRunning = false;
                 _isFailed = true;
