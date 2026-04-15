@@ -55,12 +55,15 @@ class OTAState extends ChangeNotifier {
   int? get lastOTAStatus => _lastOTAStatus;
   
   bool get isConnected {
+    // 串口已连接则返回true
+    if (_serialService?.isConnected ?? false) return true;
+    // 蓝牙SPP已连接则返回true
     if (_linuxBtService != null) {
       try {
-        return (_linuxBtService as dynamic).isConnected == true;
+        if ((_linuxBtService as dynamic).isConnected == true) return true;
       } catch (_) {}
     }
-    return _serialService?.isConnected ?? false;
+    return false;
   }
   
   bool get _useLinuxBluetooth {
