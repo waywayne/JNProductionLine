@@ -344,6 +344,128 @@ class BydMesService {
     }
   }
   
+  /// 删除关键物料信息（RemoveSfcKey）
+  Future<Map<String, dynamic>> removeSfcKey(
+    String sn, {
+    required String dataName,
+  }) async {
+    _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _log('🗑️ 执行 MES 操作: RemoveSfcKey（删除关键物料信息）');
+    _log('   SN: $sn');
+    _log('   MES IP: $mesIp');
+    _log('   Client ID: $clientId');
+    _log('   DATA_NAME: $dataName');
+    
+    try {
+      final url = 'http://$mesIp/Service.action?method=RemoveSfcKey&param='
+          '{"LOGIN_ID":"-1","CLIENT_ID":"$clientId","SFC":"$sn",'
+          '"DATA_NAME":"$dataName"}';
+      
+      _log('   📡 接口: RemoveSfcKey');
+      _log('   请求方式: HTTP GET');
+      _log('   参数:');
+      _log('      LOGIN_ID: -1');
+      _log('      CLIENT_ID: $clientId');
+      _log('      SFC: $sn');
+      _log('      DATA_NAME: $dataName');
+      _log('   完整URL: $url');
+      
+      final data = await _httpGet(url);
+      if (data == null) {
+        _log('   ❌ RemoveSfcKey 请求失败');
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': false, 'error': 'RemoveSfcKey 请求失败'};
+      }
+      
+      _log('   响应: ${json.encode(data)}');
+      
+      if (data['RESULT'] == 'PASS') {
+        _log('   ✅ $sn RemoveSfcKey PASS (DATA_NAME: $dataName)');
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': true, 'data': data};
+      } else {
+        _log('   ❌ $sn RemoveSfcKey FAIL');
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': false, 'error': 'MES RemoveSfcKey 返回 FAIL: ${json.encode(data)}'};
+      }
+    } catch (e) {
+      _log('   ❌ 删除关键物料信息异常: $e');
+      _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+  
+  /// 上传关键物料信息（AddSfcKey）
+  Future<Map<String, dynamic>> addSfcKey(
+    String sn, {
+    required String dataName,
+    required String dataValue,
+    String qty = '0',
+  }) async {
+    _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    _log('📤 执行 MES 操作: AddSfcKey（上传关键物料信息）');
+    _log('   SN: $sn');
+    _log('   工站: $station');
+    _log('   MES IP: $mesIp');
+    _log('   Client ID: $clientId');
+    _log('   DATA_NAME: $dataName');
+    _log('   DATA_VALUE: $dataValue');
+    _log('   QTY: $qty');
+    
+    try {
+      // 1. 获取 SFC 信息（需要 SHOPORDER）
+      final sfcData = await _getSfcInfo(sn);
+      if (sfcData == null) {
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': false, 'error': '获取 SFC 信息失败'};
+      }
+      
+      final shoporder = sfcData['SHOPORDER'] ?? '';
+      
+      // 2. 调用 AddSfcKey
+      final url = 'http://$mesIp/Service.action?method=AddSfcKey&param='
+          '{"LOGIN_ID":"-1","CLIENT_ID":"$clientId","SFC":"$sn",'
+          '"STATION_NAME":"$station","SHOPORDER":"$shoporder",'
+          '"DATA_NAME":"$dataName","DATA_VALUE":"$dataValue","QTY":"$qty"}';
+      
+      _log('   📡 接口: AddSfcKey');
+      _log('   请求方式: HTTP GET');
+      _log('   参数:');
+      _log('      LOGIN_ID: -1');
+      _log('      CLIENT_ID: $clientId');
+      _log('      SFC: $sn');
+      _log('      STATION_NAME: $station');
+      _log('      SHOPORDER: $shoporder');
+      _log('      DATA_NAME: $dataName');
+      _log('      DATA_VALUE: $dataValue');
+      _log('      QTY: $qty');
+      _log('   完整URL: $url');
+      
+      final data = await _httpGet(url);
+      if (data == null) {
+        _log('   ❌ AddSfcKey 请求失败');
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': false, 'error': 'AddSfcKey 请求失败'};
+      }
+      
+      _log('   响应: ${json.encode(data)}');
+      
+      if (data['RESULT'] == 'PASS') {
+        _log('   ✅ $sn AddSfcKey PASS (DATA_NAME: $dataName, DATA_VALUE: $dataValue)');
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': true, 'data': data};
+      } else {
+        _log('   ❌ $sn AddSfcKey FAIL');
+        _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        return {'success': false, 'error': 'MES AddSfcKey 返回 FAIL: ${json.encode(data)}'};
+      }
+    } catch (e) {
+      _log('   ❌ 上传关键物料信息异常: $e');
+      _log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+  
   /// 测试 MES 连接
   Future<Map<String, dynamic>> testConnection(String testSn) async {
     _log('🧪 测试 MES 连接');
