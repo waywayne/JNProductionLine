@@ -387,6 +387,11 @@ class TestState extends ChangeNotifier {
     _linuxBtService.setLogState(logState);
     _pythonBtService.setLogState(logState);
     
+    // 绑定 BYD MES 服务日志到 LogState，使其内部详细日志可在日志控制台查看
+    _bydMesService.setOnLog((message) {
+      _logState?.info('[MES] $message', type: LogType.debug);
+    });
+    
     // Python 蓝牙服务将在首次使用时初始化
   }
   
@@ -6109,14 +6114,17 @@ class TestState extends ChangeNotifier {
         _logState?.info('🏭 调用 BYD MES 开始接口...', type: LogType.debug);
         _logState?.info('   SN: $_scannedSN', type: LogType.debug);
         _logState?.info('   工站: ${_bydMesService.station}', type: LogType.debug);
+        _logState?.info('   MES IP: ${_bydMesService.mesIp}', type: LogType.debug);
+        _logState?.info('   Client ID: ${_bydMesService.clientId}', type: LogType.debug);
         
         final mesStartResult = await _bydMesService.start(_scannedSN!);
         if (mesStartResult['success'] == true) {
           _logState?.success('✅ BYD MES 开始接口调用成功', type: LogType.debug);
           _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
         } else {
-          _logState?.error('❌ BYD MES 开始接口调用失败: ${mesStartResult['error'] ?? '未知错误'}', type: LogType.debug);
-          _logState?.error('   请检查 MES 配置和网络连接', type: LogType.debug);
+          final mesError = mesStartResult['error'] ?? '未知错误';
+          _logState?.error('❌ BYD MES 开始接口调用失败: $mesError', type: LogType.debug);
+          _logState?.error('   MES IP: ${_bydMesService.mesIp}', type: LogType.debug);
           _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
           return;
         }

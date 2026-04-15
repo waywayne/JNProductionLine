@@ -40,6 +40,11 @@ class BydMesService {
     _onLog = onLog;
   }
   
+  /// 设置日志回调（用于在创建后动态绑定日志输出）
+  void setOnLog(Function(String) onLog) {
+    _onLog = onLog;
+  }
+  
   /// 更新工站配置（现在通过 ProductionConfig 配置）
   Future<void> updateStation(String station) async {
     await _config.setBydMesStation(station);

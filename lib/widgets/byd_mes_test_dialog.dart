@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/byd_mes_service.dart';
+import '../config/production_config.dart';
 
 /// BYD MES 系统测试对话框
 class BydMesTestDialog extends StatefulWidget {
@@ -38,9 +39,10 @@ class _BydMesTestDialogState extends State<BydMesTestDialog> {
   void initState() {
     super.initState();
     
-    _mesIpController = TextEditingController(text: widget.initialMesIp ?? '192.168.1.100');
-    _clientIdController = TextEditingController(text: widget.initialClientId ?? 'DEFAULT_CLIENT');
-    _stationController = TextEditingController(text: widget.initialStation ?? 'STATION1');
+    final config = ProductionConfig();
+    _mesIpController = TextEditingController(text: widget.initialMesIp ?? config.bydMesIp);
+    _clientIdController = TextEditingController(text: widget.initialClientId ?? config.bydMesClientId);
+    _stationController = TextEditingController(text: widget.initialStation ?? config.bydMesStation);
     _snController = TextEditingController();
     _ncCodeController = TextEditingController(text: 'NC001');
     _ncContextController = TextEditingController(text: '测试不良');
@@ -78,15 +80,23 @@ class _BydMesTestDialogState extends State<BydMesTestDialog> {
   }
   
   Future<void> _updateMesConfig() async {
-    // 更新站点名称到 ProductionConfig
-    await _mesService.updateStation(_stationController.text);
+    // 更新所有MES配置到 ProductionConfig
+    final config = ProductionConfig();
+    await config.setBydMesIp(_mesIpController.text);
+    await config.setBydMesClientId(_clientIdController.text);
+    await config.setBydMesStation(_stationController.text);
     _mesService = BydMesService(
       onLog: _addLog,
     );
     
+    _addLog('🔧 MES 配置已更新:');
+    _addLog('   MES IP: ${_mesIpController.text}');
+    _addLog('   Client ID: ${_clientIdController.text}');
+    _addLog('   工站: ${_stationController.text}');
+    
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('MES 配置已更新（所有配置从通用配置读取）')),
+        const SnackBar(content: Text('MES 配置已更新（IP、Client ID、工站均已保存）')),
       );
     }
   }
