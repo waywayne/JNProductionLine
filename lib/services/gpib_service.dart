@@ -13,6 +13,7 @@ class GpibService {
   
   String? _currentAddress;
   bool _isConnected = false;
+  bool _isDisconnecting = false;
   LogState? _logState;
   
   // 数据流控制器
@@ -50,17 +51,34 @@ class GpibService {
       
       final pythonCmd = envCheck['pythonCommand'] as String;
       
-      // 创建临时 Python 脚本来列出资源
+      // 创建临时 Python 脚本来列出资源（多后端探测）
       final scriptContent = '''
+import sys
+import os
 import pyvisa
-try:
-    rm = pyvisa.ResourceManager()
-    resources = rm.list_resources()
-    for res in resources:
-        print(res)
-    rm.close()
-except Exception as e:
-    print(f"ERROR: {e}", file=sys.stderr)
+
+backends = []
+if os.name != 'nt':
+    backends = ['@ni', '@py']
+else:
+    backends = ['', '@ni', '@py']
+
+found_resources = set()
+for backend in backends:
+    try:
+        if backend:
+            rm = pyvisa.ResourceManager(backend)
+        else:
+            rm = pyvisa.ResourceManager()
+        resources = rm.list_resources()
+        for res in resources:
+            found_resources.add(res)
+        rm.close()
+    except Exception:
+        continue
+
+for res in sorted(found_resources):
+    print(res)
 ''';
       
       final tempDir = Directory.systemTemp;
@@ -244,7 +262,9 @@ except Exception as e:
       
       // 监听进程退出
       _process!.exitCode.then((exitCode) {
-        _logState?.warning('Python 桥接进程退出，退出码: $exitCode', type: LogType.gpib);
+        if (!_isDisconnecting) {
+          _logState?.warning('Python 桥接进程退出，退出码: $exitCode', type: LogType.gpib);
+        }
         if (!connectionCompleter.isCompleted) {
           connectionCompleter.complete(false);
         }
@@ -294,7 +314,7 @@ except Exception as e:
       _logState?.debug('等待 GPIB 设备响应...', type: LogType.gpib);
       
       final connected = await connectionCompleter.future.timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 20),
         onTimeout: () {
           _logState?.error('⏱️  连接超时：设备未响应', type: LogType.gpib);
           return false;
@@ -345,10 +365,14 @@ except Exception as e:
   
   /// 断开连接
   Future<void> disconnect() async {
+    _isDisconnecting = true;
     try {
       if (_process != null) {
         // 发送退出命令
-        await sendCommand('EXIT');
+        try {
+          _process!.stdin.writeln('EXIT');
+          await _process!.stdin.flush();
+        } catch (_) {}
         await Future.delayed(const Duration(milliseconds: 500));
         
         _process?.kill();
@@ -365,6 +389,8 @@ except Exception as e:
       _logState?.info('GPIB 设备已断开', type: LogType.gpib);
     } catch (e) {
       _logState?.error('断开 GPIB 连接时出错: $e', type: LogType.gpib);
+    } finally {
+      _isDisconnecting = false;
     }
   }
   
@@ -535,8 +561,66 @@ except Exception as e:
   Future<String> _createGpibBridgeScript() async {
     final scriptContent = '''
 import sys
+import os
 import pyvisa
 import time
+
+def try_open_resource_manager():
+    """尝试打开 VISA Resource Manager，优先使用 NI-VISA 后端"""
+    backends = []
+    
+    # Linux 上优先尝试 NI-VISA (@ni)，然后 linux-gpib，最后 pyvisa-py (@py)
+    # Windows 上默认就是 NI-VISA
+    if os.name != 'nt':  # Linux/macOS
+        backends = ['@ni', '@py']
+    else:  # Windows
+        backends = ['', '@ni', '@py']  # 空字符串 = 默认后端
+    
+    last_error = None
+    for backend in backends:
+        try:
+            if backend:
+                print(f"INFO: Trying VISA backend: {backend}", file=sys.stderr)
+                rm = pyvisa.ResourceManager(backend)
+            else:
+                print(f"INFO: Trying default VISA backend", file=sys.stderr)
+                rm = pyvisa.ResourceManager()
+            
+            # 验证能列出资源
+            try:
+                resources = rm.list_resources()
+                print(f"INFO: Backend {backend or 'default'}: Available resources: {resources}", file=sys.stderr)
+                
+                # 检查是否有 GPIB 资源（而不是只有 ASRL 串口资源）
+                gpib_resources = [r for r in resources if 'GPIB' in r.upper() or 'USB' in r.upper() or 'TCPIP' in r.upper()]
+                if gpib_resources:
+                    print(f"INFO: Found instrument resources: {gpib_resources}", file=sys.stderr)
+                    return rm, backend
+                else:
+                    # 没有 GPIB 资源但可以列出资源 - 如果是最后一个后端也返回
+                    if backend == backends[-1]:
+                        print(f"WARNING: No GPIB/USB/TCPIP resources found with any backend", file=sys.stderr)
+                        return rm, backend
+                    else:
+                        print(f"INFO: No instrument resources with backend {backend or 'default'}, trying next...", file=sys.stderr)
+                        rm.close()
+                        continue
+            except Exception as e:
+                print(f"WARNING: Could not list resources with {backend or 'default'}: {e}", file=sys.stderr)
+                return rm, backend  # 仍然返回，让后续 open_resource 尝试
+                
+        except Exception as e:
+            last_error = e
+            print(f"WARNING: Backend {backend or 'default'} failed: {e}", file=sys.stderr)
+            continue
+    
+    # 所有后端都失败，最后尝试默认
+    print(f"WARNING: All preferred backends failed, trying default...", file=sys.stderr)
+    try:
+        rm = pyvisa.ResourceManager()
+        return rm, 'default-fallback'
+    except Exception as e:
+        raise RuntimeError(f"Cannot initialize any VISA backend: {last_error}; final: {e}")
 
 def main():
     if len(sys.argv) < 2:
@@ -546,14 +630,26 @@ def main():
     address = sys.argv[1]
     
     try:
-        # 初始化 VISA 资源管理器
+        # 初始化 VISA 资源管理器（自动选择后端）
         print(f"INFO: Initializing VISA Resource Manager...", file=sys.stderr)
-        rm = pyvisa.ResourceManager()
+        rm, backend_used = try_open_resource_manager()
+        print(f"INFO: Using VISA backend: {backend_used or 'default'}", file=sys.stderr)
         
-        # 列出所有可用资源
+        # 列出所有可用资源并检查目标资源是否存在
+        target_found = False
         try:
             resources = rm.list_resources()
             print(f"INFO: Available resources: {resources}", file=sys.stderr)
+            
+            # 检查目标地址是否在资源列表中
+            for res in resources:
+                if res.upper() == address.upper():
+                    target_found = True
+                    break
+            
+            if not target_found:
+                print(f"WARNING: Target resource '{address}' not found in available resources: {resources}", file=sys.stderr)
+                print(f"INFO: Will attempt to connect anyway...", file=sys.stderr)
         except Exception as e:
             print(f"WARNING: Could not list resources: {e}", file=sys.stderr)
         
@@ -565,14 +661,27 @@ def main():
         instrument.timeout = 15000  # 15秒超时
         
         # 测试连接 - 发送 *IDN? 查询
+        idn_ok = False
         try:
             idn = instrument.query("*IDN?").strip()
             print(f"INFO: Device identified: {idn}", file=sys.stderr)
+            idn_ok = True
         except Exception as e:
             print(f"WARNING: Could not query *IDN?: {e}", file=sys.stderr)
+            # 如果 *IDN? 失败且不是 GPIB 资源，说明连接到了错误的设备
+            if not address.upper().startswith('GPIB'):
+                print(f"ERROR: Connected to non-GPIB resource and *IDN? failed, likely wrong device", file=sys.stderr)
+                instrument.close()
+                rm.close()
+                sys.exit(1)
         
         # 发送连接成功信号
-        print("CONNECTED|OK")
+        if idn_ok:
+            print("CONNECTED|OK")
+        else:
+            # *IDN? 失败但资源打开成功（某些设备不支持 *IDN?）
+            print("CONNECTED|OK")
+            print(f"WARNING: Device connected but *IDN? failed - commands may not work", file=sys.stderr)
         sys.stdout.flush()
         
         # 等待一小段时间确保信号被接收

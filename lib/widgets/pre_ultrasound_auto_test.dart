@@ -720,43 +720,54 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     // 绑定 MES 日志
     _mesService1.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
     
-    // 弹窗扫描SN（同步单板产测）
+    // 弹窗扫描SN或输入蓝牙MAC
     if (!mounted) return;
-    final snResult = await showDialog<String>(
+    final scanResult = await showDialog<_SNScanResult>(
       context: context,
       barrierDismissible: false,
       builder: (context) => _SNScanDialog(title: '工位1: 射频图像测试'),
     );
     
-    if (snResult == null || snResult.isEmpty) {
-      logState.warning('用户取消输入SN');
+    if (scanResult == null) {
+      logState.warning('用户取消输入');
       return;
     }
     
-    _scannedSN1 = snResult;
-    logState.info('📋 扫码SN: $_scannedSN1');
-    
-    // 通过SN查询接口获取蓝牙MAC
-    logState.info('📡 查询SN信息获取蓝牙MAC...');
-    try {
-      final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN1!);
-      if (productInfo == null) {
-        logState.error('❌ SN查询失败，无法获取蓝牙地址');
+    if (scanResult.isMacMode) {
+      // MAC直连模式：跳过SN查询，直接使用蓝牙地址
+      final mac = scanResult.bluetoothAddress!;
+      logState.info('📋 蓝牙MAC直连模式: $mac');
+      _scannedSN1 = null;
+      _productInfo1 = ProductSNInfo(
+        snCode: 'MAC直连',
+        bluetoothAddress: mac,
+        macAddress: '',
+      );
+    } else {
+      // SN模式：通过SN查询接口获取蓝牙MAC
+      _scannedSN1 = scanResult.sn;
+      logState.info('📋 扫码SN: $_scannedSN1');
+      logState.info('📡 查询SN信息获取蓝牙MAC...');
+      try {
+        final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN1!);
+        if (productInfo == null) {
+          logState.error('❌ SN查询失败，无法获取蓝牙地址');
+          return;
+        }
+        _productInfo1 = productInfo;
+        logState.info('✅ 获取到设备信息:');
+        logState.info('   SN: ${productInfo.snCode}');
+        logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
+        logState.info('   WiFi MAC: ${productInfo.macAddress}');
+        
+        if (productInfo.bluetoothAddress.isEmpty) {
+          logState.error('❌ 蓝牙地址为空，无法继续');
+          return;
+        }
+      } catch (e) {
+        logState.error('❌ SN查询异常: $e');
         return;
       }
-      _productInfo1 = productInfo;
-      logState.info('✅ 获取到设备信息:');
-      logState.info('   SN: ${productInfo.snCode}');
-      logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
-      logState.info('   WiFi MAC: ${productInfo.macAddress}');
-      
-      if (productInfo.bluetoothAddress.isEmpty) {
-        logState.error('❌ 蓝牙地址为空，无法继续');
-        return;
-      }
-    } catch (e) {
-      logState.error('❌ SN查询异常: $e');
-      return;
     }
     
     setState(() {
@@ -767,7 +778,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.info('🔧 工位1: 射频图像测试');
-    logState.info('   SN: $_scannedSN1');
+    logState.info('   SN: ${_scannedSN1 ?? "MAC直连"}');
     logState.info('   蓝牙: ${_productInfo1!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod1)}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -797,9 +808,15 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 1: // BYD MES 开始
             logState.info('步骤2: BYD MES 开始');
-            final mesResult = await _mesService1.start(_scannedSN1!);
-            success = mesResult['success'] == true;
-            message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            if (_scannedSN1 != null && _scannedSN1!.isNotEmpty) {
+              final mesResult = await _mesService1.start(_scannedSN1!);
+              success = mesResult['success'] == true;
+              message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            } else {
+              logState.info('   ⏭️ MAC直连模式，跳过 MES Start');
+              success = true;
+              message = 'MAC直连模式，跳过 MES';
+            }
             break;
           case 2: // 产测开始
             logState.info('步骤3: 产测开始');
@@ -917,6 +934,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
         
         logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项');
+      }
+    } else {
+      // MAC直连模式：跳过MES上报，仅输出结果
+      if (allPassed) {
+        logState.info('🎉 工位1测试全部通过！($passedCount/$totalCount)（MAC直连模式，跳过MES上报）');
+      } else {
+        logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
       }
     }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -1212,43 +1236,54 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     // 绑定 MES 日志
     _mesService3.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
     
-    // 弹窗扫描SN（同步单板产测）
+    // 弹窗扫描SN或输入蓝牙MAC
     if (!mounted) return;
-    final snResult = await showDialog<String>(
+    final scanResult = await showDialog<_SNScanResult>(
       context: context,
       barrierDismissible: false,
       builder: (context) => _SNScanDialog(title: '工位3: 电源外设测试'),
     );
     
-    if (snResult == null || snResult.isEmpty) {
-      logState.warning('用户取消输入SN');
+    if (scanResult == null) {
+      logState.warning('用户取消输入');
       return;
     }
     
-    _scannedSN3 = snResult;
-    logState.info('📋 扫码SN: $_scannedSN3');
-    
-    // 通过SN查询接口获取蓝牙MAC
-    logState.info('📡 查询SN信息获取蓝牙MAC...');
-    try {
-      final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN3!);
-      if (productInfo == null) {
-        logState.error('❌ SN查询失败，无法获取蓝牙地址');
+    if (scanResult.isMacMode) {
+      // MAC直连模式：跳过SN查询，直接使用蓝牙地址
+      final mac = scanResult.bluetoothAddress!;
+      logState.info('📋 蓝牙MAC直连模式: $mac');
+      _scannedSN3 = null;
+      _productInfo3 = ProductSNInfo(
+        snCode: 'MAC直连',
+        bluetoothAddress: mac,
+        macAddress: '',
+      );
+    } else {
+      // SN模式：通过SN查询接口获取蓝牙MAC
+      _scannedSN3 = scanResult.sn;
+      logState.info('📋 扫码SN: $_scannedSN3');
+      logState.info('📡 查询SN信息获取蓝牙MAC...');
+      try {
+        final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN3!);
+        if (productInfo == null) {
+          logState.error('❌ SN查询失败，无法获取蓝牙地址');
+          return;
+        }
+        _productInfo3 = productInfo;
+        logState.info('✅ 获取到设备信息:');
+        logState.info('   SN: ${productInfo.snCode}');
+        logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
+        logState.info('   WiFi MAC: ${productInfo.macAddress}');
+        
+        if (productInfo.bluetoothAddress.isEmpty) {
+          logState.error('❌ 蓝牙地址为空，无法继续');
+          return;
+        }
+      } catch (e) {
+        logState.error('❌ SN查询异常: $e');
         return;
       }
-      _productInfo3 = productInfo;
-      logState.info('✅ 获取到设备信息:');
-      logState.info('   SN: ${productInfo.snCode}');
-      logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
-      logState.info('   WiFi MAC: ${productInfo.macAddress}');
-      
-      if (productInfo.bluetoothAddress.isEmpty) {
-        logState.error('❌ 蓝牙地址为空，无法继续');
-        return;
-      }
-    } catch (e) {
-      logState.error('❌ SN查询异常: $e');
-      return;
     }
     
     setState(() {
@@ -1259,7 +1294,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.info('🔧 工位3: 电源外设测试');
-    logState.info('   SN: $_scannedSN3');
+    logState.info('   SN: ${_scannedSN3 ?? "MAC直连"}');
     logState.info('   蓝牙: ${_productInfo3!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod3)}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -1287,9 +1322,15 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 1: // BYD MES 开始
             logState.info('步骤2: BYD MES 开始');
-            final mesResult = await _mesService3.start(_scannedSN3!);
-            success = mesResult['success'] == true;
-            message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            if (_scannedSN3 != null && _scannedSN3!.isNotEmpty) {
+              final mesResult = await _mesService3.start(_scannedSN3!);
+              success = mesResult['success'] == true;
+              message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            } else {
+              logState.info('   ⏭️ MAC直连模式，跳过 MES Start');
+              success = true;
+              message = 'MAC直连模式，跳过 MES';
+            }
             break;
           case 2: // 产测开始
             success = await _testProductionStart(state, logState);
@@ -1437,6 +1478,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
         
         logState.warning('⚠️ 工位3测试完成，通过 $passedCount/$totalCount 项');
+      }
+    } else {
+      // MAC直连模式：跳过MES上报，仅输出结果
+      if (allPassed) {
+        logState.info('🎉 工位3测试全部通过！($passedCount/$totalCount)（MAC直连模式，跳过MES上报）');
+      } else {
+        logState.warning('⚠️ 工位3测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
       }
     }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -2811,7 +2859,17 @@ class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog
   }
 }
 
-// SN扫描对话框（同步单板产测流程，仅输入SN）
+/// SN扫描对话框返回结果
+class _SNScanResult {
+  final String? sn;               // SN码（SN模式时有值）
+  final String? bluetoothAddress; // 蓝牙MAC（MAC模式时有值）
+  final bool isMacMode;           // 是否为MAC直连模式
+
+  _SNScanResult.fromSN(String snCode) : sn = snCode, bluetoothAddress = null, isMacMode = false;
+  _SNScanResult.fromMAC(String mac) : sn = null, bluetoothAddress = mac, isMacMode = true;
+}
+
+// SN扫描对话框（支持SN码和蓝牙MAC地址两种输入模式）
 class _SNScanDialog extends StatefulWidget {
   final String title;
   
@@ -2823,21 +2881,43 @@ class _SNScanDialog extends StatefulWidget {
 
 class _SNScanDialogState extends State<_SNScanDialog> {
   final TextEditingController _snController = TextEditingController();
+  final TextEditingController _macController = TextEditingController();
+  bool _isMacMode = false;
   String? _errorMessage;
 
   @override
   void dispose() {
     _snController.dispose();
+    _macController.dispose();
     super.dispose();
   }
 
+  bool _isValidBluetoothAddress(String address) {
+    final regex = RegExp(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$');
+    return regex.hasMatch(address);
+  }
+
   void _handleConfirm() {
-    final sn = _snController.text.trim();
-    if (sn.isEmpty) {
-      setState(() => _errorMessage = '请输入或扫描 SN 码');
-      return;
+    if (_isMacMode) {
+      final mac = _macController.text.trim();
+      if (mac.isEmpty) {
+        setState(() => _errorMessage = '请输入蓝牙 MAC 地址');
+        return;
+      }
+      if (!_isValidBluetoothAddress(mac)) {
+        setState(() => _errorMessage = 'MAC 地址格式不正确，例如: 48:08:EB:60:00:60');
+        return;
+      }
+      final formatted = mac.toUpperCase().replaceAll('-', ':');
+      Navigator.of(context).pop(_SNScanResult.fromMAC(formatted));
+    } else {
+      final sn = _snController.text.trim();
+      if (sn.isEmpty) {
+        setState(() => _errorMessage = '请输入或扫描 SN 码');
+        return;
+      }
+      Navigator.of(context).pop(_SNScanResult.fromSN(sn));
     }
-    Navigator.of(context).pop(sn);
   }
 
   @override
@@ -2845,7 +2925,7 @@ class _SNScanDialogState extends State<_SNScanDialog> {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 420,
+        width: 480,
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2859,7 +2939,11 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                     color: Colors.orange[100],
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(Icons.qr_code_scanner, size: 28, color: Colors.orange[700]),
+                  child: Icon(
+                    _isMacMode ? Icons.bluetooth : Icons.qr_code_scanner,
+                    size: 28,
+                    color: Colors.orange[700],
+                  ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -2872,7 +2956,7 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '请扫描或输入设备 SN 码',
+                        _isMacMode ? '输入蓝牙 MAC 地址直接连接' : '请扫描或输入设备 SN 码',
                         style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                       ),
                     ],
@@ -2880,19 +2964,105 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _snController,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'SN 码',
-                hintText: '扫码枪扫描或手动输入',
-                prefixIcon: const Icon(Icons.tag),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                errorText: _errorMessage,
+            const SizedBox(height: 20),
+            
+            // 模式切换
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
               ),
-              onSubmitted: (_) => _handleConfirm(),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() { _isMacMode = false; _errorMessage = null; }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: !_isMacMode ? Colors.orange : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.qr_code_scanner, size: 16,
+                              color: !_isMacMode ? Colors.white : Colors.grey[600]),
+                            const SizedBox(width: 6),
+                            Text('SN 码',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: !_isMacMode ? Colors.white : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() { _isMacMode = true; _errorMessage = null; }),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _isMacMode ? Colors.blue : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.bluetooth, size: 16,
+                              color: _isMacMode ? Colors.white : Colors.grey[600]),
+                            const SizedBox(width: 6),
+                            Text('蓝牙 MAC',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _isMacMode ? Colors.white : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(height: 20),
+            
+            // 输入框
+            if (_isMacMode)
+              TextField(
+                controller: _macController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: '蓝牙 MAC 地址',
+                  hintText: '例如: 48:08:EB:60:00:60',
+                  prefixIcon: const Icon(Icons.bluetooth),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  errorText: _errorMessage,
+                  helperText: '直接输入蓝牙 MAC 地址，跳过 SN 查询',
+                ),
+                onSubmitted: (_) => _handleConfirm(),
+              )
+            else
+              TextField(
+                controller: _snController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'SN 码',
+                  hintText: '扫码枪扫描或手动输入',
+                  prefixIcon: const Icon(Icons.tag),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  errorText: _errorMessage,
+                  helperText: '输入 SN 码后将通过接口查询蓝牙地址',
+                ),
+                onSubmitted: (_) => _handleConfirm(),
+              ),
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
@@ -2905,9 +3075,9 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                 ElevatedButton.icon(
                   onPressed: _handleConfirm,
                   icon: const Icon(Icons.play_arrow),
-                  label: const Text('开始测试'),
+                  label: Text(_isMacMode ? '直接连接' : '开始测试'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
+                    backgroundColor: _isMacMode ? Colors.blue : Colors.orange,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
