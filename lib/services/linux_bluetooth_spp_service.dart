@@ -1309,9 +1309,6 @@ hciconfig hci0 up 2>/dev/null || true
         'result': parsedGTP['result'],
       };
       
-      // 提取 CLI payload 用于推送
-      final payload = response['payload'] as Uint8List?;
-      
       // 根据响应的 SN 匹配对应的请求
       final responseSN = parsedGTP['sn'] as int?;
       if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
