@@ -192,10 +192,15 @@ for res in sorted(found_resources):
       
       // 安装 pyvisa 和 pyvisa-py
       _logState?.info('正在安装 PyVISA...', type: LogType.gpib);
-      final pyvisaResult = await Process.run(
-        pythonCmd,
-        ['-m', 'pip', 'install', 'pyvisa', 'pyvisa-py', '--user'],
-      );
+      
+      // Linux (Debian/Ubuntu) Python 3.12+ 使用 externally-managed-environment，
+      // 需要 --break-system-packages 才能 pip install
+      final pipArgs = ['-m', 'pip', 'install', 'pyvisa', 'pyvisa-py', '--user'];
+      if (Platform.isLinux) {
+        pipArgs.add('--break-system-packages');
+      }
+      
+      final pyvisaResult = await Process.run(pythonCmd, pipArgs);
       
       if (pyvisaResult.exitCode == 0) {
         _logState?.success('✅ PyVISA 安装成功', type: LogType.gpib);
@@ -233,9 +238,12 @@ for res in sorted(found_resources):
       }
       
       if (!(envCheck['pyvisaInstalled'] as bool)) {
-        _logState?.error('❌ PyVISA 未安装！', type: LogType.gpib);
-        _logState?.error('请点击"安装 Python 依赖"按钮安装所需依赖', type: LogType.gpib);
-        return false;
+        _logState?.warning('⚠️ PyVISA 未安装，正在自动安装...', type: LogType.gpib);
+        final installed = await installDependencies();
+        if (!installed) {
+          _logState?.error('❌ PyVISA 自动安装失败，请手动安装', type: LogType.gpib);
+          return false;
+        }
       }
       
       final pythonCmd = envCheck['pythonCommand'] as String;
