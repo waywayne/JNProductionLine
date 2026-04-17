@@ -244,8 +244,6 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
         return _buildSingleBoardAutoTest(context, state);
       case TestMode.preUltrasoundComplete:
         return const PreUltrasoundAutoTest();
-      case TestMode.transitionComplete:
-        return _buildPlaceholder(context, '过渡整机产测', Icons.sync_alt, Colors.purple);
       case TestMode.formalComplete:
         return _buildPlaceholder(context, '正式整机产测', Icons.verified, Colors.green);
     }

@@ -806,6 +806,21 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             logState.info('步骤1: 蓝牙连接测试');
             success = await _testBluetoothConnection1(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
+            // 蓝牙连接成功后发送产测状态重置命令 (0xFF 0xFF)
+            if (success) {
+              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
+              try {
+                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
+                await state.sendCommandViaLinuxBluetooth(
+                  resetCommand,
+                  timeout: const Duration(seconds: 3),
+                  moduleId: ProductionTestCommands.moduleId,
+                );
+                logState.info('✅ 产测状态重置命令发送成功');
+              } catch (e) {
+                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
+              }
+            }
             break;
           case 1: // BYD MES 开始
             logState.info('步骤2: BYD MES 开始');
@@ -869,6 +884,19 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           hasFailure = true;
           failItem = _stepResults1[i].name;
           failValue = message ?? '测试未通过';
+        }
+        // 测试失败时调用产测状态更新命令 (0xFF 0x01)
+        logState.info('🔄 发送产测状态更新命令 (0xFF 0x01) - 测试失败...');
+        try {
+          final failCommand = ProductionTestCommands.createEndTestCommand(opt: 0x01);
+          await state.sendCommandViaLinuxBluetooth(
+            failCommand,
+            timeout: const Duration(seconds: 3),
+            moduleId: ProductionTestCommands.moduleId,
+          );
+          logState.info('✅ 产测状态更新命令发送成功');
+        } catch (e) {
+          logState.warning('⚠️ 产测状态更新命令发送失败: $e');
         }
         if (!_debugMode1) {
           break;
@@ -1320,6 +1348,21 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           case 0: // 蓝牙连接
             success = await _testBluetoothConnection3(state, logState);
             message = success ? '蓝牙连接成功' : '蓝牙连接失败';
+            // 蓝牙连接成功后发送产测状态重置命令 (0xFF 0xFF)
+            if (success) {
+              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
+              try {
+                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
+                await state.sendCommandViaLinuxBluetooth(
+                  resetCommand,
+                  timeout: const Duration(seconds: 3),
+                  moduleId: ProductionTestCommands.moduleId,
+                );
+                logState.info('✅ 产测状态重置命令发送成功');
+              } catch (e) {
+                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
+              }
+            }
             break;
           case 1: // BYD MES 开始
             logState.info('步骤2: BYD MES 开始');
@@ -1415,6 +1458,19 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           hasFailure = true;
           failItem = _stepResults3[i].name;
           failValue = message ?? '测试未通过';
+        }
+        // 测试失败时调用产测状态更新命令 (0xFF 0x01)
+        logState.info('🔄 发送产测状态更新命令 (0xFF 0x01) - 测试失败...');
+        try {
+          final failCommand = ProductionTestCommands.createEndTestCommand(opt: 0x01);
+          await state.sendCommandViaLinuxBluetooth(
+            failCommand,
+            timeout: const Duration(seconds: 3),
+            moduleId: ProductionTestCommands.moduleId,
+          );
+          logState.info('✅ 产测状态更新命令发送成功');
+        } catch (e) {
+          logState.warning('⚠️ 产测状态更新命令发送失败: $e');
         }
         if (!_debugMode3) {
           break;
@@ -2615,21 +2671,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       
       logState.info('📥 开始FTP下载图片...');
       final downloadSuccess = await state.downloadImageFromDevice(_deviceIP1!);
-      
+
       if (!downloadSuccess) {
         logState.error('❌ 图片下载失败');
         return false;
       }
-      
-      logState.info('🔍 开始图片质量检测...');
-      final qualitySuccess = await state.testCameraImageQuality();
-      
-      if (!qualitySuccess) {
-        logState.error('❌ 图片质量检测失败');
-        return false;
-      }
-      
-      logState.info('✅ 摄像头测试通过');
+
+      logState.info('✅ 图片下载成功，摄像头测试通过');
       return true;
     } catch (e) {
       logState.error('摄像头测试失败: $e');

@@ -8,11 +8,7 @@ enum TestMode {
   /// Pre-ultrasound complete device testing (via SPP Bluetooth)
   /// 超声前整机产测（通过SPP蓝牙）
   preUltrasoundComplete,
-  
-  /// Transition complete device testing (via SPP Bluetooth)
-  /// 过渡整机产测（通过SPP蓝牙）
-  transitionComplete,
-  
+
   /// Formal complete device testing (via SPP Bluetooth)
   /// 正式整机产测（通过SPP蓝牙）
   formalComplete,
@@ -27,8 +23,6 @@ extension TestModeExtension on TestMode {
         return '单板产测';
       case TestMode.preUltrasoundComplete:
         return '超声前整机产测';
-      case TestMode.transitionComplete:
-        return '过渡整机产测';
       case TestMode.formalComplete:
         return '正式整机产测';
     }
@@ -41,8 +35,6 @@ extension TestModeExtension on TestMode {
         return '通过串口连接进行单板测试';
       case TestMode.preUltrasoundComplete:
         return '超声前整机产测（通过SPP蓝牙）';
-      case TestMode.transitionComplete:
-        return '过渡整机产测（通过SPP蓝牙）';
       case TestMode.formalComplete:
         return '正式整机产测（通过SPP蓝牙）';
     }
@@ -55,8 +47,6 @@ extension TestModeExtension on TestMode {
         return 'developer_board';
       case TestMode.preUltrasoundComplete:
         return 'devices_other';
-      case TestMode.transitionComplete:
-        return 'sync_alt';
       case TestMode.formalComplete:
         return 'verified';
     }
@@ -70,7 +60,6 @@ extension TestModeExtension on TestMode {
   /// Check if uses SPP Bluetooth
   bool get usesSppBluetooth {
     return this == TestMode.preUltrasoundComplete ||
-           this == TestMode.transitionComplete ||
            this == TestMode.formalComplete;
   }
   
