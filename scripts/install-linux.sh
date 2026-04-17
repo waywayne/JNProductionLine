@@ -65,6 +65,7 @@ apt-get install -y \
     iperf3 \
     socat \
     pkg-config \
+    linux-gpib \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-wqy-microhei \
@@ -99,6 +100,16 @@ if python3 -c "import bluetooth" 2>/dev/null; then
     echo "   ✅ PyBluez 验证成功 (版本: $PYBLUEZ_VERSION)"
 else
     echo "   ⚠️  警告: PyBluez 安装可能失败，RFCOMM Socket 功能可能不可用"
+fi
+
+# 安装 Python GPIB 库
+echo "🔌 安装 Python GPIB 库..."
+if ! python3 -c "import gpib" 2>/dev/null; then
+    echo "   正在安装 gpib-ctypes..."
+    pip3 install gpib-ctypes --break-system-packages 2>/dev/null || pip3 install gpib-ctypes
+    echo "   ✅ 已安装 gpib-ctypes"
+else
+    echo "   ✅ GPIB 库已安装"
 fi
 
 # 创建安装目录
