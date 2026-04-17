@@ -85,19 +85,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
-      // TestStepResult(stepNumber: N, name: '设备电压测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '电量检测测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '充电状态测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: '右触控-TK1测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: '右触控-TK2测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '右触控-TK3测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '左佩戴检测', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '左触控事件测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: '结束产测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '设备电压测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '电量检测测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '充电状态测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '充电电流测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'LED灯(外侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'LED灯(外侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: 'LED灯(内侧)开启', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: 'LED灯(内侧)关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '右触控-TK1测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '右触控-TK2测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '右触控-TK3测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '左佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '左触控事件测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: '结束产测', status: TestStepStatus.pending),
     ]);
   }
 
@@ -1336,58 +1337,63 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             success = await _testProductionStart(state, logState);
             message = success ? '产测开始成功' : '产测开始失败';
             break;
-          // case N: // 设备电压测试（已注释）
-          //   final result = await _testVoltage3(state, logState);
-          //   success = result['success'] as bool;
-          //   message = result['message'] as String?;
-          //   break;
-          case 3: // 电量检测测试
-            final result = await _testBattery3(state, logState);
-            success = result['success'] as bool;
-            message = result['message'] as String?;
+          case 3: // 设备电压测试
+            final voltResult = await _testVoltage3(state, logState);
+            success = voltResult['success'] as bool;
+            message = voltResult['message'] as String?;
             break;
-          case 4: // 充电状态测试
-            final result = await _testChargeStatus3(state, logState);
-            success = result['success'] as bool;
-            message = result['message'] as String?;
+          case 4: // 电量检测测试
+            final batResult = await _testBattery3(state, logState);
+            success = batResult['success'] as bool;
+            message = batResult['message'] as String?;
             break;
-          case 5: // LED灯(外侧)开启
+          case 5: // 充电状态测试
+            final chargeResult = await _testChargeStatus3(state, logState);
+            success = chargeResult['success'] as bool;
+            message = chargeResult['message'] as String?;
+            break;
+          case 6: // 充电电流测试
+            final currentResult = await _testChargingCurrent3(state, logState);
+            success = currentResult['success'] as bool;
+            message = currentResult['message'] as String?;
+            break;
+          case 7: // LED灯(外侧)开启
             success = await _testLED3(state, logState, isOuter: true, turnOn: true);
             message = success ? 'LED外侧开启成功' : 'LED外侧开启失败';
             break;
-          case 6: // LED灯(外侧)关闭
+          case 8: // LED灯(外侧)关闭
             success = await _testLED3(state, logState, isOuter: true, turnOn: false);
             message = success ? 'LED外侧关闭成功' : 'LED外侧关闭失败';
             break;
-          case 7: // LED灯(内侧)开启
+          case 9: // LED灯(内侧)开启
             success = await _testLED3(state, logState, isOuter: false, turnOn: true);
             message = success ? 'LED内侧开启成功' : 'LED内侧开启失败';
             break;
-          case 8: // LED灯(内侧)关闭
+          case 10: // LED灯(内侧)关闭
             success = await _testLED3(state, logState, isOuter: false, turnOn: false);
             message = success ? 'LED内侧关闭成功' : 'LED内侧关闭失败';
             break;
-          case 9: // 右触控-TK1测试
+          case 11: // 右触控-TK1测试
             success = await _testTouch3(state, logState, touchType: 'TK1');
             message = success ? 'TK1测试通过' : 'TK1测试失败';
             break;
-          case 10: // 右触控-TK2测试
+          case 12: // 右触控-TK2测试
             success = await _testTouch3(state, logState, touchType: 'TK2');
             message = success ? 'TK2测试通过' : 'TK2测试失败';
             break;
-          case 11: // 右触控-TK3测试
+          case 13: // 右触控-TK3测试
             success = await _testTouch3(state, logState, touchType: 'TK3');
             message = success ? 'TK3测试通过' : 'TK3测试失败';
             break;
-          case 12: // 左佩戴检测
+          case 14: // 左佩戴检测
             success = await _testLeftWearDetect3(state, logState);
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 13: // 左触控事件测试
+          case 15: // 左触控事件测试
             success = await _testLeftTouchEvent3(state, logState);
             message = success ? '左触控事件通过' : '左触控事件失败';
             break;
-          case 14: // 结束产测
+          case 16: // 结束产测
             success = await _testProductionEnd3(state, logState);
             message = success ? '产测结束成功' : '产测结束失败';
             break;
@@ -1543,7 +1549,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   // ========== 工位3: 电压测试 ==========
   Future<Map<String, dynamic>> _testVoltage3(TestState state, LogState logState) async {
-    logState.info('🔋 步骤3: 设备电压测试');
+    logState.info('🔋 设备电压测试');
     
     final command = ProductionTestCommands.createGetVoltageCommand();
     final response = await state.sendCommandViaLinuxBluetooth(
@@ -1558,20 +1564,22 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
 
     final payload = response['payload'];
-    if (payload is List && payload.length >= 5) {
-      final voltageBytes = payload.sublist(1, 5).cast<int>();
-      final byteData = ByteData.sublistView(Uint8List.fromList(voltageBytes));
-      final voltage = byteData.getFloat32(0, Endian.little);
+    if (payload is List && payload.length >= 3) {
+      final payloadBytes = Uint8List.fromList(payload.cast<int>());
+      final voltageMv = ProductionTestCommands.parseVoltageResponse(payloadBytes);
       
-      final threshold = _config.minVoltageV;
-      final success = voltage > threshold;
-      
-      logState.info('   电压值: ${voltage.toStringAsFixed(2)}V (阈值: >${threshold}V)');
-      
-      return {
-        'success': success,
-        'message': '电压: ${voltage.toStringAsFixed(2)}V ${success ? "✅" : "❌"}',
-      };
+      if (voltageMv != null) {
+        final voltageV = voltageMv / 1000.0;
+        final threshold = _config.minVoltageV;
+        final success = voltageV > threshold;
+        
+        logState.info('   电压值: ${voltageV.toStringAsFixed(2)}V (阈值: >${threshold}V)');
+        
+        return {
+          'success': success,
+          'message': '电压: ${voltageV.toStringAsFixed(2)}V ${success ? "✅" : "❌ <${threshold}V"}',
+        };
+      }
     }
 
     return {'success': false, 'message': '电压数据解析失败'};
@@ -1645,6 +1653,50 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
 
     return {'success': false, 'message': '充电状态数据解析失败 (payload长度不足)'};
+  }
+
+  // ========== 工位3: 充电电流测试 ==========
+  Future<Map<String, dynamic>> _testChargingCurrent3(TestState state, LogState logState) async {
+    logState.info('⚡ 充电电流测试');
+    
+    // 发送充电状态命令 (0x03)，设备返回格式：
+    // [CMD 0x03] + [充电状态枚举] + [故障码] + [2字节充电电流 mA, little-endian]
+    final command = ProductionTestCommands.createGetChargeStatusCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取充电电流失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 5) {
+      // 扩展格式：[CMD] + [mode] + [fault] + [current_lo] + [current_hi]
+      final payloadBytes = Uint8List.fromList(payload.cast<int>());
+      final byteData = ByteData.sublistView(payloadBytes);
+      final currentMa = byteData.getUint16(3, Endian.little).toDouble();
+      
+      final threshold = _config.minChargingCurrentMa;
+      final success = currentMa >= threshold;
+      
+      logState.info('   充电电流: ${currentMa.toStringAsFixed(0)}mA (阈值: ≥${threshold.toStringAsFixed(0)}mA)');
+      
+      return {
+        'success': success,
+        'message': '充电电流: ${currentMa.toStringAsFixed(0)}mA ${success ? "✅" : "❌ <${threshold.toStringAsFixed(0)}mA"}',
+      };
+    } else if (payload is List && payload.length >= 3) {
+      // 旧格式：[CMD] + [mode] + [fault]，无电流数据
+      logState.warning('   充电状态响应中未包含电流数据 (payload长度: ${payload.length})');
+      logState.info('   提示: 设备固件可能需要升级以支持充电电流上报');
+      return {'success': false, 'message': '设备未返回充电电流数据 (需固件支持)'};
+    }
+
+    return {'success': false, 'message': '充电电流数据解析失败'};
   }
 
   // ========== 工位3: LED测试 ==========

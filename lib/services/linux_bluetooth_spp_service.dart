@@ -61,6 +61,7 @@ class LinuxBluetoothSppService {
   Process? _socketProcess;     // Python RFCOMM socket 进程
   StreamSubscription? _subscription;
   final StreamController<Uint8List> _dataController = StreamController<Uint8List>.broadcast();
+  final StreamController<Uint8List> _pushPayloadController = StreamController<Uint8List>.broadcast();
   
   String? _currentDeviceAddress;
   String? _currentDeviceName;
@@ -121,6 +122,9 @@ class LinuxBluetoothSppService {
   
   /// 获取数据流
   Stream<Uint8List> get dataStream => _dataController.stream;
+  
+  /// 获取推送数据流（用于监听设备主动推送的数据，如IMU、佩戴检测等）
+  Stream<Uint8List> get pushPayloadStream => _pushPayloadController.stream;
   
   /// 扫描可用的蓝牙设备
   Future<List<Map<String, String>>> scanDevices({Duration timeout = const Duration(seconds: 10)}) async {
@@ -1305,6 +1309,9 @@ hciconfig hci0 up 2>/dev/null || true
         'result': parsedGTP['result'],
       };
       
+      // 提取 CLI payload 用于推送
+      final payload = response['payload'] as Uint8List?;
+      
       // 根据响应的 SN 匹配对应的请求
       final responseSN = parsedGTP['sn'] as int?;
       if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
@@ -1327,7 +1334,12 @@ hciconfig hci0 up 2>/dev/null || true
           _pendingResponses.remove(firstKey);
         }
       } else {
-        _logState?.warning('⚠️ 收到数据包但没有待处理的响应 (SN: $responseSN)');
+        _logState?.warning('⚠️ 收到数据包但没有待处理的响应 (SN: $responseSN)，推送到数据流');
+      }
+      
+      // 始终推送 payload 到 pushPayloadStream（供 IMU 数据流、佩戴检测等监听）
+      if (payload != null && payload.isNotEmpty) {
+        _pushPayloadController.add(payload);
       }
     } catch (e) {
       _logState?.error('❌ 数据包处理异常: $e');
@@ -1411,6 +1423,9 @@ hciconfig hci0 up 2>/dev/null || true
         };
       }
       
+      // 提取 payload 用于推送
+      final payload = response['payload'] as Uint8List?;
+      
       // 匹配待处理的请求
       final responseSN = response['sn'] as int?;
       if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
@@ -1430,7 +1445,12 @@ hciconfig hci0 up 2>/dev/null || true
           _pendingResponses.remove(firstKey);
         }
       } else {
-        _logState?.warning('⚠️ 收到响应但没有待处理的请求');
+        _logState?.warning('⚠️ 收到响应但没有待处理的请求，推送到数据流');
+      }
+      
+      // 始终推送 payload 到 pushPayloadStream（供 IMU 数据流、佩戴检测等监听）
+      if (payload != null && payload.isNotEmpty) {
+        _pushPayloadController.add(payload);
       }
     } catch (e) {
       _logState?.error('❌ 原始响应处理异常: $e');
@@ -1441,5 +1461,6 @@ hciconfig hci0 up 2>/dev/null || true
   void dispose() {
     disconnect();
     _dataController.close();
+    _pushPayloadController.close();
   }
 }

@@ -4295,7 +4295,7 @@ class TestState extends ChangeNotifier {
       bool receivedData = false;
       
       // 根据连接方式选择数据流（使用已解析的 pushPayloadStream）
-      final pushStream = useLinuxBluetooth ? _linuxBtService.dataStream : _serialService.pushPayloadStream;
+      final pushStream = useLinuxBluetooth ? _linuxBtService.pushPayloadStream : _serialService.pushPayloadStream;
       
       dataSubscription = pushStream.listen((payload) {
         try {

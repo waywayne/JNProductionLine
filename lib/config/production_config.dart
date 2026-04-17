@@ -23,6 +23,7 @@ class ProductionConfig {
   static const String _keyMaxBattery = 'max_battery_percent';
   static const String _keyTemperatureThreshold = 'temperature_threshold_c';
   static const String _keyTouchThreshold = 'touch_threshold';
+  static const String _keyMinChargingCurrentMa = 'min_charging_current_ma';
   static const String _keyEmmcMinCapacityGb = 'emmc_min_capacity_gb';
   static const String _keyGpibAddress = 'gpib_address';
   static const String _keyWifiSsid = 'wifi_ssid';
@@ -46,6 +47,7 @@ class ProductionConfig {
   static const int defaultMaxBatteryPercent = 100;
   static const int defaultTemperatureThresholdC = 50;  // 默认50℃
   static const int defaultTouchThreshold = 500;
+  static const double defaultMinChargingCurrentMa = 200.0; // 默认200mA
   static const double defaultEmmcMinCapacityGb = 1.0; // 默认1GB
   static const String defaultGpibAddress = 'GPIB0::5::INSTR';
   static const String defaultWifiSsid = '';  // 默认为空，需要用户配置
@@ -160,6 +162,12 @@ class ProductionConfig {
     await _prefs?.setInt(_keyTouchThreshold, value);
   }
 
+  // ========== 充电电流阈值 (mA) ==========
+  double get minChargingCurrentMa => _prefs?.getDouble(_keyMinChargingCurrentMa) ?? defaultMinChargingCurrentMa;
+  Future<void> setMinChargingCurrentMa(double value) async {
+    await _prefs?.setDouble(_keyMinChargingCurrentMa, value);
+  }
+
   // ========== EMMC最小容量 (GB) ==========
   double get emmcMinCapacityGb => _prefs?.getDouble(_keyEmmcMinCapacityGb) ?? defaultEmmcMinCapacityGb;
   Future<void> setEmmcMinCapacityGb(double value) async {
@@ -235,6 +243,7 @@ class ProductionConfig {
     await setMinBatteryPercent(defaultMinBatteryPercent);
     await setMaxBatteryPercent(defaultMaxBatteryPercent);
     await setTouchThreshold(defaultTouchThreshold);
+    await setMinChargingCurrentMa(defaultMinChargingCurrentMa);
     await setEmmcMinCapacityGb(defaultEmmcMinCapacityGb);
     await setGpibAddress(defaultGpibAddress);
     await setWifiSsid(defaultWifiSsid);
@@ -259,6 +268,7 @@ class ProductionConfig {
       '最小电压': '>${minVoltageV}V',
       '电量范围': '$minBatteryPercent~$maxBatteryPercent%',
       'Touch阈值变化量': '>$touchThreshold',
+      '充电电流阈值': '≥${minChargingCurrentMa}mA',
       'EMMC最小容量': '≥${emmcMinCapacityGb}GB',
       'GPIB地址': gpibAddress,
       'WiFi SSID': wifiSsid.isEmpty ? '(未配置)' : wifiSsid,

@@ -26,6 +26,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _maxBatteryController;
   late TextEditingController _temperatureThresholdController;
   late TextEditingController _touchThresholdController;
+  late TextEditingController _chargingCurrentController;
   late TextEditingController _emmcMinCapacityController;
   late TextEditingController _gpibAddressController;
   late TextEditingController _wifiSsidController;
@@ -52,6 +53,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _maxBatteryController = TextEditingController(text: _config.maxBatteryPercent.toString());
     _temperatureThresholdController = TextEditingController(text: _config.temperatureThresholdC.toString());
     _touchThresholdController = TextEditingController(text: _config.touchThreshold.toString());
+    _chargingCurrentController = TextEditingController(text: _config.minChargingCurrentMa.toString());
     _emmcMinCapacityController = TextEditingController(text: _config.emmcMinCapacityGb.toString());
     _gpibAddressController = TextEditingController(text: _config.gpibAddress);
     _wifiSsidController = TextEditingController(text: _config.wifiSsid);
@@ -74,6 +76,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _maxBatteryController.dispose();
     _temperatureThresholdController.dispose();
     _touchThresholdController.dispose();
+    _chargingCurrentController.dispose();
     _emmcMinCapacityController.dispose();
     _gpibAddressController.dispose();
     _wifiSsidController.dispose();
@@ -97,6 +100,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setMaxBatteryPercent(int.parse(_maxBatteryController.text));
       await _config.setTemperatureThresholdC(int.parse(_temperatureThresholdController.text));
       await _config.setTouchThreshold(int.parse(_touchThresholdController.text));
+      await _config.setMinChargingCurrentMa(double.parse(_chargingCurrentController.text));
       await _config.setEmmcMinCapacityGb(double.parse(_emmcMinCapacityController.text));
       await _config.setGpibAddress(_gpibAddressController.text);
       await _config.setWifiSsid(_wifiSsidController.text);
@@ -280,6 +284,16 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _chargingCurrentController,
+              label: '充电电流阈值',
+              hint: '≥ 200',
+              suffix: 'mA',
+              icon: Icons.electric_bolt,
+              inputType: TextInputType.number,
+              validator: _validatePositiveNumber,
             ),
             const SizedBox(height: 12),
             _buildTextField(
