@@ -239,7 +239,7 @@ for res in sorted(found_resources):
       
       if (!(envCheck['pyvisaInstalled'] as bool)) {
         _logState?.warning('⚠️ PyVISA 未安装，正在自动安装...', type: LogType.gpib);
-        final installed = await installDependencies();
+        final installed = await installPythonDependencies();
         if (!installed) {
           _logState?.error('❌ PyVISA 自动安装失败，请手动安装', type: LogType.gpib);
           return false;
