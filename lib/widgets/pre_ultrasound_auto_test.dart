@@ -2689,7 +2689,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       if (!mounted) return false;
 
-      final userConfirmed = await showDialog<bool>(
+      final imageReviewResult = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
@@ -2726,7 +2726,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         ),
       );
 
-      if (userConfirmed == true) {
+      if (imageReviewResult == true) {
         logState.info('✅ 用户确认：摄像头测试通过');
         return true;
       } else {
