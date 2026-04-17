@@ -947,6 +947,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
         
         logState.info('🎉 工位1测试全部通过！($passedCount/$totalCount)');
+
+        // 测试全部通过，发送设备重启命令 (module id: 6, msg id: 0, payload: 2004)
+        logState.info('🔄 发送设备重启命令...');
+        await _sendDeviceRestartCommand(state, logState);
       } else {
         // 有失败 → BYD MES 不良品
         logState.info('🏭 调用 BYD MES 不良品接口...');
@@ -1524,6 +1528,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             const SnackBar(content: Text('✅ 工位3测试全部通过'), backgroundColor: Colors.green),
           );
         }
+
+        // 测试全部通过，发送设备重启命令 (module id: 6, msg id: 0, payload: 2004)
+        logState.info('🔄 发送设备重启命令...');
+        await _sendDeviceRestartCommand(state, logState);
       } else {
         // 有失败 → BYD MES 不良品
         logState.info('🏭 调用 BYD MES 不良品接口...');
@@ -2792,6 +2800,59 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.error('产测结束异常: $e');
       return false;
     }
+  }
+
+  /// 发送设备重启命令
+  /// module id: 6, msg id: 0, payload: 2004 (0xD4, 0x07, 0x00, 0x00 - 小端32位)
+  /// 判断蓝牙连接是否断开，断开则表示结束，否则重试3次
+  Future<void> _sendDeviceRestartCommand(TestState state, LogState logState) async {
+    // payload 2004 的小端32位字节表示
+    final restartPayload = Uint8List.fromList([0xD4, 0x07, 0x00, 0x00]);
+    const maxRetries = 3;
+
+    for (int retry = 0; retry < maxRetries; retry++) {
+      if (retry > 0) {
+        logState.info('   重启命令重试 ($retry/$maxRetries)...');
+        await Future.delayed(const Duration(seconds: 2));
+      }
+
+      // 检查蓝牙连接状态
+      if (!state.linuxBtService.isConnected) {
+        logState.info('✅ 蓝牙连接已断开，设备重启成功');
+        return;
+      }
+
+      try {
+        logState.info('📤 发送重启命令 (module: 6, msg: 0, payload: 2004)...');
+        final response = await state.sendCommandViaLinuxBluetooth(
+          restartPayload,
+          timeout: const Duration(seconds: 3),
+          moduleId: 6,
+          messageId: 0,
+        );
+
+        if (response != null && !response.containsKey('error')) {
+          logState.info('✅ 重启命令发送成功，等待设备断开...');
+        } else {
+          final errorMsg = response?['error'] ?? '未知错误';
+          logState.warning('⚠️ 重启命令发送失败: $errorMsg');
+        }
+
+        // 等待一段时间后检查蓝牙是否断开
+        await Future.delayed(const Duration(seconds: 3));
+
+        if (!state.linuxBtService.isConnected) {
+          logState.success('✅ 蓝牙连接已断开，设备重启成功');
+          return;
+        }
+
+      } catch (e) {
+        logState.warning('⚠️ 发送重启命令异常: $e');
+      }
+    }
+
+    // 3次重试后蓝牙仍未断开
+    logState.warning('⚠️ 3次重试后蓝牙仍未断开，设备可能未重启或已断开');
   }
 }
 
