@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -2677,8 +2678,61 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
-      logState.info('✅ 图片下载成功，摄像头测试通过');
-      return true;
+      logState.info('✅ 图片下载成功，等待人工确认...');
+
+      // 获取图片路径并显示弹窗供用户确认
+      final imagePath = state.sensorImagePath;
+      if (imagePath == null || imagePath.isEmpty) {
+        logState.error('❌ 图片路径为空');
+        return false;
+      }
+
+      if (!mounted) return false;
+
+      final userConfirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('摄像头测试 - 图片确认'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('请确认图片是否正常显示：'),
+              const SizedBox(height: 16),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 400, maxWidth: 600),
+                child: Image.file(
+                  File(imagePath),
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Text('❌ 无法加载图片');
+                  },
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('❌ 测试失败'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('✅ 测试通过'),
+            ),
+          ],
+        ),
+      );
+
+      if (userConfirmed == true) {
+        logState.info('✅ 用户确认：摄像头测试通过');
+        return true;
+      } else {
+        logState.info('❌ 用户确认：摄像头测试失败');
+        return false;
+      }
     } catch (e) {
       logState.error('摄像头测试失败: $e');
       return false;

@@ -61,6 +61,8 @@ apt-get install -y \
     liblzma5 \
     bluez \
     bluez-tools \
+    curl \
+    iperf3 \
     socat \
     pkg-config \
     fonts-noto-cjk \
