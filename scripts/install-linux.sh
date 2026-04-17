@@ -54,6 +54,11 @@ fi
 
 # 安装系统依赖
 echo "📥 安装系统依赖..."
+
+# 启用 universe 仓库（某些 GPIB 包可能需要）
+echo "   启用 universe 仓库..."
+apt-add-repository -y universe 2>/dev/null || true
+
 apt-get update -qq
 apt-get install -y \
     libgtk-3-0 \
@@ -65,7 +70,6 @@ apt-get install -y \
     iperf3 \
     socat \
     pkg-config \
-    linux-gpib \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \
     fonts-wqy-microhei \
@@ -73,6 +77,14 @@ apt-get install -y \
     python3 \
     python3-pip \
     python3-bluez
+
+# 尝试安装 GPIB 驱动（如果可用）
+echo "   尝试安装 GPIB 驱动..."
+if apt-cache search linux-gpib 2>/dev/null | grep -q "linux-gpib"; then
+    apt-get install -y linux-gpib || echo "   ⚠️ linux-gpib 安装失败，将继续使用纯 Python 方案"
+else
+    echo "   ⚠️ linux-gpib 包不可用，将使用 gpib-ctypes 纯 Python 方案"
+fi
 
 echo "   ✅ 已安装系统依赖和中文字体"
 
