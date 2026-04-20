@@ -2803,11 +2803,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   }
 
   /// 发送设备重启命令
-  /// module id: 6, msg id: 0, payload: 2004 (0xD4, 0x07, 0x00, 0x00 - 小端32位)
+  /// module id: 6, msg id: 0, payload: 2004 (0x20, 0x04 - 两个字节)
   /// 判断蓝牙连接是否断开，断开则表示结束，否则重试3次
   Future<void> _sendDeviceRestartCommand(TestState state, LogState logState) async {
-    // payload 2004 的小端32位字节表示
-    final restartPayload = Uint8List.fromList([0xD4, 0x07, 0x00, 0x00]);
+    // payload 2004 的两个字节表示
+    final restartPayload = Uint8List.fromList([0x20, 0x04]);
     const maxRetries = 3;
 
     for (int retry = 0; retry < maxRetries; retry++) {
