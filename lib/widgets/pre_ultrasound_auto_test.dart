@@ -947,10 +947,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
         
         logState.info('🎉 工位1测试全部通过！($passedCount/$totalCount)');
-
-        // 测试全部通过，发送设备重启命令 (module id: 6, msg id: 0, payload: 2004)
-        logState.info('🔄 发送设备重启命令...');
-        await _sendDeviceRestartCommand(state, logState);
       } else {
         // 有失败 → BYD MES 不良品
         logState.info('🏭 调用 BYD MES 不良品接口...');
@@ -966,7 +962,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         } else {
           logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
         }
-        
         logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项');
       }
     } else {
@@ -977,6 +972,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         logState.warning('⚠️ 工位1测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
       }
     }
+    // 测试全部通过，发送设备重启命令 (module id: 6, msg id: 0, payload: 2004)
+    logState.info('🔄 发送设备重启命令...');
+    await _sendDeviceRestartCommand(state, logState);
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
