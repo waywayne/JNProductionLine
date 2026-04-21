@@ -318,11 +318,11 @@ for res in sorted(found_resources):
         },
       );
       
-      // 等待连接确认或超时
+      // 等待连接确认或超时（增加到40秒，因为设备初始化+多后端探测+*IDN?查询可能耗时较长）
       _logState?.debug('等待 GPIB 设备响应...', type: LogType.gpib);
       
       final connected = await connectionCompleter.future.timeout(
-        const Duration(seconds: 20),
+        const Duration(seconds: 40),
         onTimeout: () {
           _logState?.error('⏱️  连接超时：设备未响应', type: LogType.gpib);
           return false;
