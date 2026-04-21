@@ -12,6 +12,7 @@ import '../services/linux_bluetooth_spp_service.dart';
 import '../services/sn_api_service.dart';
 import '../config/wifi_config.dart';
 import '../config/production_config.dart';
+import '../config/test_config.dart';
 import '../models/touch_test_step.dart';
 import '../services/gtp_protocol.dart';
 import 'sn_input_dialog.dart';
@@ -31,6 +32,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   // 调试模式（失败后可跳过继续执行）
   bool _debugMode1 = false;
   bool _debugMode3 = false;
+  
+  // 工位3：跳过充电电流测试（使用GPIB采集）
+  bool _skipChargingCurrentTest3 = false;
   
   // 工位1状态
   bool _isAutoTesting1 = false;
@@ -512,6 +516,19 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                     value: _debugMode3,
                     onChanged: _isAutoTesting3 ? null : (value) => setState(() => _debugMode3 = value),
                     activeColor: Colors.red,
+                  ),
+                ],
+              ),
+              // 跳过充电电流测试（使用GPIB采集）
+              Row(
+                children: [
+                  Icon(Icons.electric_bolt, color: _skipChargingCurrentTest3 ? Colors.orange : Colors.grey, size: 20),
+                  const SizedBox(width: 4),
+                  Text('跳过充电电流(GPIB)', style: TextStyle(fontSize: 12, color: _skipChargingCurrentTest3 ? Colors.orange : Colors.grey)),
+                  Switch(
+                    value: _skipChargingCurrentTest3,
+                    onChanged: _isAutoTesting3 ? null : (value) => setState(() => _skipChargingCurrentTest3 = value),
+                    activeColor: Colors.orange,
                   ),
                 ],
               ),
@@ -1399,9 +1416,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             message = chargeResult['message'] as String?;
             break;
           case 6: // 充电电流测试
-            final currentResult = await _testChargingCurrent3(state, logState);
-            success = currentResult['success'] as bool;
-            message = currentResult['message'] as String?;
+            if (_skipChargingCurrentTest3) {
+              // 跳过充电电流测试，直接标记为成功
+              logState.warning('⚠️ 已跳过充电电流测试（GPIB采集），默认标记为通过');
+              success = true;
+              message = '已跳过充电电流测试（默认通过）';
+            } else {
+              final currentResult = await _testChargingCurrent3(state, logState);
+              success = currentResult['success'] as bool;
+              message = currentResult['message'] as String?;
+            }
             break;
           case 7: // LED灯(外侧)开启
             success = await _testLED3(state, logState, isOuter: true, turnOn: true);
@@ -1718,48 +1742,45 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return {'success': false, 'message': '充电状态数据解析失败 (payload长度不足)'};
   }
 
-  // ========== 工位3: 充电电流测试 ==========
+  // ========== 工位3: 充电电流测试（使用GPIB直接采集）==========
   Future<Map<String, dynamic>> _testChargingCurrent3(TestState state, LogState logState) async {
-    logState.info('⚡ 充电电流测试');
+    logState.info('⚡ 充电电流测试 (GPIB直接采集)');
+    logState.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz');
     
-    // 发送充电状态命令 (0x03)，设备返回格式：
-    // [CMD 0x03] + [充电状态枚举] + [故障码] + [2字节充电电流 mA, little-endian]
-    final command = ProductionTestCommands.createGetChargeStatusCommand();
-    final response = await state.sendCommandViaLinuxBluetooth(
-      command,
-      timeout: const Duration(seconds: 5),
-      moduleId: ProductionTestCommands.moduleId,
-      messageId: ProductionTestCommands.messageId,
-    );
-
-    if (response == null || response.containsKey('error')) {
-      return {'success': false, 'message': '获取充电电流失败'};
+    // 检查GPIB是否就绪
+    if (!state.isGpibReady) {
+      logState.error('❌ GPIB设备未就绪，无法测量充电电流');
+      logState.error('   请先连接GPIB程控电源');
+      return {'success': false, 'message': 'GPIB设备未就绪'};
     }
-
-    final payload = response['payload'];
-    if (payload is List && payload.length >= 5) {
-      // 扩展格式：[CMD] + [mode] + [fault] + [current_lo] + [current_hi]
-      final payloadBytes = Uint8List.fromList(payload.cast<int>());
-      final byteData = ByteData.sublistView(payloadBytes);
-      final currentMa = byteData.getUint16(3, Endian.little).toDouble();
+    
+    try {
+      // 使用GPIB测量电流（多次采样）
+      final currentA = await state.gpibService.measureCurrent(
+        sampleCount: TestConfig.gpibSampleCount,
+        sampleRate: TestConfig.gpibSampleRate,
+      );
       
+      if (currentA == null) {
+        logState.error('❌ GPIB电流测量失败');
+        return {'success': false, 'message': 'GPIB电流测量失败'};
+      }
+      
+      // 转换为毫安 (mA)
+      final currentMa = currentA * 1000;
       final threshold = _config.minChargingCurrentMa;
       final success = currentMa >= threshold;
       
-      logState.info('   充电电流: ${currentMa.toStringAsFixed(0)}mA (阈值: ≥${threshold.toStringAsFixed(0)}mA)');
+      logState.info('   充电电流: ${currentMa.toStringAsFixed(2)}mA (阈值: ≥${threshold.toStringAsFixed(0)}mA)');
       
       return {
         'success': success,
-        'message': '充电电流: ${currentMa.toStringAsFixed(0)}mA ${success ? "✅" : "❌ <${threshold.toStringAsFixed(0)}mA"}',
+        'message': '充电电流: ${currentMa.toStringAsFixed(2)}mA ${success ? "✅" : "❌ <${threshold.toStringAsFixed(0)}mA"}',
       };
-    } else if (payload is List && payload.length >= 3) {
-      // 旧格式：[CMD] + [mode] + [fault]，无电流数据
-      logState.warning('   充电状态响应中未包含电流数据 (payload长度: ${payload.length})');
-      logState.info('   提示: 设备固件可能需要升级以支持充电电流上报');
-      return {'success': false, 'message': '设备未返回充电电流数据 (需固件支持)'};
+    } catch (e) {
+      logState.error('❌ 充电电流测试异常: $e');
+      return {'success': false, 'message': '充电电流测试异常: $e'};
     }
-
-    return {'success': false, 'message': '充电电流数据解析失败'};
   }
 
   // ========== 工位3: LED测试 ==========
