@@ -7,6 +7,7 @@ import 'skip_settings_panel.dart';
 import 'pre_ultrasound_auto_test.dart';
 import 'ota_upgrade_widget.dart';
 import 'wifi_range_test_widget.dart';
+import 'image_algorithm_test_widget.dart';
 
 /// Show error dialog
 void _showErrorDialog(BuildContext context, String testName, String errorMessage) {
@@ -40,7 +41,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
   }
   
   @override
@@ -175,6 +176,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
             Tab(text: '手动测试'),
             Tab(text: '产测OTA'),
             Tab(text: 'WiFi拉距'),
+            Tab(text: '图像算法'),
           ],
         ),
         const SizedBox(height: 8),
@@ -194,6 +196,8 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
               const OTAUpgradeWidget(),
               // Tab 4: WiFi拉距测试
               const WiFiRangeTestWidget(),
+              // Tab 5: 图像算法测试
+              const ImageAlgorithmTestWidget(),
             ],
           ),
         ),
