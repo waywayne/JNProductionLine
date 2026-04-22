@@ -3276,7 +3276,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<void> _startAutoTest5(TestState state) async {
     final logState = context.read<LogState>();
 
-    _mesService5.setLogState(logState);
+    _mesService5.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
 
     final scanResult = await showDialog<_SNScanResult>(
       context: context,
@@ -3604,12 +3604,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       final bluetoothAddress = _productInfo4!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
       
-      final options = BluetoothTestOptions(
+      final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
         method: _selectedMethod4,
       );
-      
-      final success = await state.testLinuxBluetoothWithOptions(options);
       return success;
     } catch (e) {
       logState.error('蓝牙连接测试失败: $e');
@@ -3911,12 +3909,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       final bluetoothAddress = _productInfo6!.bluetoothAddress;
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
       
-      final options = BluetoothTestOptions(
+      final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
         method: _selectedMethod6,
       );
-      
-      final success = await state.testLinuxBluetoothWithOptions(options);
       return success;
     } catch (e) {
       logState.error('蓝牙连接测试失败: $e');
@@ -4076,7 +4072,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testTouch6(TestState state, LogState logState, {required String touchType}) async {
     logState.info('👆 右Touch测试: $touchType');
     
-    final touchCommand = ProductionTestCommands.createTouchCommand();
+    final touchCommand = ProductionTestCommands.createTouchCommand(0x01, 0x00);
     
     for (int retry = 0; retry < 3; retry++) {
       if (retry > 0) {
@@ -4141,7 +4137,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testWearDetection6(TestState state, LogState logState) async {
     logState.info('👓 佩戴检测测试');
     
-    final wearCommand = ProductionTestCommands.createWearDetectionCommand();
+    final wearCommand = ProductionTestCommands.createGetWearStatusCommand();
     
     for (int retry = 0; retry < 5; retry++) {
       if (retry > 0) {
@@ -4200,7 +4196,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
     }
     
-    final touchEventCommand = ProductionTestCommands.createTouchEventCommand();
+    final touchEventCommand = ProductionTestCommands.createGetTouchEventCommand();
     
     for (int retry = 0; retry < 10; retry++) {
       if (retry > 0) {
@@ -4281,6 +4277,322 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.error('产测结束异常: $e');
       return false;
     }
+  }
+
+  // ========== UI构建方法 ==========
+
+  Widget _buildWorkstation4Content(TestState state) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_isAutoTesting4)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '工位4测试中... 步骤 $_currentStep4/${_stepResults4.length}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _stopAutoTest4,
+                    icon: const Icon(Icons.stop, size: 16),
+                    label: const Text('停止'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          Row(
+            children: [
+              Icon(Icons.bug_report, color: _debugMode4 ? Colors.orange : Colors.grey, size: 20),
+              const SizedBox(width: 4),
+              Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode4 ? Colors.orange : Colors.grey)),
+              Switch(
+                value: _debugMode4,
+                onChanged: _isAutoTesting4 ? null : (value) => setState(() => _debugMode4 = value),
+                activeColor: Colors.orange,
+              ),
+              if (_debugMode4)
+                Text('(失败后可跳过)', style: TextStyle(fontSize: 11, color: Colors.orange.shade700)),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: ListView.builder(
+                itemCount: _stepResults4.length,
+                itemBuilder: (context, index) {
+                  final step = _stepResults4[index];
+                  return _buildTestStepItem(step, index + 1 == _currentStep4);
+                },
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isAutoTesting4 ? null : () => _startAutoTest4(state),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('开始自动测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkstation5Content(TestState state) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_isAutoTesting5)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '工位5测试中... 步骤 $_currentStep5/${_stepResults5.length}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => setState(() => _isAutoTesting5 = false),
+                    icon: const Icon(Icons.stop, size: 16),
+                    label: const Text('停止'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          Row(
+            children: [
+              Icon(Icons.bug_report, color: _debugMode5 ? Colors.orange : Colors.grey, size: 20),
+              const SizedBox(width: 4),
+              Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode5 ? Colors.orange : Colors.grey)),
+              Switch(
+                value: _debugMode5,
+                onChanged: _isAutoTesting5 ? null : (value) => setState(() => _debugMode5 = value),
+                activeColor: Colors.orange,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: ListView.builder(
+                itemCount: _stepResults5.length,
+                itemBuilder: (context, index) {
+                  final step = _stepResults5[index];
+                  return _buildTestStepItem(step, index + 1 == _currentStep5);
+                },
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isAutoTesting5 ? null : () => _startAutoTest5(state),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('开始自动测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkstation6Content(TestState state) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_isAutoTesting6)
+            Container(
+              padding: const EdgeInsets.all(12),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '工位6测试中... 步骤 $_currentStep6/${_stepResults6.length}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.blue.shade700,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => setState(() => _isAutoTesting6 = false),
+                    icon: const Icon(Icons.stop, size: 16),
+                    label: const Text('停止'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          Row(
+            children: [
+              Icon(Icons.bug_report, color: _debugMode6 ? Colors.orange : Colors.grey, size: 20),
+              const SizedBox(width: 4),
+              Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode6 ? Colors.orange : Colors.grey)),
+              Switch(
+                value: _debugMode6,
+                onChanged: _isAutoTesting6 ? null : (value) => setState(() => _debugMode6 = value),
+                activeColor: Colors.orange,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: ListView.builder(
+                itemCount: _stepResults6.length,
+                itemBuilder: (context, index) {
+                  final step = _stepResults6[index];
+                  return _buildTestStepItem(step, index + 1 == _currentStep6);
+                },
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isAutoTesting6 ? null : () => _startAutoTest6(state),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('开始自动测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -4512,327 +4824,6 @@ class _SNScanResult {
   _SNScanResult.fromMAC(String mac) : sn = null, bluetoothAddress = mac, isMacMode = true;
 }
 
-// ==================== 工位4、5、6 超声后测试 ====================
-
-// ========== 工位4: 超声后射频图像测试 ==========
-Widget _buildWorkstation4Content(TestState state) {
-  return Padding(
-    padding: const EdgeInsets.all(20),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 测试进行中提示
-        if (_isAutoTesting4)
-          Container(
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '工位4测试中... 步骤 $_currentStep4/${_stepResults4.length}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.blue.shade700,
-                    ),
-                  ),
-                ),
-                ElevatedButton.icon(
-                  onPressed: _stopAutoTest4,
-                  icon: const Icon(Icons.stop, size: 16),
-                  label: const Text('停止'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-        // 调试模式开关
-        Row(
-          children: [
-            Icon(Icons.bug_report, color: _debugMode4 ? Colors.orange : Colors.grey, size: 20),
-            const SizedBox(width: 4),
-            Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode4 ? Colors.orange : Colors.grey)),
-            Switch(
-              value: _debugMode4,
-              onChanged: _isAutoTesting4 ? null : (value) => setState(() => _debugMode4 = value),
-              activeColor: Colors.orange,
-            ),
-            if (_debugMode4)
-              Text('(失败后可跳过)', style: TextStyle(fontSize: 11, color: Colors.orange.shade700)),
-          ],
-        ),
-        const SizedBox(height: 8),
-
-        // 测试步骤列表
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: ListView.builder(
-              itemCount: _stepResults4.length,
-              itemBuilder: (context, index) {
-                final step = _stepResults4[index];
-                return _buildTestStepItem(step, index + 1 == _currentStep4);
-              },
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // 开始测试按钮
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isAutoTesting4 ? null : () => _startAutoTest4(state),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('开始自动测试'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
-void _stopAutoTest4() {
-  setState(() {
-    _isAutoTesting4 = false;
-  });
-}
-
-// ========== 工位5: 超声后音频测试 ==========
-Widget _buildWorkstation5Content(TestState state) {
-  return Padding(
-    padding: const EdgeInsets.all(20),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_isAutoTesting5)
-          Container(
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.purple.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.purple.shade200),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.purple.shade700),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '工位5测试中... 步骤 $_currentStep5/${_stepResults5.length}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.purple.shade700,
-                    ),
-                  ),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => setState(() => _isAutoTesting5 = false),
-                  icon: const Icon(Icons.stop, size: 16),
-                  label: const Text('停止'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        Row(
-          children: [
-            Icon(Icons.bug_report, color: _debugMode5 ? Colors.orange : Colors.grey, size: 20),
-            const SizedBox(width: 4),
-            Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode5 ? Colors.orange : Colors.grey)),
-            Switch(
-              value: _debugMode5,
-              onChanged: _isAutoTesting5 ? null : (value) => setState(() => _debugMode5 = value),
-              activeColor: Colors.orange,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: ListView.builder(
-              itemCount: _stepResults5.length,
-              itemBuilder: (context, index) {
-                final step = _stepResults5[index];
-                return _buildTestStepItem(step, index + 1 == _currentStep5);
-              },
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isAutoTesting5 ? null : () => _startAutoTest5(state),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('开始自动测试'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.purple,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
-// ========== 工位6: 超声后电源外设测试 ==========
-Widget _buildWorkstation6Content(TestState state) {
-  return Padding(
-    padding: const EdgeInsets.all(20),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_isAutoTesting6)
-          Container(
-            padding: const EdgeInsets.all(12),
-            margin: const EdgeInsets.only(bottom: 16),
-            decoration: BoxDecoration(
-              color: Colors.teal.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.teal.shade200),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.teal.shade700),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '工位6测试中... 步骤 $_currentStep6/${_stepResults6.length}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.teal.shade700,
-                    ),
-                  ),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => setState(() => _isAutoTesting6 = false),
-                  icon: const Icon(Icons.stop, size: 16),
-                  label: const Text('停止'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        Row(
-          children: [
-            Icon(Icons.bug_report, color: _debugMode6 ? Colors.orange : Colors.grey, size: 20),
-            const SizedBox(width: 4),
-            Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode6 ? Colors.orange : Colors.grey)),
-            Switch(
-              value: _debugMode6,
-              onChanged: _isAutoTesting6 ? null : (value) => setState(() => _debugMode6 = value),
-              activeColor: Colors.orange,
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: ListView.builder(
-              itemCount: _stepResults6.length,
-              itemBuilder: (context, index) {
-                final step = _stepResults6[index];
-                return _buildTestStepItem(step, index + 1 == _currentStep6);
-              },
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: _isAutoTesting6 ? null : () => _startAutoTest6(state),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('开始自动测试'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-
 // SN扫描对话框（支持SN码和蓝牙MAC地址两种输入模式）
 class _SNScanDialog extends StatefulWidget {
   final String title;
@@ -4846,8 +4837,7 @@ class _SNScanDialog extends StatefulWidget {
 class _SNScanDialogState extends State<_SNScanDialog> {
   final TextEditingController _snController = TextEditingController();
   final TextEditingController _macController = TextEditingController();
-  bool _isMacMode = false;
-  String? _errorMessage;
+  InputMode _inputMode = InputMode.sn;
 
   @override
   void dispose() {
@@ -4856,221 +4846,155 @@ class _SNScanDialogState extends State<_SNScanDialog> {
     super.dispose();
   }
 
-  bool _isValidBluetoothAddress(String address) {
-    final regex = RegExp(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$');
-    return regex.hasMatch(address);
-  }
-
   void _handleConfirm() {
-    if (_isMacMode) {
-      final mac = _macController.text.trim();
-      if (mac.isEmpty) {
-        setState(() => _errorMessage = '请输入蓝牙 MAC 地址');
-        return;
-      }
-      if (!_isValidBluetoothAddress(mac)) {
-        setState(() => _errorMessage = 'MAC 地址格式不正确，例如: 48:08:EB:60:00:60');
-        return;
-      }
-      final formatted = mac.toUpperCase().replaceAll('-', ':');
-      Navigator.of(context).pop(_SNScanResult.fromMAC(formatted));
-    } else {
+    if (_inputMode == InputMode.sn) {
       final sn = _snController.text.trim();
       if (sn.isEmpty) {
-        setState(() => _errorMessage = '请输入或扫描 SN 码');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请输入SN码')),
+        );
         return;
       }
       Navigator.of(context).pop(_SNScanResult.fromSN(sn));
+    } else {
+      final mac = _macController.text.trim();
+      if (mac.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请输入蓝牙MAC地址')),
+        );
+        return;
+      }
+      Navigator.of(context).pop(_SNScanResult.fromMAC(mac));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: 480,
-        padding: const EdgeInsets.all(24),
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 400,
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[100],
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    _isMacMode ? Icons.bluetooth : Icons.qr_code_scanner,
-                    size: 28,
-                    color: Colors.orange[700],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.title,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _isMacMode ? '输入蓝牙 MAC 地址直接连接' : '请扫描或输入设备 SN 码',
-                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                ),
+            SegmentedButton<InputMode>(
+              segments: const [
+                ButtonSegment(value: InputMode.sn, label: Text('SN码'), icon: Icon(Icons.qr_code)),
+                ButtonSegment(value: InputMode.bluetooth, label: Text('蓝牙MAC'), icon: Icon(Icons.bluetooth)),
               ],
+              selected: {_inputMode},
+              onSelectionChanged: (Set<InputMode> newSelection) {
+                setState(() => _inputMode = newSelection.first);
+              },
             ),
-            const SizedBox(height: 20),
-            
-            // 模式切换
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() { _isMacMode = false; _errorMessage = null; }),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: !_isMacMode ? Colors.orange : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.qr_code_scanner, size: 16,
-                              color: !_isMacMode ? Colors.white : Colors.grey[600]),
-                            const SizedBox(width: 6),
-                            Text('SN 码',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: !_isMacMode ? Colors.white : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() { _isMacMode = true; _errorMessage = null; }),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _isMacMode ? Colors.blue : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.bluetooth, size: 16,
-                              color: _isMacMode ? Colors.white : Colors.grey[600]),
-                            const SizedBox(width: 6),
-                            Text('蓝牙 MAC',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: _isMacMode ? Colors.white : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            
-            // 输入框
-            if (_isMacMode)
+            const SizedBox(height: 16),
+            if (_inputMode == InputMode.sn)
               TextField(
-                controller: _macController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: '蓝牙 MAC 地址',
-                  hintText: '例如: 48:08:EB:60:00:60',
-                  prefixIcon: const Icon(Icons.bluetooth),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  errorText: _errorMessage,
-                  helperText: '直接输入蓝牙 MAC 地址，跳过 SN 查询',
+                controller: _snController,
+                decoration: const InputDecoration(
+                  labelText: 'SN码',
+                  hintText: '请扫描或输入SN码',
+                  border: OutlineInputBorder(),
                 ),
+                autofocus: true,
                 onSubmitted: (_) => _handleConfirm(),
               )
             else
               TextField(
-                controller: _snController,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'SN 码',
-                  hintText: '扫码枪扫描或手动输入',
-                  prefixIcon: const Icon(Icons.tag),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  errorText: _errorMessage,
-                  helperText: '输入 SN 码后将通过接口查询蓝牙地址',
+                controller: _macController,
+                decoration: const InputDecoration(
+                  labelText: '蓝牙MAC地址',
+                  hintText: '例如: 00:11:22:33:44:55',
+                  border: OutlineInputBorder(),
                 ),
+                autofocus: true,
                 onSubmitted: (_) => _handleConfirm(),
               ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: _handleConfirm,
-                  icon: const Icon(Icons.play_arrow),
-                  label: Text(_isMacMode ? '直接连接' : '开始测试'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isMacMode ? Colors.blue : Colors.orange,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        ElevatedButton(
+          onPressed: _handleConfirm,
+          child: const Text('确定'),
+        ),
+      ],
     );
   }
 }
 
-// 自动测试选项
-class _AutoTestOptions {
-  final ProductSNInfo productInfo;
+/// 简单的蓝牙地址输入对话框（用于单独测试某个方案）
+class _SimpleBluetoothInputDialog extends StatefulWidget {
   final BluetoothTestMethod method;
   
-  _AutoTestOptions({
-    required this.productInfo,
-    required this.method,
-  });
+  const _SimpleBluetoothInputDialog({required this.method});
+
+  @override
+  State<_SimpleBluetoothInputDialog> createState() => _SimpleBluetoothInputDialogState();
 }
 
-// 自动测试输入对话框（支持 SN 或 MAC 地址输入 + 方案选择）
+class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog> {
+  final TextEditingController _macController = TextEditingController();
+
+  @override
+  void dispose() {
+    _macController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('测试 ${_getMethodName(widget.method)}'),
+      content: TextField(
+        controller: _macController,
+        decoration: const InputDecoration(
+          labelText: '蓝牙MAC地址',
+          hintText: '例如: 00:11:22:33:44:55',
+        ),
+        autofocus: true,
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final mac = _macController.text.trim();
+            if (mac.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('请输入蓝牙MAC地址')),
+              );
+              return;
+            }
+            Navigator.of(context).pop(mac);
+          },
+          child: const Text('开始测试'),
+        ),
+      ],
+    );
+  }
+}
+
+String _getMethodName(BluetoothTestMethod method) {
+  switch (method) {
+    case BluetoothTestMethod.rfcommBind:
+      return 'RFCOMM Bind方案';
+    case BluetoothTestMethod.stableRfcomm:
+      return 'Stable RFCOMM方案';
+    case BluetoothTestMethod.nativeRfcomm:
+      return 'Native RFCOMM方案';
+  }
+}
+
+/// 自动化测试输入对话框
 class _AutoTestInputDialog extends StatefulWidget {
-  final BluetoothTestMethod defaultMethod;
-  
-  const _AutoTestInputDialog({required this.defaultMethod});
+  const _AutoTestInputDialog();
 
   @override
   State<_AutoTestInputDialog> createState() => _AutoTestInputDialogState();
@@ -5080,14 +5004,7 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
   final TextEditingController _macController = TextEditingController();
   BluetoothTestMethod _selectedMethod = BluetoothTestMethod.rfcommBind;
   ProductSNInfo? _productInfo;
-  bool _isLoading = false;
-  String? _errorMessage;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedMethod = widget.defaultMethod;
-  }
+  bool _isQuerying = false;
 
   @override
   void dispose() {
@@ -5095,278 +5012,30 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
     super.dispose();
   }
 
-  bool _isValidBluetoothAddress(String address) {
-    final regex = RegExp(r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$');
-    return regex.hasMatch(address);
-  }
-
-  Future<void> _showSNInput() async {
-    final productInfo = await showDialog<ProductSNInfo>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const SNInputDialog(),
-    );
-
-    if (productInfo != null) {
-      setState(() {
-        _productInfo = productInfo;
-        _errorMessage = null;
-      });
-    }
-  }
-
-  void _useManualMacInput() {
-    final address = _macController.text.trim();
-    
-    if (address.isEmpty) {
-      setState(() => _errorMessage = '请输入蓝牙 MAC 地址');
-      return;
-    }
-    
-    if (!_isValidBluetoothAddress(address)) {
-      setState(() => _errorMessage = 'MAC 地址格式不正确，例如: 48:08:EB:60:00:60');
-      return;
-    }
-    
-    final formattedAddress = address.toUpperCase().replaceAll('-', ':');
-    
-    setState(() {
-      _productInfo = ProductSNInfo(
-        snCode: '手动输入',
-        bluetoothAddress: formattedAddress,
-        macAddress: '',
-      );
-      _errorMessage = null;
-    });
-  }
-
-  void _handleConfirm() {
-    if (_productInfo == null) {
-      setState(() => _errorMessage = '请先输入 SN 码或蓝牙 MAC 地址');
-      return;
-    }
-    
-    Navigator.of(context).pop(_AutoTestOptions(
-      productInfo: _productInfo!,
-      method: _selectedMethod,
-    ));
-  }
-
-  String _getMethodName(BluetoothTestMethod method) {
-    switch (method) {
-      case BluetoothTestMethod.autoScan:
-        return '方案1: 扫描配对';
-      case BluetoothTestMethod.directConnect:
-        return '方案2: 直接连接';
-      case BluetoothTestMethod.rfcommBind:
-        return '方案3: RFCOMM Bind ⭐';
-      case BluetoothTestMethod.rfcommSocket:
-        return '方案4: RFCOMM Socket';
-      case BluetoothTestMethod.serial:
-        return '方案5: 串口设备';
-      case BluetoothTestMethod.commandLine:
-        return '方案6: 命令行工具';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Row(
-        children: [
-          Icon(Icons.bluetooth, color: Colors.blue[700]),
-          const SizedBox(width: 12),
-          const Text('自动测试设置'),
-        ],
-      ),
+      title: const Text('自动化测试配置'),
       content: SizedBox(
-        width: 450,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 输入方式选择
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.bluetooth, color: Colors.orange[700], size: 16),
-                        const SizedBox(width: 8),
-                        Text(
-                          '输入蓝牙 MAC 地址',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange[700],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _macController,
-                      decoration: InputDecoration(
-                        hintText: '例如: 48:08:EB:60:00:60',
-                        prefixIcon: const Icon(Icons.bluetooth, size: 20),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _useManualMacInput,
-                            icon: const Icon(Icons.check, size: 16),
-                            label: const Text('确认地址'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _showSNInput,
-                            icon: const Icon(Icons.qr_code, size: 16),
-                            label: const Text('SN码查询'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              
-              // 显示已获取的设备信息
-              if (_productInfo != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green[300]!),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.green[700], size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            '设备信息',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text('SN: ${_productInfo!.snCode}', style: const TextStyle(fontSize: 13)),
-                      Text('蓝牙: ${_productInfo!.bluetoothAddress}', style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
-                      if (_productInfo!.macAddress.isNotEmpty)
-                        Text('WiFi: ${_productInfo!.macAddress}', style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
-                    ],
-                  ),
-                ),
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('蓝牙连接方案', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            SegmentedButton<BluetoothTestMethod>(
+              segments: const [
+                ButtonSegment(value: BluetoothTestMethod.rfcommBind, label: Text('Bind')),
+                ButtonSegment(value: BluetoothTestMethod.stableRfcomm, label: Text('Stable')),
+                ButtonSegment(value: BluetoothTestMethod.nativeRfcomm, label: Text('Native')),
               ],
-              
-              // 错误信息
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.red[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red[300]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error, color: Colors.red[700], size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: TextStyle(fontSize: 12, color: Colors.red[700]),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              
-              // 方案选择
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.settings, color: Colors.blue[700], size: 16),
-                        const SizedBox(width: 8),
-                        Text(
-                          '选择连接方案',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue[700],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<BluetoothTestMethod>(
-                      value: _selectedMethod,
-                      isDense: true,
-                      decoration: InputDecoration(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      items: BluetoothTestMethod.values.map((method) {
-                        return DropdownMenuItem(
-                          value: method,
-                          child: Text(_getMethodName(method), style: const TextStyle(fontSize: 13)),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => _selectedMethod = value);
-                        }
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+              selected: {_selectedMethod},
+              onSelectionChanged: (Set<BluetoothTestMethod> newSelection) {
+                setState(() => _selectedMethod = newSelection.first);
+              },
+            ),
+          ],
         ),
       ),
       actions: [
@@ -5375,19 +5044,15 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
           child: const Text('取消'),
         ),
         ElevatedButton(
-          onPressed: _productInfo != null ? _handleConfirm : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-          ),
-          child: const Text('开始自动测试'),
+          onPressed: () => Navigator.of(context).pop(_selectedMethod),
+          child: const Text('开始测试'),
         ),
       ],
     );
   }
 }
 
-/// IMU校准进度弹窗
+/// IMU校准对话框
 class _IMUCalibrationDialog extends StatefulWidget {
   final TestState state;
   final LogState logState;
@@ -5398,7 +5063,7 @@ class _IMUCalibrationDialog extends StatefulWidget {
     required this.state,
     required this.logState,
     required this.command,
-    required this.useLinuxBluetooth,
+    this.useLinuxBluetooth = false,
   });
 
   @override
@@ -5406,24 +5071,14 @@ class _IMUCalibrationDialog extends StatefulWidget {
 }
 
 class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
-  int _currentStatus = -1;
-  String _statusText = '正在发送校准命令...';
-  bool _isRunning = true;
+  bool _isRunning = false;
   bool _isSuccess = false;
   bool _isFailed = false;
-  StreamSubscription<Uint8List>? _subscription;
+  String _statusText = '等待开始...';
+  int _retryCount = 0;
+  static const int _maxRetries = 30;
+  StreamSubscription? _subscription;
   Timer? _timeoutTimer;
-  int _sendAttempt = 0;
-
-  static const _maxRetries = 10;
-  static const _listenTimeout = Duration(seconds: 30);
-
-  static const _statusSteps = [
-    {'status': 0x00, 'label': '设备IMU启动中', 'icon': Icons.power_settings_new},
-    {'status': 0x01, 'label': '设备朝向检测中', 'icon': Icons.screen_rotation},
-    {'status': 0x02, 'label': '设备校准中', 'icon': Icons.tune},
-    {'status': 0x03, 'label': '设备校准完成', 'icon': Icons.check_circle},
-  ];
 
   @override
   void initState() {
@@ -5439,128 +5094,93 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
   }
 
   Future<void> _startCalibration() async {
-    if (widget.useLinuxBluetooth) {
-      await _startBluetoothPolling();
-    } else {
-      final sent = await _sendCommand();
-      if (sent) {
-        _startSerialListening();
-      } else {
-        _onMaxRetriesExceeded();
-      }
-    }
-  }
-
-  Future<bool> _sendCommand() async {
-    try {
-      return await widget.state.serialService.sendCommand(
-        widget.command,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-    } catch (e) {
-      widget.logState.error('❌ 发送IMU校准命令失败: $e', type: LogType.debug);
-      return false;
-    }
-  }
-
-  Future<Map<String, dynamic>?> _btSendAndWait() async {
-    try {
-      return await widget.state.sendCommandViaLinuxBluetooth(
-        widget.command,
-        timeout: _listenTimeout,
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-    } catch (e) {
-      widget.logState.warning('⚠️ 蓝牙命令异常: $e', type: LogType.debug);
-      return null;
-    }
-  }
-
-  void _startSerialListening() {
-    _subscription?.cancel();
-    _resetTimeout();
-
-    _subscription = widget.state.serialService.pushPayloadStream.listen((payload) {
-      if (!_isRunning) return;
-      if (payload.isEmpty || payload[0] != ProductionTestCommands.cmdIMUCalibration) return;
-      _resetTimeout();
-      _handlePayload(payload);
+    setState(() {
+      _isRunning = true;
+      _statusText = '正在发送IMU校准命令...';
     });
-  }
 
-  Future<void> _startBluetoothPolling() async {
-    while (_isRunning) {
-      if (_sendAttempt > 0) {
-        widget.logState.info('🔄 蓝牙: 重新发送IMU校准命令 (${_sendAttempt + 1}/$_maxRetries)', type: LogType.debug);
-        if (mounted) {
-          setState(() => _statusText = '重新发送校准命令 (${_sendAttempt + 1}/$_maxRetries)...');
-        }
+    widget.logState.info('📤 发送IMU校准命令...', type: LogType.debug);
+
+    try {
+      Map<String, dynamic>? response;
+      if (widget.useLinuxBluetooth) {
+        response = await widget.state.sendCommandViaLinuxBluetooth(
+          widget.command,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+      } else {
+        response = await widget.state.sendCommand(
+          widget.command,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
       }
-
-      final response = await _btSendAndWait();
-      if (!_isRunning) return;
 
       if (response == null || response.containsKey('error')) {
-        _sendAttempt++;
-        if (_sendAttempt >= _maxRetries) {
-          _onMaxRetriesExceeded();
-          return;
-        }
-        continue;
+        widget.logState.error('❌ IMU校准命令发送失败', type: LogType.debug);
+        _onMaxRetriesExceeded();
+        return;
       }
 
-      if (response.containsKey('payload') && response['payload'] != null) {
-        final payload = response['payload'] as Uint8List;
-        final done = _handlePayload(payload);
-        if (done) return;
-      }
-    }
-  }
+      widget.logState.info('✅ IMU校准命令已发送，等待校准完成...', type: LogType.debug);
+      setState(() => _statusText = '等待校准完成...');
 
-  void _resetTimeout() {
-    _timeoutTimer?.cancel();
-    _timeoutTimer = Timer(_listenTimeout, () {
-      if (!_isRunning) return;
-      widget.logState.warning('⏱️ IMU校准: 监听超时', type: LogType.debug);
-      _retryOrFail();
-    });
-  }
-
-  void _retryOrFail() {
-    _subscription?.cancel();
-    _sendAttempt++;
-    if (_sendAttempt >= _maxRetries) {
+      _startListeningForPush();
+      _startTimeout();
+    } catch (e) {
+      widget.logState.error('❌ IMU校准异常: $e', type: LogType.debug);
       _onMaxRetriesExceeded();
+    }
+  }
+
+  void _startListeningForPush() {
+    if (widget.useLinuxBluetooth) {
+      _subscription = widget.state.linuxBluetoothPushStream.listen((push) {
+        _handlePush(push);
+      });
     } else {
-      _sendCommand().then((sent) {
-        if (sent) _startSerialListening();
+      _subscription = widget.state.pushStream.listen((push) {
+        _handlePush(push);
       });
     }
   }
 
-  bool _handlePayload(Uint8List payload) {
-    if (payload.length < 2) return false;
-    
-    final status = payload[1];
-    widget.logState.info('📊 IMU校准状态: 0x${status.toRadixString(16).toUpperCase()}', type: LogType.debug);
-
-    if (mounted) {
-      setState(() {
-        _currentStatus = status;
-        final step = _statusSteps.firstWhere((s) => s['status'] == status, orElse: () => {'label': '未知状态'});
-        _statusText = step['label'] as String;
-      });
+  void _handlePush(Map<String, dynamic> push) {
+    if (push['moduleId'] == ProductionTestCommands.moduleId &&
+        push['messageId'] == ProductionTestCommands.messageId) {
+      final payload = push['payload'];
+      if (payload is List && payload.isNotEmpty) {
+        final cmdId = payload[0];
+        if (cmdId == 0x0D) {
+          if (payload.length >= 2) {
+            final status = payload[1];
+            if (status == 0x00) {
+              widget.logState.success('✅ IMU校准成功！', type: LogType.debug);
+              _onSuccess();
+            } else {
+              _retryCount++;
+              widget.logState.warning('⚠️ IMU校准中... ($status) 重试 $_retryCount/$_maxRetries', type: LogType.debug);
+              setState(() => _statusText = 'IMU校准中... 重试 $_retryCount/$_maxRetries');
+              if (_retryCount >= _maxRetries) {
+                _onMaxRetriesExceeded();
+              }
+            }
+          }
+        }
+      }
     }
+  }
 
-    if (status == 0x03) {
-      widget.logState.success('✅ IMU校准完成', type: LogType.debug);
-      _onSuccess();
-      return true;
-    }
-
-    return false;
+  void _startTimeout() {
+    _timeoutTimer = Timer(const Duration(seconds: 60), () {
+      if (_isRunning && !_isSuccess) {
+        widget.logState.error('❌ IMU校准超时', type: LogType.debug);
+        _onMaxRetriesExceeded();
+      }
+    });
   }
 
   void _onSuccess() {
@@ -5606,54 +5226,33 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_isRunning && !_isSuccess && !_isFailed)
-              const CircularProgressIndicator(),
-            if (_isSuccess)
-              Icon(Icons.check_circle, color: Colors.green, size: 48),
-            if (_isFailed)
-              Icon(Icons.error, color: Colors.red, size: 48),
+            if (_isRunning)
+              const CircularProgressIndicator()
+            else if (_isSuccess)
+              Icon(Icons.check_circle, color: Colors.green.shade600, size: 64)
+            else if (_isFailed)
+              Icon(Icons.error, color: Colors.red.shade600, size: 64),
             const SizedBox(height: 16),
             Text(
               _statusText,
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 16,
                 fontWeight: FontWeight.w500,
-                color: _isSuccess ? Colors.green : (_isFailed ? Colors.red : Colors.black87),
+                color: _isSuccess
+                    ? Colors.green.shade700
+                    : _isFailed
+                        ? Colors.red.shade700
+                        : Colors.blue.shade700,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 16),
-            ..._statusSteps.map((step) {
-              final status = step['status'] as int;
-              final label = step['label'] as String;
-              final icon = step['icon'] as IconData;
-              final isActive = _currentStatus == status;
-              final isPassed = _currentStatus > status;
-              
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Icon(
-                      isPassed ? Icons.check_circle : (isActive ? icon : Icons.radio_button_unchecked),
-                      color: isPassed ? Colors.green : (isActive ? Colors.blue : Colors.grey),
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isPassed ? Colors.green : (isActive ? Colors.blue : Colors.grey),
-                          fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
+            if (_isRunning) ...[
+              const SizedBox(height: 12),
+              Text(
+                '请保持设备静止',
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ),
+            ],
           ],
         ),
       ),
