@@ -24,8 +24,8 @@ class _ConnectionSelectorState extends State<ConnectionSelector> {
       builder: (context, state, _) {
         if (state.testMode.usesSerialPort) {
           return _buildSerialPortSelector(state);
-        } else if (state.testMode == TestMode.preUltrasoundComplete) {
-          // 超声前整机产测不显示SPP连接UI，在自动测试中处理
+        } else if (state.testMode == TestMode.completeDevice) {
+          // 整机产测不显示SPP连接UI，在自动测试中处理
           return const SizedBox.shrink();
         } else {
           return _buildSppDeviceSelector(state);

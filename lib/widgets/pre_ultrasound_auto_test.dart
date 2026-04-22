@@ -18,7 +18,7 @@ import '../services/gtp_protocol.dart';
 import 'sn_input_dialog.dart';
 import 'bluetooth_test_options_dialog.dart';
 
-/// 超声前整机产测自动测试组件 - 支持三个工位
+/// 整机产测自动测试组件 - 支持六个工位
 class PreUltrasoundAutoTest extends StatefulWidget {
   const PreUltrasoundAutoTest({super.key});
 
@@ -32,7 +32,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   // 调试模式（失败后可跳过继续执行）
   bool _debugMode1 = false;
   bool _debugMode3 = false;
-  
+  bool _debugMode4 = false;
+  bool _debugMode5 = false;
+  bool _debugMode6 = false;
+
   // 工位3：跳过充电电流测试（使用GPIB采集）
   bool _skipChargingCurrentTest3 = false;
   
@@ -45,7 +48,35 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   String? _scannedSN1;
   BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommBind;
   final BydMesService _mesService1 = BydMesService();
-  
+
+  // 工位4状态
+  bool _isAutoTesting4 = false;
+  int _currentStep4 = 0;
+  final List<TestStepResult> _stepResults4 = [];
+  ProductSNInfo? _productInfo4;
+  String? _deviceIP4;
+  String? _scannedSN4;
+  BluetoothTestMethod _selectedMethod4 = BluetoothTestMethod.rfcommBind;
+  final BydMesService _mesService4 = BydMesService();
+
+  // 工位5状态
+  bool _isAutoTesting5 = false;
+  int _currentStep5 = 0;
+  final List<TestStepResult> _stepResults5 = [];
+  ProductSNInfo? _productInfo5;
+  String? _scannedSN5;
+  BluetoothTestMethod _selectedMethod5 = BluetoothTestMethod.rfcommBind;
+  final BydMesService _mesService5 = BydMesService();
+
+  // 工位6状态
+  bool _isAutoTesting6 = false;
+  int _currentStep6 = 0;
+  final List<TestStepResult> _stepResults6 = [];
+  ProductSNInfo? _productInfo6;
+  String? _scannedSN6;
+  BluetoothTestMethod _selectedMethod6 = BluetoothTestMethod.rfcommBind;
+  final BydMesService _mesService6 = BydMesService();
+
   // 工位3状态
   bool _isAutoTesting3 = false;
   int _currentStep3 = 0;
@@ -59,9 +90,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _initializeSteps1();
     _initializeSteps3();
+    _initializeSteps4();
+    _initializeSteps5();
+    _initializeSteps6();
   }
 
   @override
@@ -133,7 +167,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                         Icon(Icons.devices_other, color: Colors.orange.shade700, size: 28),
                         const SizedBox(width: 12),
                         Text(
-                          '超声前整机产测',
+                          '整机产测',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -150,6 +184,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                       unselectedLabelColor: Colors.grey,
                       indicatorColor: Colors.orange.shade700,
                       indicatorWeight: 3,
+                      isScrollable: true,
                       tabs: const [
                         Tab(
                           icon: Icon(Icons.wifi),
@@ -162,6 +197,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                         Tab(
                           icon: Icon(Icons.power),
                           text: '工位3: 电源外设',
+                        ),
+                        Tab(
+                          icon: Icon(Icons.signal_cellular_alt),
+                          text: '工位4: 超声后射频图像',
+                        ),
+                        Tab(
+                          icon: Icon(Icons.hearing),
+                          text: '工位5: 超声后音频',
+                        ),
+                        Tab(
+                          icon: Icon(Icons.electrical_services),
+                          text: '工位6: 超声后电源外设',
                         ),
                       ],
                     ),
@@ -180,6 +227,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                     _buildWorkstation2Content(state),
                     // 工位3: 电源外设测试
                     _buildWorkstation3Content(state),
+                    // 工位4: 超声后射频图像测试
+                    _buildWorkstation4Content(state),
+                    // 工位5: 超声后音频测试
+                    _buildWorkstation5Content(state),
+                    // 工位6: 超声后电源外设测试
+                    _buildWorkstation6Content(state),
                   ],
                 ),
               ),
@@ -3103,6 +3156,327 @@ class _SNScanResult {
   _SNScanResult.fromMAC(String mac) : sn = null, bluetoothAddress = mac, isMacMode = true;
 }
 
+// ==================== 工位4、5、6 超声后测试 ====================
+
+// ========== 工位4: 超声后射频图像测试 ==========
+Widget _buildWorkstation4Content(TestState state) {
+  return Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 测试进行中提示
+        if (_isAutoTesting4)
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.shade200),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '工位4测试中... 步骤 $_currentStep4/${_stepResults4.length}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.blue.shade700,
+                    ),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: _stopAutoTest4,
+                  icon: const Icon(Icons.stop, size: 16),
+                  label: const Text('停止'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // 调试模式开关
+        Row(
+          children: [
+            Icon(Icons.bug_report, color: _debugMode4 ? Colors.orange : Colors.grey, size: 20),
+            const SizedBox(width: 4),
+            Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode4 ? Colors.orange : Colors.grey)),
+            Switch(
+              value: _debugMode4,
+              onChanged: _isAutoTesting4 ? null : (value) => setState(() => _debugMode4 = value),
+              activeColor: Colors.orange,
+            ),
+            if (_debugMode4)
+              Text('(失败后可跳过)', style: TextStyle(fontSize: 11, color: Colors.orange.shade700)),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // 测试步骤列表
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: ListView.builder(
+              itemCount: _stepResults4.length,
+              itemBuilder: (context, index) {
+                final step = _stepResults4[index];
+                return _buildTestStepItem(step, index + 1 == _currentStep4);
+              },
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // 开始测试按钮
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isAutoTesting4 ? null : () => _startAutoTest4(state),
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('开始自动测试'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+void _stopAutoTest4() {
+  setState(() {
+    _isAutoTesting4 = false;
+  });
+}
+
+// ========== 工位5: 超声后音频测试 ==========
+Widget _buildWorkstation5Content(TestState state) {
+  return Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_isAutoTesting5)
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.purple.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.purple.shade200),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.purple.shade700),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '工位5测试中... 步骤 $_currentStep5/${_stepResults5.length}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.purple.shade700,
+                    ),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => setState(() => _isAutoTesting5 = false),
+                  icon: const Icon(Icons.stop, size: 16),
+                  label: const Text('停止'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Row(
+          children: [
+            Icon(Icons.bug_report, color: _debugMode5 ? Colors.orange : Colors.grey, size: 20),
+            const SizedBox(width: 4),
+            Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode5 ? Colors.orange : Colors.grey)),
+            Switch(
+              value: _debugMode5,
+              onChanged: _isAutoTesting5 ? null : (value) => setState(() => _debugMode5 = value),
+              activeColor: Colors.orange,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: ListView.builder(
+              itemCount: _stepResults5.length,
+              itemBuilder: (context, index) {
+                final step = _stepResults5[index];
+                return _buildTestStepItem(step, index + 1 == _currentStep5);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isAutoTesting5 ? null : () => _startAutoTest5(state),
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('开始自动测试'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+// ========== 工位6: 超声后电源外设测试 ==========
+Widget _buildWorkstation6Content(TestState state) {
+  return Padding(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_isAutoTesting6)
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.teal.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.teal.shade200),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.teal.shade700),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '工位6测试中... 步骤 $_currentStep6/${_stepResults6.length}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.teal.shade700,
+                    ),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => setState(() => _isAutoTesting6 = false),
+                  icon: const Icon(Icons.stop, size: 16),
+                  label: const Text('停止'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Row(
+          children: [
+            Icon(Icons.bug_report, color: _debugMode6 ? Colors.orange : Colors.grey, size: 20),
+            const SizedBox(width: 4),
+            Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode6 ? Colors.orange : Colors.grey)),
+            Switch(
+              value: _debugMode6,
+              onChanged: _isAutoTesting6 ? null : (value) => setState(() => _debugMode6 = value),
+              activeColor: Colors.orange,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: ListView.builder(
+              itemCount: _stepResults6.length,
+              itemBuilder: (context, index) {
+                final step = _stepResults6[index];
+                return _buildTestStepItem(step, index + 1 == _currentStep6);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _isAutoTesting6 ? null : () => _startAutoTest6(state),
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('开始自动测试'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
 // SN扫描对话框（支持SN码和蓝牙MAC地址两种输入模式）
 class _SNScanDialog extends StatefulWidget {
   final String title;
@@ -3654,5 +4028,202 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
         ),
       ],
     );
+  }
+
+  // ========== 工位4: 开始自动测试 ==========
+  Future<void> _startAutoTest4(TestState state) async {
+    final logState = context.read<LogState>();
+
+    // 绑定 MES 日志
+    _mesService4.setLogState(logState);
+
+    // 显示 SN 扫描对话框
+    final scanResult = await showDialog<_SNScanResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _SNScanDialog(title: '工位4: 超声后射频图像测试'),
+    );
+
+    if (scanResult == null) {
+      logState.info('用户取消了扫描');
+      return;
+    }
+
+    // 重置步骤状态
+    setState(() {
+      _initializeSteps4();
+      _currentStep4 = 1;
+      _isAutoTesting4 = true;
+      _scannedSN4 = scanResult.sn;
+      if (scanResult.isMacMode) {
+        _productInfo4 = ProductSNInfo(
+          snCode: '',
+          bluetoothAddress: scanResult.bluetoothAddress!,
+          macAddress: '',
+        );
+      }
+    });
+
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔧 工位4: 超声后射频图像测试');
+    logState.info('   SN: ${_scannedSN4 ?? "MAC直连"}');
+    logState.info('   蓝牙: ${_productInfo4?.bluetoothAddress ?? "未知"}');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // TODO: 实现工位4的完整测试流程
+    // 1. 蓝牙连接
+    // 2. BYD MES 开始
+    // 3. WIFI连接热点并获取IP
+    // 4. 拉距测试WIFI
+    // 5. 光源箱不同照度光敏值
+    // 6. 摄像头位置与IMU位置标定
+    // 7. 纯色画面测试
+    // 8. IMU校准(棋盘格)
+    // 9. IMU值测试
+    // 10. ISO12233图卡MTF测试
+    // 11. 24色色卡色彩误差测试
+    // 12. 产测结束
+
+    await Future.delayed(const Duration(seconds: 2));
+    logState.info('工位4测试流程框架已搭建，详细测试步骤待实现');
+
+    setState(() {
+      _isAutoTesting4 = false;
+    });
+  }
+
+  // ========== 工位5: 开始自动测试 ==========
+  Future<void> _startAutoTest5(TestState state) async {
+    final logState = context.read<LogState>();
+
+    _mesService5.setLogState(logState);
+
+    final scanResult = await showDialog<_SNScanResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _SNScanDialog(title: '工位5: 超声后音频测试'),
+    );
+
+    if (scanResult == null) return;
+
+    setState(() {
+      _initializeSteps5();
+      _currentStep5 = 1;
+      _isAutoTesting5 = true;
+      _scannedSN5 = scanResult.sn;
+      if (scanResult.isMacMode) {
+        _productInfo5 = ProductSNInfo(
+          snCode: '',
+          bluetoothAddress: scanResult.bluetoothAddress!,
+          macAddress: '',
+        );
+      }
+    });
+
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔧 工位5: 超声后音频测试');
+    logState.info('   SN: ${_scannedSN5 ?? "MAC直连"}');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // TODO: 实现工位5的音频测试流程
+
+    await Future.delayed(const Duration(seconds: 2));
+    logState.info('工位5测试流程框架已搭建，详细测试步骤待实现');
+
+    setState(() {
+      _isAutoTesting5 = false;
+    });
+  }
+
+  // ========== 工位6: 开始自动测试 ==========
+  Future<void> _startAutoTest6(TestState state) async {
+    final logState = context.read<LogState>();
+
+    _mesService6.setLogState(logState);
+
+    final scanResult = await showDialog<_SNScanResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _SNScanDialog(title: '工位6: 超声后电源外设测试'),
+    );
+
+    if (scanResult == null) return;
+
+    setState(() {
+      _initializeSteps6();
+      _currentStep6 = 1;
+      _isAutoTesting6 = true;
+      _scannedSN6 = scanResult.sn;
+      if (scanResult.isMacMode) {
+        _productInfo6 = ProductSNInfo(
+          snCode: '',
+          bluetoothAddress: scanResult.bluetoothAddress!,
+          macAddress: '',
+        );
+      }
+    });
+
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('🔧 工位6: 超声后电源外设测试');
+    logState.info('   SN: ${_scannedSN6 ?? "MAC直连"}');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // TODO: 实现工位6的电源外设测试流程
+
+    await Future.delayed(const Duration(seconds: 2));
+    logState.info('工位6测试流程框架已搭建，详细测试步骤待实现');
+
+    setState(() {
+      _isAutoTesting6 = false;
+    });
+  }
+
+  // ========== 工位4: 初始化步骤 ==========
+  void _initializeSteps4() {
+    _stepResults4.clear();
+    _stepResults4.addAll([
+      TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: 'WIFI连接热点并获取IP', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '拉距测试WIFI', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '光源箱不同照度光敏值(亮/暗)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '摄像头位置与IMU位置标定', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '纯色画面测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'IMU校准(棋盘格)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'IMU值测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: 'ISO12233图卡MTF测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '24色色卡色彩误差测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '产测结束', status: TestStepStatus.pending),
+    ]);
+  }
+
+  // ========== 工位5: 初始化步骤 ==========
+  void _initializeSteps5() {
+    _stepResults5.clear();
+    _stepResults5.addAll([
+      TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: 'MIC测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '扬声器测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '音频环路测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '产测结束', status: TestStepStatus.pending),
+    ]);
+  }
+
+  // ========== 工位6: 初始化步骤 ==========
+  void _initializeSteps6() {
+    _stepResults6.clear();
+    _stepResults6.addAll([
+      TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '设备电压测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '电量检测测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '充电状态测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '充电电流测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: 'LED灯测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: '触控测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: '佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '产测结束', status: TestStepStatus.pending),
+    ]);
   }
 }

@@ -5,13 +5,9 @@ enum TestMode {
   /// 单板产测（通过串口）
   singleBoard,
   
-  /// Pre-ultrasound complete device testing (via SPP Bluetooth)
-  /// 超声前整机产测（通过SPP蓝牙）
-  preUltrasoundComplete,
-
-  /// Formal complete device testing (via SPP Bluetooth)
-  /// 正式整机产测（通过SPP蓝牙）
-  formalComplete,
+  /// Complete device testing (via SPP Bluetooth)
+  /// 整机产测（通过SPP蓝牙）
+  completeDevice,
 }
 
 /// Extension methods for TestMode
@@ -21,10 +17,8 @@ extension TestModeExtension on TestMode {
     switch (this) {
       case TestMode.singleBoard:
         return '单板产测';
-      case TestMode.preUltrasoundComplete:
-        return '超声前整机产测';
-      case TestMode.formalComplete:
-        return '正式整机产测';
+      case TestMode.completeDevice:
+        return '整机产测';
     }
   }
   
@@ -33,10 +27,8 @@ extension TestModeExtension on TestMode {
     switch (this) {
       case TestMode.singleBoard:
         return '通过串口连接进行单板测试';
-      case TestMode.preUltrasoundComplete:
-        return '超声前整机产测（通过SPP蓝牙）';
-      case TestMode.formalComplete:
-        return '正式整机产测（通过SPP蓝牙）';
+      case TestMode.completeDevice:
+        return '整机产测（通过SPP蓝牙）';
     }
   }
   
@@ -45,10 +37,8 @@ extension TestModeExtension on TestMode {
     switch (this) {
       case TestMode.singleBoard:
         return 'developer_board';
-      case TestMode.preUltrasoundComplete:
+      case TestMode.completeDevice:
         return 'devices_other';
-      case TestMode.formalComplete:
-        return 'verified';
     }
   }
   
@@ -59,12 +49,21 @@ extension TestModeExtension on TestMode {
   
   /// Check if uses SPP Bluetooth
   bool get usesSppBluetooth {
-    return this == TestMode.preUltrasoundComplete ||
-           this == TestMode.formalComplete;
+    return this == TestMode.completeDevice;
   }
   
   /// Check if is complete device mode
   bool get isCompleteDeviceMode {
     return usesSppBluetooth;
+  }
+
+  /// Get workstation count for this mode
+  int get workstationCount {
+    switch (this) {
+      case TestMode.singleBoard:
+        return 0;
+      case TestMode.completeDevice:
+        return 6; // 6 workstations for complete device testing
+    }
   }
 }
