@@ -4825,16 +4825,44 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
         return false;
     }
 
-    logState.info('   请按压 $touchType 区域...');
-    
-    int? baseCdc;
-    int? pressCdc;
-    int maxDelta = 0;
     const threshold = 500;
+    
+    // 获取基线CDC值
+    logState.info('📡 获取右Touch基线 CDC 值...');
+    final baselineCommand = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchRight, TouchTestConfig.rightAreaUntouched,
+    );
+    final baselineResponse = await state.sendCommandViaLinuxBluetooth(
+      baselineCommand,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    int? baselineCdc;
+    if (baselineResponse != null && !baselineResponse.containsKey('error')) {
+      final payload = baselineResponse['payload'];
+      if (payload is Uint8List) {
+        final touchResult = ProductionTestCommands.parseTouchResponse(payload);
+        if (touchResult != null && touchResult['success'] == true) {
+          baselineCdc = touchResult['cdcValue'] as int?;
+          logState.info('✅ 基线 CDC 值: $baselineCdc');
+        }
+      }
+    }
+    
+    if (baselineCdc == null) {
+      logState.error('❌ 获取基线CDC值失败');
+      return false;
+    }
+    
+    // 轮询检测触摸
+    logState.info('👆 请按压 $touchType 区域...');
     const maxAttempts = 50;
+    int maxDelta = 0;
     
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      final command = ProductionTestCommands.createGetCDCCommand(areaId);
+      final command = ProductionTestCommands.createTouchCommand(TouchTestConfig.touchRight, areaId);
       final response = await state.sendCommandViaLinuxBluetooth(
         command,
         timeout: const Duration(seconds: 2),
@@ -4844,22 +4872,20 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
 
       if (response != null && !response.containsKey('error')) {
         final payload = response['payload'];
-        if (payload is List && payload.length >= 3) {
-          final cdcValue = (payload[1] << 8) | payload[2];
-          
-          if (baseCdc == null) {
-            baseCdc = cdcValue;
-            logState.info('   基准CDC值: $baseCdc');
-          } else {
-            final delta = (cdcValue - baseCdc).abs();
-            if (delta > maxDelta) {
-              maxDelta = delta;
-              pressCdc = cdcValue;
-            }
-            
-            if (delta > threshold) {
-              logState.success('✅ $touchType 检测到按压！变化量: $delta (CDC: $baseCdc → $pressCdc)');
-              return true;
+        if (payload is Uint8List) {
+          final touchResult = ProductionTestCommands.parseTouchResponse(payload);
+          if (touchResult != null && touchResult['success'] == true) {
+            final cdcValue = touchResult['cdcValue'] as int?;
+            if (cdcValue != null) {
+              final delta = (cdcValue - baselineCdc).abs();
+              if (delta > maxDelta) {
+                maxDelta = delta;
+              }
+              
+              if (delta > threshold) {
+                logState.success('✅ $touchType 检测到按压！变化量: $delta (CDC: $baselineCdc → $cdcValue)');
+                return true;
+              }
             }
           }
         }
@@ -4875,36 +4901,63 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
   /// 工位6 步骤13: 佩戴检测
   Future<bool> _testWearDetection6(TestState state, LogState logState) async {
     logState.info('👤 佩戴检测测试');
-    logState.info('   请靠近佩戴区域...');
     
-    const maxAttempts = 30;
+    // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, TouchTestConfig.leftActionWearDetect,
+    );
+    logState.info('📤 发送佩戴检测命令...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
     
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      final command = ProductionTestCommands.createGetWearStatusCommand();
-      final response = await state.sendCommandViaLinuxBluetooth(
-        command,
-        timeout: const Duration(seconds: 2),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-
-      if (response != null && !response.containsKey('error')) {
-        final payload = response['payload'];
-        if (payload is List && payload.length >= 2) {
-          final wearStatus = payload[1];
-          
-          if (wearStatus == 0x01) {
-            logState.success('✅ 检测到佩戴！');
-            return true;
-          }
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 佩戴检测命令发送失败');
+      return false;
+    }
+    
+    logState.info('✅ 命令已发送，开始监听佩戴检测推送...');
+    logState.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...');
+    
+    // 监听佩戴检测推送
+    final completer = Completer<bool>();
+    StreamSubscription<Map<String, dynamic>>? subscription;
+    Timer? timeoutTimer;
+    
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!completer.isCompleted) {
+        logState.error('❌ 佩戴检测超时（15秒）');
+        subscription?.cancel();
+        completer.complete(false);
+      }
+    });
+    
+    subscription = state.gtpResponseStream.listen((gtpResponse) {
+      if (completer.isCompleted) return;
+      
+      if (gtpResponse.containsKey('payload')) {
+        final payload = gtpResponse['payload'] as Uint8List;
+        
+        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft && 
+            payload[2] == TouchTestConfig.leftActionWearDetect) {
+          logState.success('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+          timeoutTimer?.cancel();
+          subscription?.cancel();
+          completer.complete(true);
         }
       }
-      
-      await Future.delayed(const Duration(milliseconds: 200));
-    }
-
-    logState.error('❌ 未检测到佩戴');
-    return false;
+    });
+    
+    final result = await completer.future;
+    subscription?.cancel();
+    timeoutTimer?.cancel();
+    return result;
   }
 
   /// 工位6 步骤14-16: 左触控测试（点击/双击/长按）
@@ -4913,44 +4966,75 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
     
     final int expectedEvent;
     switch (touchType) {
-      case '点击': expectedEvent = 0x01; break;
-      case '双击': expectedEvent = 0x02; break;
-      case '长按': expectedEvent = 0x03; break;
+      case '点击': expectedEvent = TouchTestConfig.leftActionClick; break;
+      case '双击': expectedEvent = TouchTestConfig.leftActionDoubleClick; break;
+      case '长按': expectedEvent = TouchTestConfig.leftActionLongPress; break;
       default:
         logState.error('❌ 未知触控类型: $touchType');
         return false;
     }
 
-    logState.info('   请执行左触控$touchType操作...');
+    // 发送左触控命令: 0x07 + 0x00(左Touch) + 0x00(未触摸/查询)
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, TouchTestConfig.leftActionUntouched,
+    );
+    logState.info('📤 发送左触控事件命令...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
     
-    const maxAttempts = 50;
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 左触控事件命令发送失败');
+      return false;
+    }
     
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      final command = ProductionTestCommands.createGetTouchEventCommand();
-      final response = await state.sendCommandViaLinuxBluetooth(
-        command,
-        timeout: const Duration(seconds: 2),
-        moduleId: ProductionTestCommands.moduleId,
-        messageId: ProductionTestCommands.messageId,
-      );
-
-      if (response != null && !response.containsKey('error')) {
-        final payload = response['payload'];
-        if (payload is List && payload.length >= 2) {
-          final eventType = payload[1];
+    logState.info('✅ 命令已发送，开始监听$touchType事件推送...');
+    logState.info('👂 等待$touchType事件...');
+    
+    // 监听触控事件推送
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    Timer? timeoutTimer;
+    
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!completer.isCompleted) {
+        logState.error('❌ 左触控$touchType检测超时（15秒）');
+        subscription?.cancel();
+        completer.complete(false);
+      }
+    });
+    
+    subscription = state.linuxBluetoothDataStream.listen((data) {
+      if (completer.isCompleted) return;
+      
+      try {
+        final gtpResponse = GTPProtocol.parseGTPResponse(data);
+        if (gtpResponse != null && gtpResponse.containsKey('payload')) {
+          final payload = gtpResponse['payload'] as Uint8List;
           
-          if (eventType == expectedEvent) {
+          // 检查左触控事件: 0x07 + 0x00 + expectedEvent
+          if (payload.length >= 3 && 
+              payload[0] == ProductionTestCommands.cmdTouch && 
+              payload[1] == TouchTestConfig.touchLeft && 
+              payload[2] == expectedEvent) {
             logState.success('✅ 检测到左触控$touchType！');
-            return true;
+            timeoutTimer?.cancel();
+            subscription?.cancel();
+            completer.complete(true);
           }
         }
+      } catch (e) {
+        logState.warning('⚠️ 解析推送数据出错: $e');
       }
-      
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
-
-    logState.error('❌ 未检测到左触控$touchType');
-    return false;
+    });
+    
+    final result = await completer.future;
+    subscription?.cancel();
+    timeoutTimer?.cancel();
+    return result;
   }
 
   /// 工位6 步骤17: 产测结束
