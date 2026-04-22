@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -4035,9 +4036,10 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
     final logState = context.read<LogState>();
 
     // 绑定 MES 日志
-    _mesService4.setLogState(logState);
+    _mesService4.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
 
     // 显示 SN 扫描对话框
+    if (!mounted) return;
     final scanResult = await showDialog<_SNScanResult>(
       context: context,
       barrierDismissible: false,
@@ -4045,51 +4047,267 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
     );
 
     if (scanResult == null) {
-      logState.info('用户取消了扫描');
+      logState.warning('用户取消输入');
       return;
     }
 
-    // 重置步骤状态
-    setState(() {
-      _initializeSteps4();
-      _currentStep4 = 1;
-      _isAutoTesting4 = true;
+    // 处理SN或MAC模式
+    if (scanResult.isMacMode) {
+      final mac = scanResult.bluetoothAddress!;
+      logState.info('📋 蓝牙MAC直连模式: $mac');
+      _scannedSN4 = null;
+      _productInfo4 = ProductSNInfo(
+        snCode: 'MAC直连',
+        bluetoothAddress: mac,
+        macAddress: '',
+      );
+    } else {
       _scannedSN4 = scanResult.sn;
-      if (scanResult.isMacMode) {
-        _productInfo4 = ProductSNInfo(
-          snCode: '',
-          bluetoothAddress: scanResult.bluetoothAddress!,
-          macAddress: '',
-        );
+      logState.info('📋 扫码SN: $_scannedSN4');
+      logState.info('📡 查询SN信息获取蓝牙MAC...');
+      try {
+        final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN4!);
+        if (productInfo == null) {
+          logState.error('❌ SN查询失败，无法获取蓝牙地址');
+          return;
+        }
+        _productInfo4 = productInfo;
+        logState.info('✅ 获取到设备信息:');
+        logState.info('   SN: ${productInfo.snCode}');
+        logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
+        logState.info('   WiFi MAC: ${productInfo.macAddress}');
+        
+        if (productInfo.bluetoothAddress.isEmpty) {
+          logState.error('❌ 蓝牙地址为空，无法继续');
+          return;
+        }
+      } catch (e) {
+        logState.error('❌ SN查询异常: $e');
+        return;
       }
+    }
+
+    setState(() {
+      _isAutoTesting4 = true;
+      _currentStep4 = 0;
+      _initializeSteps4();
     });
 
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.info('🔧 工位4: 超声后射频图像测试');
     logState.info('   SN: ${_scannedSN4 ?? "MAC直连"}');
-    logState.info('   蓝牙: ${_productInfo4?.bluetoothAddress ?? "未知"}');
+    logState.info('   蓝牙: ${_productInfo4!.bluetoothAddress}');
+    logState.info('   连接方案: ${_getMethodName(_selectedMethod4)}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    // TODO: 实现工位4的完整测试流程
-    // 1. 蓝牙连接
-    // 2. BYD MES 开始
-    // 3. WIFI连接热点并获取IP
-    // 4. 拉距测试WIFI
-    // 5. 光源箱不同照度光敏值
-    // 6. 摄像头位置与IMU位置标定
-    // 7. 纯色画面测试
-    // 8. IMU校准(棋盘格)
-    // 9. IMU值测试
-    // 10. ISO12233图卡MTF测试
-    // 11. 24色色卡色彩误差测试
-    // 12. 产测结束
+    bool hasFailure = false;
+    String? failItem;
+    String? failValue;
 
-    await Future.delayed(const Duration(seconds: 2));
-    logState.info('工位4测试流程框架已搭建，详细测试步骤待实现');
+    // 执行测试步骤
+    for (int i = 0; i < _stepResults4.length; i++) {
+      if (!_isAutoTesting4) break;
+
+      setState(() {
+        _currentStep4 = i;
+        _stepResults4[i].status = TestStepStatus.running;
+      });
+
+      bool success = false;
+      String? message;
+
+      try {
+        switch (i) {
+          case 0: // 蓝牙连接
+            logState.info('步骤1: 蓝牙连接');
+            success = await _testBluetoothConnection4(state, logState);
+            message = success ? '蓝牙连接正常' : '蓝牙连接失败';
+            if (success) {
+              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
+              try {
+                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
+                await state.sendCommandViaLinuxBluetooth(
+                  resetCommand,
+                  timeout: const Duration(seconds: 3),
+                  moduleId: ProductionTestCommands.moduleId,
+                );
+                logState.info('✅ 产测状态重置命令发送成功');
+              } catch (e) {
+                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
+              }
+            }
+            break;
+          case 1: // BYD MES 开始
+            logState.info('步骤2: BYD MES 开始');
+            if (_scannedSN4 != null && _scannedSN4!.isNotEmpty) {
+              final mesResult = await _mesService4.start(_scannedSN4!);
+              success = mesResult['success'] == true;
+              message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            } else {
+              logState.info('   ⏭️ MAC直连模式，跳过 MES Start');
+              success = true;
+              message = 'MAC直连模式，跳过 MES';
+            }
+            break;
+          case 2: // WIFI连接热点并获取IP
+            logState.info('步骤3: WIFI连接热点并获取IP');
+            final ip = await _testWiFiConnection4(state, logState);
+            success = ip != null && ip.isNotEmpty;
+            _deviceIP4 = ip;
+            message = success ? 'WiFi连接成功，IP: $ip' : 'WiFi连接失败';
+            break;
+          case 3: // 拉距测试WIFI
+            logState.info('步骤4: 拉距测试WIFI');
+            success = await _testWiFiRange4(state, logState);
+            message = success ? 'WiFi拉距测试通过' : 'WiFi拉距测试失败';
+            break;
+          case 4: // 光源箱不同照度光敏值
+            logState.info('步骤5: 光源箱不同照度光敏值(亮/暗)');
+            success = await _testLightSensorBrightDark4(state, logState);
+            message = success ? '光敏值测试通过' : '光敏值测试失败';
+            break;
+          case 5: // 摄像头位置与IMU位置标定
+            logState.info('步骤6: 摄像头位置与IMU位置标定');
+            success = await _testCameraIMUCalibration4(state, logState);
+            message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
+            break;
+          case 6: // 纯色画面测试
+            logState.info('步骤7: 纯色画面测试');
+            success = await _testPureColorStream4(state, logState);
+            message = success ? '纯色画面测试通过' : '纯色画面测试失败';
+            break;
+          case 7: // IMU校准(棋盘格)
+            logState.info('步骤8: IMU校准(棋盘格)');
+            success = await _testIMUCalibration4(state, logState);
+            message = success ? 'IMU校准完成' : 'IMU校准失败';
+            break;
+          case 8: // IMU值测试
+            logState.info('步骤9: IMU值测试');
+            success = await _testIMUSensor(state, logState);
+            message = success ? '获取到IMU值' : 'IMU传感器测试失败';
+            break;
+          case 9: // ISO12233图卡MTF测试
+            logState.info('步骤10: ISO12233图卡MTF测试');
+            success = await _testISO12233MTF4(state, logState);
+            message = success ? 'MTF测试通过' : 'MTF测试失败';
+            break;
+          case 10: // 24色色卡色彩误差测试
+            logState.info('步骤11: 24色色卡色彩误差测试');
+            success = await _testColorChart4(state, logState);
+            message = success ? '色彩误差测试通过' : '色彩误差测试失败';
+            break;
+          case 11: // 产测结束
+            logState.info('步骤12: 产测结束');
+            success = await _testProductionEnd4(state, logState);
+            message = success ? '产测结束命令发送成功' : '产测结束命令失败';
+            break;
+        }
+      } catch (e) {
+        success = false;
+        message = '测试异常: $e';
+        logState.error('步骤${i + 1}异常: $e');
+      }
+
+      if (!_isAutoTesting4) break;
+
+      setState(() {
+        _stepResults4[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
+        _stepResults4[i].message = message;
+      });
+
+      if (!success) {
+        logState.error('❌ 步骤${i + 1}失败: $message');
+        if (!hasFailure) {
+          hasFailure = true;
+          failItem = _stepResults4[i].name;
+          failValue = message ?? '测试未通过';
+        }
+        // 测试失败时调用产测状态更新命令 (0xFF 0x01)
+        logState.info('🔄 发送产测状态更新命令 (0xFF 0x01) - 测试失败...');
+        try {
+          final failCommand = ProductionTestCommands.createEndTestCommand(opt: 0x01);
+          await state.sendCommandViaLinuxBluetooth(
+            failCommand,
+            timeout: const Duration(seconds: 3),
+            moduleId: ProductionTestCommands.moduleId,
+          );
+          logState.info('✅ 产测状态更新命令发送成功');
+        } catch (e) {
+          logState.warning('⚠️ 产测状态更新命令发送失败: $e');
+        }
+        if (!_debugMode4) {
+          break;
+        } else {
+          logState.warning('⚠️ 调试模式：跳过失败步骤，继续执行...');
+        }
+      } else {
+        logState.info('✅ 步骤${i + 1}通过: $message');
+      }
+
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
 
     setState(() {
       _isAutoTesting4 = false;
     });
+
+    final passedCount = _stepResults4.where((s) => s.status == TestStepStatus.passed).length;
+    final totalCount = _stepResults4.length;
+    final allPassed = passedCount == totalCount;
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // BYD MES 结果上报 + SN状态更新
+    if (_scannedSN4 != null && _scannedSN4!.isNotEmpty) {
+      if (allPassed) {
+        logState.info('🏭 调用 BYD MES 良品完成接口...');
+        final mesResult = await _mesService4.complete(_scannedSN4!);
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 良品完成成功');
+        } else {
+          logState.error('❌ BYD MES 良品完成失败: ${mesResult['error']}');
+        }
+        
+        logState.info('📤 更新SN状态为「超声后射频图像测试通过」(status=6)...');
+        final statusUpdated = await SNApiService.updateSNStatus(
+          sn: _scannedSN4!,
+          status: 6,
+          logState: logState,
+        );
+        if (statusUpdated) {
+          logState.success('✅ SN状态更新成功');
+        } else {
+          logState.error('❌ SN状态更新失败');
+        }
+        
+        logState.info('🎉 工位4测试全部通过！($passedCount/$totalCount)');
+      } else {
+        logState.info('🏭 调用 BYD MES 不良品接口...');
+        final mesResult = await _mesService4.ncComplete(
+          _scannedSN4!,
+          ncCode: 'NC004',
+          ncContext: '超声后射频图像测试不良',
+          failItem: failItem ?? '未知',
+          failValue: failValue ?? '测试未通过',
+        );
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 不良品上报成功');
+        } else {
+          logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
+        }
+        logState.warning('⚠️ 工位4测试完成，通过 $passedCount/$totalCount 项');
+      }
+    } else {
+      if (allPassed) {
+        logState.info('🎉 工位4测试全部通过！($passedCount/$totalCount)（MAC直连模式，跳过MES上报）');
+      } else {
+        logState.warning('⚠️ 工位4测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
+      }
+    }
+    
+    logState.info('🔄 发送设备重启命令...');
+    await _sendDeviceRestartCommand(state, logState);
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
   // ========== 工位5: 开始自动测试 ==========
@@ -4139,43 +4357,1371 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
   Future<void> _startAutoTest6(TestState state) async {
     final logState = context.read<LogState>();
 
-    _mesService6.setLogState(logState);
+    _mesService6.setOnLog((msg) => logState.info('[MES] $msg', type: LogType.debug));
 
+    if (!mounted) return;
     final scanResult = await showDialog<_SNScanResult>(
       context: context,
       barrierDismissible: false,
       builder: (context) => _SNScanDialog(title: '工位6: 超声后电源外设测试'),
     );
 
-    if (scanResult == null) return;
+    if (scanResult == null) {
+      logState.warning('用户取消输入');
+      return;
+    }
+
+    if (scanResult.isMacMode) {
+      final mac = scanResult.bluetoothAddress!;
+      logState.info('📋 蓝牙MAC直连模式: $mac');
+      _scannedSN6 = null;
+      _productInfo6 = ProductSNInfo(
+        snCode: 'MAC直连',
+        bluetoothAddress: mac,
+        macAddress: '',
+      );
+    } else {
+      _scannedSN6 = scanResult.sn;
+      logState.info('📋 扫码SN: $_scannedSN6');
+      logState.info('📡 查询SN信息获取蓝牙MAC...');
+      try {
+        final productInfo = await ProductSNApi.getProductSNInfo(_scannedSN6!);
+        if (productInfo == null) {
+          logState.error('❌ SN查询失败，无法获取蓝牙地址');
+          return;
+        }
+        _productInfo6 = productInfo;
+        logState.info('✅ 获取到设备信息:');
+        logState.info('   SN: ${productInfo.snCode}');
+        logState.info('   蓝牙地址: ${productInfo.bluetoothAddress}');
+        logState.info('   WiFi MAC: ${productInfo.macAddress}');
+        
+        if (productInfo.bluetoothAddress.isEmpty) {
+          logState.error('❌ 蓝牙地址为空，无法继续');
+          return;
+        }
+      } catch (e) {
+        logState.error('❌ SN查询异常: $e');
+        return;
+      }
+    }
 
     setState(() {
-      _initializeSteps6();
-      _currentStep6 = 1;
       _isAutoTesting6 = true;
-      _scannedSN6 = scanResult.sn;
-      if (scanResult.isMacMode) {
-        _productInfo6 = ProductSNInfo(
-          snCode: '',
-          bluetoothAddress: scanResult.bluetoothAddress!,
-          macAddress: '',
-        );
-      }
+      _currentStep6 = 0;
+      _initializeSteps6();
     });
 
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.info('🔧 工位6: 超声后电源外设测试');
     logState.info('   SN: ${_scannedSN6 ?? "MAC直连"}');
+    logState.info('   蓝牙: ${_productInfo6!.bluetoothAddress}');
+    logState.info('   连接方案: ${_getMethodName(_selectedMethod6)}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-    // TODO: 实现工位6的电源外设测试流程
+    bool hasFailure = false;
+    String? failItem;
+    String? failValue;
 
-    await Future.delayed(const Duration(seconds: 2));
-    logState.info('工位6测试流程框架已搭建，详细测试步骤待实现');
+    for (int i = 0; i < _stepResults6.length; i++) {
+      if (!_isAutoTesting6) break;
 
-    setState(() {
-      _isAutoTesting6 = false;
-    });
+      setState(() {
+        _currentStep6 = i;
+        _stepResults6[i].status = TestStepStatus.running;
+      });
+
+      bool success = false;
+      String? message;
+
+      try {
+        switch (i) {
+          case 0:
+            logState.info('步骤1: 蓝牙连接');
+            success = await _testBluetoothConnection6(state, logState);
+            message = success ? '蓝牙连接正常' : '蓝牙连接失败';
+            if (success) {
+              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
+              try {
+                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
+                await state.sendCommandViaLinuxBluetooth(resetCommand, timeout: const Duration(seconds: 3), moduleId: ProductionTestCommands.moduleId);
+                logState.info('✅ 产测状态重置命令发送成功');
+              } catch (e) {
+                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
+              }
+            }
+            break;
+          case 1:
+            logState.info('步骤2: BYD MES 开始');
+            if (_scannedSN6 != null && _scannedSN6!.isNotEmpty) {
+              final mesResult = await _mesService6.start(_scannedSN6!);
+              success = mesResult['success'] == true;
+              message = success ? 'MES Start 成功' : 'MES Start 失败: ${mesResult['error'] ?? '未知错误'}';
+            } else {
+              logState.info('   ⏭️ MAC直连模式，跳过 MES Start');
+              success = true;
+              message = 'MAC直连模式，跳过 MES';
+            }
+            break;
+          case 2:
+            logState.info('步骤3: 电池电压测试(>2.5V)');
+            final voltageResult = await _testBatteryVoltage6(state, logState);
+            success = voltageResult['success'] == true;
+            message = voltageResult['message'] as String?;
+            break;
+          case 3:
+            logState.info('步骤4: 电量检测(0~100%)');
+            final batteryResult = await _testBattery6(state, logState);
+            success = batteryResult['success'] == true;
+            message = batteryResult['message'] as String?;
+            break;
+          case 4:
+            logState.info('步骤5: 充电状态(充电中)');
+            final chargeResult = await _testChargeStatus6(state, logState);
+            success = chargeResult['success'] == true;
+            message = chargeResult['message'] as String?;
+            break;
+          case 5:
+            logState.info('步骤6: LED外侧亮');
+            success = await _testLED6(state, logState, isOuter: true, turnOn: true);
+            message = success ? 'LED外侧亮测试通过' : 'LED外侧亮测试失败';
+            break;
+          case 6:
+            logState.info('步骤7: LED外侧关');
+            success = await _testLED6(state, logState, isOuter: true, turnOn: false);
+            message = success ? 'LED外侧关测试通过' : 'LED外侧关测试失败';
+            break;
+          case 7:
+            logState.info('步骤8: LED内侧亮');
+            success = await _testLED6(state, logState, isOuter: false, turnOn: true);
+            message = success ? 'LED内侧亮测试通过' : 'LED内侧亮测试失败';
+            break;
+          case 8:
+            logState.info('步骤9: LED内侧关');
+            success = await _testLED6(state, logState, isOuter: false, turnOn: false);
+            message = success ? 'LED内侧关测试通过' : 'LED内侧关测试失败';
+            break;
+          case 9:
+            logState.info('步骤10: 右Touch-TK1(>500)');
+            success = await _testTouch6(state, logState, touchType: 'TK1');
+            message = success ? 'TK1测试通过' : 'TK1测试失败';
+            break;
+          case 10:
+            logState.info('步骤11: 右Touch-TK2(>500)');
+            success = await _testTouch6(state, logState, touchType: 'TK2');
+            message = success ? 'TK2测试通过' : 'TK2测试失败';
+            break;
+          case 11:
+            logState.info('步骤12: 右Touch-TK3(>500)');
+            success = await _testTouch6(state, logState, touchType: 'TK3');
+            message = success ? 'TK3测试通过' : 'TK3测试失败';
+            break;
+          case 12:
+            logState.info('步骤13: 佩戴检测');
+            success = await _testWearDetection6(state, logState);
+            message = success ? '佩戴检测通过' : '佩戴检测失败';
+            break;
+          case 13:
+            logState.info('步骤14: 左触控-点击');
+            success = await _testLeftTouch6(state, logState, touchType: '点击');
+            message = success ? '左触控点击测试通过' : '左触控点击测试失败';
+            break;
+          case 14:
+            logState.info('步骤15: 左触控-双击');
+            success = await _testLeftTouch6(state, logState, touchType: '双击');
+            message = success ? '左触控双击测试通过' : '左触控双击测试失败';
+            break;
+          case 15:
+            logState.info('步骤16: 左触控-长按');
+            success = await _testLeftTouch6(state, logState, touchType: '长按');
+            message = success ? '左触控长按测试通过' : '左触控长按测试失败';
+            break;
+          case 16:
+            logState.info('步骤17: 产测结束');
+            success = await _testProductionEnd6(state, logState);
+            message = success ? '产测结束命令发送成功' : '产测结束命令失败';
+            break;
+        }
+      } catch (e) {
+        success = false;
+        message = '测试异常: $e';
+        logState.error('步骤${i + 1}异常: $e');
+      }
+
+      if (!_isAutoTesting6) break;
+
+      setState(() {
+        _stepResults6[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
+        _stepResults6[i].message = message;
+      });
+
+      if (!success) {
+        logState.error('❌ 步骤${i + 1}失败: $message');
+        if (!hasFailure) {
+          hasFailure = true;
+          failItem = _stepResults6[i].name;
+          failValue = message ?? '测试未通过';
+        }
+        logState.info('🔄 发送产测状态更新命令 (0xFF 0x01) - 测试失败...');
+        try {
+          final failCommand = ProductionTestCommands.createEndTestCommand(opt: 0x01);
+          await state.sendCommandViaLinuxBluetooth(failCommand, timeout: const Duration(seconds: 3), moduleId: ProductionTestCommands.moduleId);
+          logState.info('✅ 产测状态更新命令发送成功');
+        } catch (e) {
+          logState.warning('⚠️ 产测状态更新命令发送失败: $e');
+        }
+        if (!_debugMode6) {
+          break;
+        } else {
+          logState.warning('⚠️ 调试模式：跳过失败步骤，继续执行...');
+        }
+      } else {
+        logState.info('✅ 步骤${i + 1}通过: $message');
+      }
+
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    setState(() => _isAutoTesting6 = false);
+
+    final passedCount = _stepResults6.where((s) => s.status == TestStepStatus.passed).length;
+    final totalCount = _stepResults6.length;
+    final allPassed = passedCount == totalCount;
+    
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    if (_scannedSN6 != null && _scannedSN6!.isNotEmpty) {
+      if (allPassed) {
+        logState.info('🏭 调用 BYD MES 良品完成接口...');
+        final mesResult = await _mesService6.complete(_scannedSN6!);
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 良品完成成功');
+        } else {
+          logState.error('❌ BYD MES 良品完成失败: ${mesResult['error']}');
+        }
+        
+        logState.info('📤 更新SN状态为「超声后电源外设测试通过」(status=8)...');
+        final statusUpdated = await SNApiService.updateSNStatus(sn: _scannedSN6!, status: 8, logState: logState);
+        if (statusUpdated) {
+          logState.success('✅ SN状态更新成功');
+        } else {
+          logState.error('❌ SN状态更新失败');
+        }
+        
+        logState.info('🎉 工位6测试全部通过！($passedCount/$totalCount)');
+      } else {
+        logState.info('🏭 调用 BYD MES 不良品接口...');
+        final mesResult = await _mesService6.ncComplete(_scannedSN6!, ncCode: 'NC006', ncContext: '超声后电源外设测试不良', failItem: failItem ?? '未知', failValue: failValue ?? '测试未通过');
+        if (mesResult['success'] == true) {
+          logState.success('✅ BYD MES 不良品上报成功');
+        } else {
+          logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
+        }
+        logState.warning('⚠️ 工位6测试完成，通过 $passedCount/$totalCount 项');
+      }
+    } else {
+      if (allPassed) {
+        logState.info('🎉 工位6测试全部通过！($passedCount/$totalCount)（MAC直连模式，跳过MES上报）');
+      } else {
+        logState.warning('⚠️ 工位6测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
+      }
+    }
+    
+    logState.info('🔄 发送设备重启命令...');
+    await _sendDeviceRestartCommand(state, logState);
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  }
+
+  // ========== 工位6: 测试步骤实现 ==========
+
+  /// 工位6 步骤1: 蓝牙连接
+  Future<bool> _testBluetoothConnection6(TestState state, LogState logState) async {
+    try {
+      if (_productInfo6 == null) {
+        logState.error('设备信息未获取');
+        return false;
+      }
+      
+      final bluetoothAddress = _productInfo6!.bluetoothAddress;
+      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      
+      final options = BluetoothTestOptions(
+        deviceAddress: bluetoothAddress,
+        method: _selectedMethod6,
+      );
+      
+      final success = await state.testLinuxBluetoothWithOptions(options);
+      return success;
+    } catch (e) {
+      logState.error('蓝牙连接测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位6 步骤3: 电池电压测试(>2.5V)
+  Future<Map<String, dynamic>> _testBatteryVoltage6(TestState state, LogState logState) async {
+    logState.info('🔋 电池电压测试');
+    
+    final command = ProductionTestCommands.createGetVoltageCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取电压失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 3) {
+      final payloadBytes = Uint8List.fromList(payload.cast<int>());
+      final voltageMv = ProductionTestCommands.parseVoltageResponse(payloadBytes);
+      
+      if (voltageMv != null) {
+        final voltageV = voltageMv / 1000.0;
+        final threshold = 2.5;
+        final success = voltageV > threshold;
+        
+        logState.info('   电压值: ${voltageV.toStringAsFixed(2)}V (阈值: >${threshold}V)');
+        
+        return {
+          'success': success,
+          'message': '电压: ${voltageV.toStringAsFixed(2)}V ${success ? "✅" : "❌ ≤${threshold}V"}',
+        };
+      }
+    }
+
+    return {'success': false, 'message': '电压数据解析失败'};
+  }
+
+  /// 工位6 步骤4: 电量检测(0~100%)
+  Future<Map<String, dynamic>> _testBattery6(TestState state, LogState logState) async {
+    logState.info('🔋 电量检测测试');
+    
+    final command = ProductionTestCommands.createGetCurrentCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取电量失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 2) {
+      final battery = payload[1];
+      final success = battery >= 0 && battery <= 100;
+      
+      logState.info('   电量值: $battery% (范围: 0~100%)');
+      
+      return {
+        'success': success,
+        'message': '电量: $battery% ${success ? "✅" : "❌"}',
+      };
+    }
+
+    return {'success': false, 'message': '电量数据解析失败'};
+  }
+
+  /// 工位6 步骤5: 充电状态(充电中)
+  Future<Map<String, dynamic>> _testChargeStatus6(TestState state, LogState logState) async {
+    logState.info('🔌 充电状态测试');
+    
+    final command = ProductionTestCommands.createGetChargeStatusCommand();
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      return {'success': false, 'message': '获取充电状态失败'};
+    }
+
+    final payload = response['payload'];
+    if (payload is List && payload.length >= 3) {
+      final chargeStatus = payload[1];
+      final isCharging = chargeStatus == 0x01;
+      
+      final chargeDesc = isCharging ? '充电中' : (chargeStatus == 0x02 ? '未充电' : '状态: 0x${chargeStatus.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+      
+      logState.info('   充电状态: $chargeDesc');
+      
+      return {
+        'success': isCharging,
+        'message': '$chargeDesc ${isCharging ? "✅" : "❌"}',
+      };
+    }
+
+    return {'success': false, 'message': '充电状态数据解析失败'};
+  }
+
+  /// 工位6 步骤6-9: LED测试
+  Future<bool> _testLED6(TestState state, LogState logState, {required bool isOuter, required bool turnOn}) async {
+    final ledName = isOuter ? '外侧' : '内侧';
+    final action = turnOn ? '亮' : '关';
+    logState.info('💡 LED灯($ledName)$action');
+    
+    final ledNumber = isOuter ? ProductionTestCommands.ledOuter : ProductionTestCommands.ledInner;
+    final ledState = turnOn ? ProductionTestCommands.ledOn : ProductionTestCommands.ledOff;
+    
+    final command = ProductionTestCommands.createControlLEDCommand(ledNumber, ledState);
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ LED控制命令失败');
+      return false;
+    }
+
+    if (!mounted) return false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(turnOn ? Icons.lightbulb : Icons.lightbulb_outline, color: turnOn ? Colors.amber : Colors.grey),
+            const SizedBox(width: 12),
+            Text('LED灯($ledName)$action'),
+          ],
+        ),
+        content: Text('请确认LED灯($ledName)是否已$action？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('未通过')),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('通过'),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed == true;
+  }
+
+  /// 工位6 步骤10-12: 右触控测试（TK1/TK2/TK3，阈值>500）
+  Future<bool> _testTouch6(TestState state, LogState logState, {required String touchType}) async {
+    logState.info('👆 右触控-$touchType测试');
+    
+    final int areaId;
+    switch (touchType) {
+      case 'TK1': areaId = TouchTestConfig.rightAreaTK1; break;
+      case 'TK2': areaId = TouchTestConfig.rightAreaTK2; break;
+      case 'TK3': areaId = TouchTestConfig.rightAreaTK3; break;
+      default: 
+        logState.error('❌ 未知触控区域: $touchType');
+        return false;
+    }
+
+    logState.info('   请按压 $touchType 区域...');
+    
+    int? baseCdc;
+    int? pressCdc;
+    int maxDelta = 0;
+    const threshold = 500;
+    const maxAttempts = 50;
+    
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      final command = ProductionTestCommands.createGetCDCCommand(areaId);
+      final response = await state.sendCommandViaLinuxBluetooth(
+        command,
+        timeout: const Duration(seconds: 2),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'];
+        if (payload is List && payload.length >= 3) {
+          final cdcValue = (payload[1] << 8) | payload[2];
+          
+          if (baseCdc == null) {
+            baseCdc = cdcValue;
+            logState.info('   基准CDC值: $baseCdc');
+          } else {
+            final delta = (cdcValue - baseCdc).abs();
+            if (delta > maxDelta) {
+              maxDelta = delta;
+              pressCdc = cdcValue;
+            }
+            
+            if (delta > threshold) {
+              logState.success('✅ $touchType 检测到按压！变化量: $delta (CDC: $baseCdc → $pressCdc)');
+              return true;
+            }
+          }
+        }
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
+    logState.error('❌ $touchType 未检测到有效按压，最大变化量: $maxDelta (阈值: >$threshold)');
+    return false;
+  }
+
+  /// 工位6 步骤13: 佩戴检测
+  Future<bool> _testWearDetection6(TestState state, LogState logState) async {
+    logState.info('👤 佩戴检测测试');
+    logState.info('   请靠近佩戴区域...');
+    
+    const maxAttempts = 30;
+    
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      final command = ProductionTestCommands.createGetWearStatusCommand();
+      final response = await state.sendCommandViaLinuxBluetooth(
+        command,
+        timeout: const Duration(seconds: 2),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'];
+        if (payload is List && payload.length >= 2) {
+          final wearStatus = payload[1];
+          
+          if (wearStatus == 0x01) {
+            logState.success('✅ 检测到佩戴！');
+            return true;
+          }
+        }
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+
+    logState.error('❌ 未检测到佩戴');
+    return false;
+  }
+
+  /// 工位6 步骤14-16: 左触控测试（点击/双击/长按）
+  Future<bool> _testLeftTouch6(TestState state, LogState logState, {required String touchType}) async {
+    logState.info('👆 左触控-$touchType测试');
+    
+    final int expectedEvent;
+    switch (touchType) {
+      case '点击': expectedEvent = 0x01; break;
+      case '双击': expectedEvent = 0x02; break;
+      case '长按': expectedEvent = 0x03; break;
+      default:
+        logState.error('❌ 未知触控类型: $touchType');
+        return false;
+    }
+
+    logState.info('   请执行左触控$touchType操作...');
+    
+    const maxAttempts = 50;
+    
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      final command = ProductionTestCommands.createGetTouchEventCommand();
+      final response = await state.sendCommandViaLinuxBluetooth(
+        command,
+        timeout: const Duration(seconds: 2),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response != null && !response.containsKey('error')) {
+        final payload = response['payload'];
+        if (payload is List && payload.length >= 2) {
+          final eventType = payload[1];
+          
+          if (eventType == expectedEvent) {
+            logState.success('✅ 检测到左触控$touchType！');
+            return true;
+          }
+        }
+      }
+      
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
+    logState.error('❌ 未检测到左触控$touchType');
+    return false;
+  }
+
+  /// 工位6 步骤17: 产测结束
+  Future<bool> _testProductionEnd6(TestState state, LogState logState) async {
+    try {
+      logState.info('🏁 发送产测结束命令...');
+      
+      final passedCount = _stepResults6.take(_stepResults6.length - 1)
+          .where((s) => s.status == TestStepStatus.passed).length;
+      final totalCount = _stepResults6.length - 1;
+      final allPassed = passedCount == totalCount;
+      
+      final opt = allPassed ? 0x00 : 0x01;
+      final command = ProductionTestCommands.createEndTestCommand(opt: opt);
+      logState.info('   测试结果: ${allPassed ? "通过" : "失败"} ($passedCount/$totalCount)');
+      
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+          
+          if (response != null && !response.containsKey('error')) {
+            logState.success('✅ 产测结束命令发送成功');
+            return true;
+          }
+        } catch (e) {
+          logState.warning('⚠️ 发送命令异常: $e');
+        }
+      }
+      
+      logState.error('❌ 3次重试后产测结束命令仍失败');
+      return false;
+    } catch (e) {
+      logState.error('产测结束异常: $e');
+      return false;
+    }
+  }
+
+  // ========== 工位4: 测试步骤实现 ==========
+
+  /// 工位4 步骤1: 蓝牙连接
+  Future<bool> _testBluetoothConnection4(TestState state, LogState logState) async {
+    try {
+      if (_productInfo4 == null) {
+        logState.error('设备信息未获取');
+        return false;
+      }
+      
+      final bluetoothAddress = _productInfo4!.bluetoothAddress;
+      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      
+      final options = BluetoothTestOptions(
+        deviceAddress: bluetoothAddress,
+        method: _selectedMethod4,
+      );
+      
+      final success = await state.testLinuxBluetoothWithOptions(options);
+      return success;
+    } catch (e) {
+      logState.error('蓝牙连接测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤3: WIFI连接热点并获取IP
+  Future<String?> _testWiFiConnection4(TestState state, LogState logState) async {
+    try {
+      logState.info('📶 开始连接WiFi热点...');
+      
+      final String ssid = WiFiConfig.defaultSSID;
+      final String password = WiFiConfig.defaultPassword;
+      
+      if (ssid.isEmpty) {
+        logState.error('❌ WiFi SSID未配置');
+        return null;
+      }
+
+      logState.info('   SSID: $ssid');
+
+      final ssidBytes = ssid.codeUnits + [0x00];
+      final pwdBytes = password.codeUnits + [0x00];
+      final wifiPayload = [...ssidBytes, ...pwdBytes];
+      final wifiCommand = ProductionTestCommands.createControlWifiCommand(0x05, data: wifiPayload);
+
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   WiFi重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            wifiCommand,
+            timeout: const Duration(seconds: 10),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+
+          if (response != null && !response.containsKey('error')) {
+            if (response.containsKey('payload') && response['payload'] != null) {
+              final responsePayload = response['payload'] as Uint8List;
+              final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x05);
+
+              if (wifiResult != null && wifiResult['success'] == true && wifiResult.containsKey('ip')) {
+                final deviceIP = wifiResult['ip'];
+                logState.success('✅ 获取到设备IP: $deviceIP');
+                return deviceIP;
+              }
+            }
+          }
+        } catch (e) {
+          logState.warning('⚠️ WiFi连接异常: $e');
+        }
+      }
+
+      logState.error('❌ WiFi连接失败');
+      return null;
+    } catch (e) {
+      logState.error('WiFi连接测试失败: $e');
+      return null;
+    }
+  }
+
+  /// 工位4 步骤4: WiFi拉距测试（参考WiFiRangeTestWidget）
+  Future<bool> _testWiFiRange4(TestState state, LogState logState) async {
+    if (_deviceIP4 == null || _deviceIP4!.isEmpty) {
+      logState.error('❌ 设备IP为空，无法进行拉距测试');
+      return false;
+    }
+
+    try {
+      logState.info('📡 开始WiFi拉距测试...');
+      logState.info('   设备IP: $_deviceIP4');
+      
+      // 执行iperf3测试
+      final cmd = 'iperf3';
+      final args = ['-c', _deviceIP4!, '-p', '5001', '-t', '3', '-i', '1', '--json'];
+      logState.info('🚀 执行: $cmd ${args.join(' ')}');
+
+      final result = await Process.run(cmd, args, stdoutEncoding: utf8, stderrEncoding: utf8);
+
+      if (result.exitCode == 0) {
+        final jsonStr = result.stdout as String;
+        try {
+          final data = json.decode(jsonStr) as Map<String, dynamic>;
+          final end = data['end'] as Map<String, dynamic>?;
+          if (end != null) {
+            final sumSent = end['sum_sent'] as Map<String, dynamic>?;
+            if (sumSent != null) {
+              final bps = (sumSent['bits_per_second'] as num?) ?? 0;
+              final mbps = (bps / 1000000).toStringAsFixed(2);
+              logState.info('📤 发送速率: $mbps Mbps');
+              logState.success('✅ WiFi拉距测试完成');
+              return true;
+            }
+          }
+        } catch (e) {
+          logState.warning('⚠️ 解析iperf结果失败: $e');
+        }
+      } else {
+        logState.error('❌ iperf3执行失败: ${result.stderr}');
+      }
+
+      return false;
+    } catch (e) {
+      logState.error('WiFi拉距测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤5: 光源箱不同照度光敏值(亮/暗)
+  Future<bool> _testLightSensorBrightDark4(TestState state, LogState logState) async {
+    try {
+      logState.info('💡 光敏传感器测试（亮/暗）');
+      
+      // 提示用户放置在亮环境
+      if (!mounted) return false;
+      final brightConfirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.wb_sunny, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('光敏测试 - 亮环境'),
+            ],
+          ),
+          content: const Text('请将设备放置在光源箱亮环境中，然后点击确定开始测试'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+
+      if (brightConfirm != true) return false;
+
+      // 获取亮环境光敏值
+      final brightSuccess = await _testLightSensor(state, logState);
+      if (!brightSuccess) {
+        logState.error('❌ 亮环境光敏值获取失败');
+        return false;
+      }
+
+      await Future.delayed(const Duration(seconds: 1));
+
+      // 提示用户放置在暗环境
+      if (!mounted) return false;
+      final darkConfirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.nightlight, color: Colors.indigo),
+              SizedBox(width: 8),
+              Text('光敏测试 - 暗环境'),
+            ],
+          ),
+          content: const Text('请将设备放置在光源箱暗环境中，然后点击确定开始测试'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+
+      if (darkConfirm != true) return false;
+
+      // 获取暗环境光敏值
+      final darkSuccess = await _testLightSensor(state, logState);
+      if (!darkSuccess) {
+        logState.error('❌ 暗环境光敏值获取失败');
+        return false;
+      }
+
+      logState.success('✅ 光敏传感器测试完成（亮/暗）');
+      return true;
+    } catch (e) {
+      logState.error('光敏传感器测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤6: 摄像头位置与IMU位置标定
+  Future<bool> _testCameraIMUCalibration4(TestState state, LogState logState) async {
+    try {
+      logState.info('📷 摄像头位置与IMU位置标定');
+      
+      // 提示用户更换标定图
+      if (!mounted) return false;
+      final userConfirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.camera_alt, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('摄像头IMU标定'),
+            ],
+          ),
+          content: const Text('请将标定图放置在设备前方，确保标定图清晰可见，然后点击确定开始拍照'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+              child: const Text('确定拍照'),
+            ),
+          ],
+        ),
+      );
+
+      if (userConfirm != true) {
+        logState.warning('⚠️ 用户取消标定');
+        return false;
+      }
+
+      // 发送拍照命令并下载图像
+      logState.info('📸 发送拍照命令...');
+      final captureCommand = ProductionTestCommands.createCaptureImageCommand();
+      final response = await state.sendCommandViaLinuxBluetooth(
+        captureCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null || response.containsKey('error')) {
+        logState.error('❌ 拍照命令失败');
+        return false;
+      }
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      // 下载图像
+      logState.info('📥 下载图像...');
+      final imagePath = await state.downloadImageFromDevice(_deviceIP4!);
+      if (imagePath == null) {
+        logState.error('❌ 图像下载失败');
+        return false;
+      }
+
+      logState.info('✅ 图像已下载: $imagePath');
+      
+      // 显示图像供用户确认
+      if (!mounted) return false;
+      final imageReviewResult = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('标定图像确认'),
+          content: SizedBox(
+            width: 400,
+            height: 400,
+            child: Image.file(File(imagePath), fit: BoxFit.contain),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('❌ 测试失败'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('✅ 测试通过'),
+            ),
+          ],
+        ),
+      );
+
+      if (imageReviewResult == true) {
+        logState.success('✅ 摄像头IMU标定通过');
+        return true;
+      } else {
+        logState.error('❌ 摄像头IMU标定失败');
+        return false;
+      }
+    } catch (e) {
+      logState.error('摄像头IMU标定失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤7: 纯色画面测试
+  Future<bool> _testPureColorStream4(TestState state, LogState logState) async {
+    try {
+      logState.info('🎨 纯色画面测试');
+      
+      // 提示用户更换纯色画面
+      if (!mounted) return false;
+      final userConfirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.palette, color: Colors.purple),
+              SizedBox(width: 8),
+              Text('纯色画面测试'),
+            ],
+          ),
+          content: const Text('请将纯色画面放置在设备前方，点亮模组，确保软件取流正常，然后点击确定开始拍照'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.purple),
+              child: const Text('确定拍照'),
+            ),
+          ],
+        ),
+      );
+
+      if (userConfirm != true) {
+        logState.warning('⚠️ 用户取消测试');
+        return false;
+      }
+
+      // 发送拍照命令
+      logState.info('📸 发送拍照命令...');
+      final captureCommand = ProductionTestCommands.createCaptureImageCommand();
+      final response = await state.sendCommandViaLinuxBluetooth(
+        captureCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null || response.containsKey('error')) {
+        logState.error('❌ 拍照命令失败');
+        return false;
+      }
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      // 下载图像
+      logState.info('📥 下载图像...');
+      final imagePath = await state.downloadImageFromDevice(_deviceIP4!);
+      if (imagePath == null) {
+        logState.error('❌ 图像下载失败');
+        return false;
+      }
+
+      logState.info('✅ 图像已下载: $imagePath');
+      
+      // 显示图像供用户确认
+      if (!mounted) return false;
+      final imageReviewResult = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('纯色画面确认'),
+          content: SizedBox(
+            width: 400,
+            height: 400,
+            child: Image.file(File(imagePath), fit: BoxFit.contain),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('❌ 测试失败'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('✅ 测试通过'),
+            ),
+          ],
+        ),
+      );
+
+      if (imageReviewResult == true) {
+        logState.success('✅ 纯色画面测试通过');
+        return true;
+      } else {
+        logState.error('❌ 纯色画面测试失败');
+        return false;
+      }
+    } catch (e) {
+      logState.error('纯色画面测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤8: IMU校准（参考manual_test_section中的_testIMUCalibration）
+  Future<bool> _testIMUCalibration4(TestState state, LogState logState) async {
+    logState.info('🔧 IMU校准测试开始');
+
+    final command = ProductionTestCommands.createIMUCalibrationCommand();
+
+    // 弹窗显示校准进度
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return _IMUCalibrationDialog(
+          state: state,
+          logState: logState,
+          command: command,
+          useLinuxBluetooth: true,
+        );
+      },
+    );
+
+    return result == true;
+  }
+
+  /// 工位4 步骤10: ISO12233图卡MTF测试
+  Future<bool> _testISO12233MTF4(TestState state, LogState logState) async {
+    try {
+      logState.info('📊 ISO12233图卡MTF测试');
+      
+      // 提示用户更换ISO12233图卡
+      if (!mounted) return false;
+      final userConfirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.grid_on, color: Colors.teal),
+              SizedBox(width: 8),
+              Text('ISO12233 MTF测试'),
+            ],
+          ),
+          content: const Text('请将ISO12233图卡放置在设备前方，确保图卡清晰可见，然后点击确定开始拍照\n\n要求：MTF值 > 1000线'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              child: const Text('确定拍照'),
+            ),
+          ],
+        ),
+      );
+
+      if (userConfirm != true) {
+        logState.warning('⚠️ 用户取消测试');
+        return false;
+      }
+
+      // 发送拍照命令
+      logState.info('📸 发送拍照命令...');
+      final captureCommand = ProductionTestCommands.createCaptureImageCommand();
+      final response = await state.sendCommandViaLinuxBluetooth(
+        captureCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null || response.containsKey('error')) {
+        logState.error('❌ 拍照命令失败');
+        return false;
+      }
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      // 下载图像
+      logState.info('📥 下载图像...');
+      final imagePath = await state.downloadImageFromDevice(_deviceIP4!);
+      if (imagePath == null) {
+        logState.error('❌ 图像下载失败');
+        return false;
+      }
+
+      logState.info('✅ 图像已下载: $imagePath');
+      
+      // TODO: 调用图像算法计算MTF值
+      // final mtfValue = await ImageTestService.testResolutionChart(imagePath);
+      
+      // 显示图像供用户确认
+      if (!mounted) return false;
+      final imageReviewResult = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('ISO12233 MTF测试结果'),
+          content: SizedBox(
+            width: 400,
+            height: 450,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Image.file(File(imagePath), fit: BoxFit.contain),
+                ),
+                const SizedBox(height: 8),
+                const Text('请确认MTF值是否 > 1000线', style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('❌ 测试失败'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('✅ 测试通过'),
+            ),
+          ],
+        ),
+      );
+
+      if (imageReviewResult == true) {
+        logState.success('✅ ISO12233 MTF测试通过');
+        return true;
+      } else {
+        logState.error('❌ ISO12233 MTF测试失败');
+        return false;
+      }
+    } catch (e) {
+      logState.error('ISO12233 MTF测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤11: 24色色卡色彩误差测试
+  Future<bool> _testColorChart4(TestState state, LogState logState) async {
+    try {
+      logState.info('🎨 24色色卡色彩误差测试');
+      
+      // 提示用户更换24色色卡
+      if (!mounted) return false;
+      final userConfirm = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.color_lens, color: Colors.pink),
+              SizedBox(width: 8),
+              Text('24色色卡测试'),
+            ],
+          ),
+          content: const Text('请将24色色卡放置在设备前方，确保色卡清晰可见，然后点击确定开始拍照\n\n要求：平均ΔE < 10'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.pink),
+              child: const Text('确定拍照'),
+            ),
+          ],
+        ),
+      );
+
+      if (userConfirm != true) {
+        logState.warning('⚠️ 用户取消测试');
+        return false;
+      }
+
+      // 发送拍照命令
+      logState.info('📸 发送拍照命令...');
+      final captureCommand = ProductionTestCommands.createCaptureImageCommand();
+      final response = await state.sendCommandViaLinuxBluetooth(
+        captureCommand,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null || response.containsKey('error')) {
+        logState.error('❌ 拍照命令失败');
+        return false;
+      }
+
+      await Future.delayed(const Duration(seconds: 2));
+
+      // 下载图像
+      logState.info('📥 下载图像...');
+      final imagePath = await state.downloadImageFromDevice(_deviceIP4!);
+      if (imagePath == null) {
+        logState.error('❌ 图像下载失败');
+        return false;
+      }
+
+      logState.info('✅ 图像已下载: $imagePath');
+      
+      // TODO: 调用图像算法分析色彩误差
+      // final deltaE = await ImageTestService.testColorChart(imagePath);
+      
+      // 显示图像供用户确认
+      if (!mounted) return false;
+      final imageReviewResult = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('24色色卡测试结果'),
+          content: SizedBox(
+            width: 400,
+            height: 450,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Image.file(File(imagePath), fit: BoxFit.contain),
+                ),
+                const SizedBox(height: 8),
+                const Text('请确认平均ΔE是否 < 10', style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('❌ 测试失败'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: const Text('✅ 测试通过'),
+            ),
+          ],
+        ),
+      );
+
+      if (imageReviewResult == true) {
+        logState.success('✅ 24色色卡测试通过');
+        return true;
+      } else {
+        logState.error('❌ 24色色卡测试失败');
+        return false;
+      }
+    } catch (e) {
+      logState.error('24色色卡测试失败: $e');
+      return false;
+    }
+  }
+
+  /// 工位4 步骤12: 产测结束
+  Future<bool> _testProductionEnd4(TestState state, LogState logState) async {
+    try {
+      logState.info('🏁 发送产测结束命令...');
+      
+      final passedCount = _stepResults4.take(_stepResults4.length - 1)
+          .where((s) => s.status == TestStepStatus.passed).length;
+      final totalCount = _stepResults4.length - 1;
+      final allPassed = passedCount == totalCount;
+      
+      final opt = allPassed ? 0x00 : 0x01;
+      final command = ProductionTestCommands.createEndTestCommand(opt: opt);
+      logState.info('   测试结果: ${allPassed ? "通过" : "失败"} ($passedCount/$totalCount)');
+      
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+          
+          if (response != null && !response.containsKey('error')) {
+            logState.success('✅ 产测结束命令发送成功');
+            return true;
+          }
+        } catch (e) {
+          logState.warning('⚠️ 发送命令异常: $e');
+        }
+      }
+      
+      logState.error('❌ 3次重试后产测结束命令仍失败');
+      return false;
+    } catch (e) {
+      logState.error('产测结束异常: $e');
+      return false;
+    }
   }
 
   // ========== 工位4: 初始化步骤 ==========
@@ -4216,14 +5762,302 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
     _stepResults6.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '设备电压测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '电量检测测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '充电状态测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: '充电电流测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: 'LED灯测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: '触控测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: '佩戴检测', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '电池电压测试(>2.5V)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '电量检测(0~100%)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '充电状态(充电中)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: 'LED外侧亮', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: 'LED外侧关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'LED内侧亮', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'LED内侧关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '右Touch-TK1(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '右Touch-TK2(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '右Touch-TK3(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '左触控-点击', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '左触控-双击', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '左触控-长按', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: '产测结束', status: TestStepStatus.pending),
     ]);
+  }
+}
+
+/// IMU校准进度弹窗
+class _IMUCalibrationDialog extends StatefulWidget {
+  final TestState state;
+  final LogState logState;
+  final Uint8List command;
+  final bool useLinuxBluetooth;
+
+  const _IMUCalibrationDialog({
+    required this.state,
+    required this.logState,
+    required this.command,
+    required this.useLinuxBluetooth,
+  });
+
+  @override
+  State<_IMUCalibrationDialog> createState() => _IMUCalibrationDialogState();
+}
+
+class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
+  int _currentStatus = -1;
+  String _statusText = '正在发送校准命令...';
+  bool _isRunning = true;
+  bool _isSuccess = false;
+  bool _isFailed = false;
+  StreamSubscription<Uint8List>? _subscription;
+  Timer? _timeoutTimer;
+  int _sendAttempt = 0;
+
+  static const _maxRetries = 10;
+  static const _listenTimeout = Duration(seconds: 30);
+
+  static const _statusSteps = [
+    {'status': 0x00, 'label': '设备IMU启动中', 'icon': Icons.power_settings_new},
+    {'status': 0x01, 'label': '设备朝向检测中', 'icon': Icons.screen_rotation},
+    {'status': 0x02, 'label': '设备校准中', 'icon': Icons.tune},
+    {'status': 0x03, 'label': '设备校准完成', 'icon': Icons.check_circle},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _startCalibration();
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    _timeoutTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _startCalibration() async {
+    if (widget.useLinuxBluetooth) {
+      await _startBluetoothPolling();
+    } else {
+      final sent = await _sendCommand();
+      if (sent) {
+        _startSerialListening();
+      } else {
+        _onMaxRetriesExceeded();
+      }
+    }
+  }
+
+  Future<bool> _sendCommand() async {
+    try {
+      return await widget.state.serialService.sendCommand(
+        widget.command,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+    } catch (e) {
+      widget.logState.error('❌ 发送IMU校准命令失败: $e', type: LogType.debug);
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _btSendAndWait() async {
+    try {
+      return await widget.state.sendCommandViaLinuxBluetooth(
+        widget.command,
+        timeout: _listenTimeout,
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+    } catch (e) {
+      widget.logState.warning('⚠️ 蓝牙命令异常: $e', type: LogType.debug);
+      return null;
+    }
+  }
+
+  void _startSerialListening() {
+    _subscription?.cancel();
+    _resetTimeout();
+
+    _subscription = widget.state.serialService.pushPayloadStream.listen((payload) {
+      if (!_isRunning) return;
+      if (payload.isEmpty || payload[0] != ProductionTestCommands.cmdIMUCalibration) return;
+      _resetTimeout();
+      _handlePayload(payload);
+    });
+  }
+
+  Future<void> _startBluetoothPolling() async {
+    while (_isRunning) {
+      if (_sendAttempt > 0) {
+        widget.logState.info('🔄 蓝牙: 重新发送IMU校准命令 (${_sendAttempt + 1}/$_maxRetries)', type: LogType.debug);
+        if (mounted) {
+          setState(() => _statusText = '重新发送校准命令 (${_sendAttempt + 1}/$_maxRetries)...');
+        }
+      }
+
+      final response = await _btSendAndWait();
+      if (!_isRunning) return;
+
+      if (response == null || response.containsKey('error')) {
+        _sendAttempt++;
+        if (_sendAttempt >= _maxRetries) {
+          _onMaxRetriesExceeded();
+          return;
+        }
+        continue;
+      }
+
+      if (response.containsKey('payload') && response['payload'] != null) {
+        final payload = response['payload'] as Uint8List;
+        final done = _handlePayload(payload);
+        if (done) return;
+      }
+    }
+  }
+
+  void _resetTimeout() {
+    _timeoutTimer?.cancel();
+    _timeoutTimer = Timer(_listenTimeout, () {
+      if (!_isRunning) return;
+      widget.logState.warning('⏱️ IMU校准: 监听超时', type: LogType.debug);
+      _retryOrFail();
+    });
+  }
+
+  void _retryOrFail() {
+    _subscription?.cancel();
+    _sendAttempt++;
+    if (_sendAttempt >= _maxRetries) {
+      _onMaxRetriesExceeded();
+    } else {
+      _sendCommand().then((sent) {
+        if (sent) _startSerialListening();
+      });
+    }
+  }
+
+  bool _handlePayload(Uint8List payload) {
+    if (payload.length < 2) return false;
+    
+    final status = payload[1];
+    widget.logState.info('📊 IMU校准状态: 0x${status.toRadixString(16).toUpperCase()}', type: LogType.debug);
+
+    if (mounted) {
+      setState(() {
+        _currentStatus = status;
+        final step = _statusSteps.firstWhere((s) => s['status'] == status, orElse: () => {'label': '未知状态'});
+        _statusText = step['label'] as String;
+      });
+    }
+
+    if (status == 0x03) {
+      widget.logState.success('✅ IMU校准完成', type: LogType.debug);
+      _onSuccess();
+      return true;
+    }
+
+    return false;
+  }
+
+  void _onSuccess() {
+    _isRunning = false;
+    _subscription?.cancel();
+    _timeoutTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _isSuccess = true;
+        _statusText = 'IMU校准成功！';
+      });
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) Navigator.of(context).pop(true);
+      });
+    }
+  }
+
+  void _onMaxRetriesExceeded() {
+    _isRunning = false;
+    _subscription?.cancel();
+    _timeoutTimer?.cancel();
+    widget.logState.error('❌ IMU校准失败: 超过最大重试次数', type: LogType.debug);
+    if (mounted) {
+      setState(() {
+        _isFailed = true;
+        _statusText = 'IMU校准失败（超时）';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.compass_calibration, color: Colors.deepOrange.shade700),
+          const SizedBox(width: 8),
+          const Text('IMU校准'),
+        ],
+      ),
+      content: SizedBox(
+        width: 300,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_isRunning && !_isSuccess && !_isFailed)
+              const CircularProgressIndicator(),
+            if (_isSuccess)
+              Icon(Icons.check_circle, color: Colors.green, size: 48),
+            if (_isFailed)
+              Icon(Icons.error, color: Colors.red, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              _statusText,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: _isSuccess ? Colors.green : (_isFailed ? Colors.red : Colors.black87),
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            ..._statusSteps.map((step) {
+              final status = step['status'] as int;
+              final label = step['label'] as String;
+              final icon = step['icon'] as IconData;
+              final isActive = _currentStatus == status;
+              final isPassed = _currentStatus > status;
+              
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      isPassed ? Icons.check_circle : (isActive ? icon : Icons.radio_button_unchecked),
+                      color: isPassed ? Colors.green : (isActive ? Colors.blue : Colors.grey),
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isPassed ? Colors.green : (isActive ? Colors.blue : Colors.grey),
+                          fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      ),
+      actions: [
+        if (_isFailed)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('关闭'),
+          ),
+      ],
+    );
   }
 }
