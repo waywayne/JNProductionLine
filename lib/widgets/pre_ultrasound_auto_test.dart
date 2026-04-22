@@ -5003,10 +5003,18 @@ class _SNScanDialogState extends State<_SNScanDialog> {
 
 String _getMethodName(BluetoothTestMethod method) {
   switch (method) {
-    case BluetoothTestMethod.rfcommBind:
-      return 'RFCOMM Bind方案';
     case BluetoothTestMethod.autoScan:
       return 'Auto Scan方案';
+    case BluetoothTestMethod.directConnect:
+      return 'Direct Connect方案';
+    case BluetoothTestMethod.rfcommBind:
+      return 'RFCOMM Bind方案';
+    case BluetoothTestMethod.rfcommSocket:
+      return 'RFCOMM Socket方案';
+    case BluetoothTestMethod.serial:
+      return 'Serial方案';
+    case BluetoothTestMethod.commandLine:
+      return 'Command Line方案';
   }
 }
 
