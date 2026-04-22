@@ -3606,7 +3606,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       
       final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
-        method: _selectedMethod4,
       );
       return success;
     } catch (e) {
@@ -3911,7 +3910,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       
       final success = await state.testLinuxBluetooth(
         deviceAddress: bluetoothAddress,
-        method: _selectedMethod6,
       );
       return success;
     } catch (e) {
@@ -4137,7 +4135,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testWearDetection6(TestState state, LogState logState) async {
     logState.info('👓 佩戴检测测试');
     
-    final wearCommand = ProductionTestCommands.createGetWearStatusCommand();
+    final wearCommand = ProductionTestCommands.createSensorCommand(0x00);
     
     for (int retry = 0; retry < 5; retry++) {
       if (retry > 0) {
@@ -4182,7 +4180,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     int expectedEventCode;
     switch (touchType) {
-      case '点击':
+      case '单击':
         expectedEventCode = 0x01;
         break;
       case '双击':
@@ -4196,12 +4194,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
     }
     
-    final touchEventCommand = ProductionTestCommands.createGetTouchEventCommand();
+    final touchEventCommand = ProductionTestCommands.createTouchCommand(0x00, 0x00);
     
     for (int retry = 0; retry < 10; retry++) {
       if (retry > 0) {
         await Future.delayed(const Duration(milliseconds: 500));
       }
+      
 
       try {
         final response = await state.sendCommandViaLinuxBluetooth(
@@ -4280,6 +4279,76 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   }
 
   // ========== UI构建方法 ==========
+
+  Widget _buildTestStepItem(TestStepResult step, bool isCurrent) {
+    Color statusColor;
+    IconData statusIcon;
+    
+    switch (step.status) {
+      case TestStepStatus.pending:
+        statusColor = Colors.grey;
+        statusIcon = Icons.radio_button_unchecked;
+        break;
+      case TestStepStatus.running:
+        statusColor = Colors.blue;
+        statusIcon = Icons.hourglass_empty;
+        break;
+      case TestStepStatus.passed:
+        statusColor = Colors.green;
+        statusIcon = Icons.check_circle;
+        break;
+      case TestStepStatus.failed:
+        statusColor = Colors.red;
+        statusIcon = Icons.error;
+        break;
+    }
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isCurrent ? Colors.blue.shade50 : null,
+        border: Border(
+          left: BorderSide(
+            color: isCurrent ? Colors.blue : Colors.transparent,
+            width: 3,
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(statusIcon, color: statusColor, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${step.stepNumber}. ${step.name}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: isCurrent ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+                if (step.message != null && step.message!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      step.message!,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: step.status == TestStepStatus.failed
+                            ? Colors.red.shade700
+                            : Colors.grey.shade600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildWorkstation4Content(TestState state) {
     return Padding(
@@ -4825,6 +4894,11 @@ class _SNScanResult {
 }
 
 // SN扫描对话框（支持SN码和蓝牙MAC地址两种输入模式）
+enum _InputMode {
+  sn,
+  bluetooth,
+}
+
 class _SNScanDialog extends StatefulWidget {
   final String title;
   
@@ -4837,7 +4911,7 @@ class _SNScanDialog extends StatefulWidget {
 class _SNScanDialogState extends State<_SNScanDialog> {
   final TextEditingController _snController = TextEditingController();
   final TextEditingController _macController = TextEditingController();
-  InputMode _inputMode = InputMode.sn;
+  _InputMode _inputMode = _InputMode.sn;
 
   @override
   void dispose() {
@@ -4847,7 +4921,7 @@ class _SNScanDialogState extends State<_SNScanDialog> {
   }
 
   void _handleConfirm() {
-    if (_inputMode == InputMode.sn) {
+    if (_inputMode == _InputMode.sn) {
       final sn = _snController.text.trim();
       if (sn.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -4877,18 +4951,18 @@ class _SNScanDialogState extends State<_SNScanDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SegmentedButton<InputMode>(
+            SegmentedButton<_InputMode>(
               segments: const [
-                ButtonSegment(value: InputMode.sn, label: Text('SN码'), icon: Icon(Icons.qr_code)),
-                ButtonSegment(value: InputMode.bluetooth, label: Text('蓝牙MAC'), icon: Icon(Icons.bluetooth)),
+                ButtonSegment(value: _InputMode.sn, label: Text('SN码'), icon: Icon(Icons.qr_code)),
+                ButtonSegment(value: _InputMode.bluetooth, label: Text('蓝牙MAC'), icon: Icon(Icons.bluetooth)),
               ],
               selected: {_inputMode},
-              onSelectionChanged: (Set<InputMode> newSelection) {
+              onSelectionChanged: (Set<_InputMode> newSelection) {
                 setState(() => _inputMode = newSelection.first);
               },
             ),
             const SizedBox(height: 16),
-            if (_inputMode == InputMode.sn)
+            if (_inputMode == _InputMode.sn)
               TextField(
                 controller: _snController,
                 decoration: const InputDecoration(
@@ -4927,68 +5001,12 @@ class _SNScanDialogState extends State<_SNScanDialog> {
   }
 }
 
-/// 简单的蓝牙地址输入对话框（用于单独测试某个方案）
-class _SimpleBluetoothInputDialog extends StatefulWidget {
-  final BluetoothTestMethod method;
-  
-  const _SimpleBluetoothInputDialog({required this.method});
-
-  @override
-  State<_SimpleBluetoothInputDialog> createState() => _SimpleBluetoothInputDialogState();
-}
-
-class _SimpleBluetoothInputDialogState extends State<_SimpleBluetoothInputDialog> {
-  final TextEditingController _macController = TextEditingController();
-
-  @override
-  void dispose() {
-    _macController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('测试 ${_getMethodName(widget.method)}'),
-      content: TextField(
-        controller: _macController,
-        decoration: const InputDecoration(
-          labelText: '蓝牙MAC地址',
-          hintText: '例如: 00:11:22:33:44:55',
-        ),
-        autofocus: true,
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            final mac = _macController.text.trim();
-            if (mac.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('请输入蓝牙MAC地址')),
-              );
-              return;
-            }
-            Navigator.of(context).pop(mac);
-          },
-          child: const Text('开始测试'),
-        ),
-      ],
-    );
-  }
-}
-
 String _getMethodName(BluetoothTestMethod method) {
   switch (method) {
     case BluetoothTestMethod.rfcommBind:
       return 'RFCOMM Bind方案';
-    case BluetoothTestMethod.stableRfcomm:
-      return 'Stable RFCOMM方案';
-    case BluetoothTestMethod.nativeRfcomm:
-      return 'Native RFCOMM方案';
+    case BluetoothTestMethod.autoScan:
+      return 'Auto Scan方案';
   }
 }
 
@@ -5027,8 +5045,7 @@ class _AutoTestInputDialogState extends State<_AutoTestInputDialog> {
             SegmentedButton<BluetoothTestMethod>(
               segments: const [
                 ButtonSegment(value: BluetoothTestMethod.rfcommBind, label: Text('Bind')),
-                ButtonSegment(value: BluetoothTestMethod.stableRfcomm, label: Text('Stable')),
-                ButtonSegment(value: BluetoothTestMethod.nativeRfcomm, label: Text('Native')),
+                ButtonSegment(value: BluetoothTestMethod.autoScan, label: Text('Auto')),
               ],
               selected: {_selectedMethod},
               onSelectionChanged: (Set<BluetoothTestMethod> newSelection) {
@@ -5102,22 +5119,12 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
     widget.logState.info('📤 发送IMU校准命令...', type: LogType.debug);
 
     try {
-      Map<String, dynamic>? response;
-      if (widget.useLinuxBluetooth) {
-        response = await widget.state.sendCommandViaLinuxBluetooth(
-          widget.command,
-          timeout: const Duration(seconds: 5),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
-      } else {
-        response = await widget.state.sendCommand(
-          widget.command,
-          timeout: const Duration(seconds: 5),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
-      }
+      final response = await widget.state.sendCommandViaLinuxBluetooth(
+        widget.command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
 
       if (response == null || response.containsKey('error')) {
         widget.logState.error('❌ IMU校准命令发送失败', type: LogType.debug);
@@ -5137,15 +5144,21 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
   }
 
   void _startListeningForPush() {
-    if (widget.useLinuxBluetooth) {
-      _subscription = widget.state.linuxBluetoothPushStream.listen((push) {
-        _handlePush(push);
-      });
-    } else {
-      _subscription = widget.state.pushStream.listen((push) {
-        _handlePush(push);
-      });
-    }
+    _subscription = widget.state.linuxBluetoothDataStream.listen((data) {
+      // 解析GTP协议数据
+      if (data.length >= 8) {
+        final moduleId = (data[2] << 8) | data[3];
+        final messageId = (data[4] << 8) | data[5];
+        final payloadLength = (data[6] << 8) | data[7];
+        
+        if (moduleId == ProductionTestCommands.moduleId &&
+            messageId == ProductionTestCommands.messageId &&
+            data.length >= 8 + payloadLength) {
+          final payload = data.sublist(8, 8 + payloadLength);
+          _handlePush({'moduleId': moduleId, 'messageId': messageId, 'payload': payload});
+        }
+      }
+    });
   }
 
   void _handlePush(Map<String, dynamic> push) {
