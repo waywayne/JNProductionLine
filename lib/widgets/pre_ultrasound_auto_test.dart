@@ -341,24 +341,22 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
                     ),
-                  ] else
-                    ElevatedButton.icon(
-                      onPressed: _stopAutoTest1,
-                      icon: const Icon(Icons.stop),
-                      label: const Text('停止测试'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                    ),
-                ],
-              ),
-                ],
-              ),
+              ] else
+                ElevatedButton.icon(
+                  onPressed: _stopAutoTest1,
+                  icon: const Icon(Icons.stop),
+                  label: const Text('停止测试'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  ),
+                ),
             ],
           ),
-        );
+        ],
+      ),
+    );
   }
 
   // ========== 工位2: 音频测试（待实现）==========
