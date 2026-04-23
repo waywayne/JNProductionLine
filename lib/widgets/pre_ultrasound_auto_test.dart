@@ -49,6 +49,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   String? _scannedSN1;
   BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService1 = BydMesService();
+  bool _cancelRestartCommand1 = false; // 取消重启命令标志
 
   // 工位4状态
   bool _isAutoTesting4 = false;
