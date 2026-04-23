@@ -3650,6 +3650,9 @@ class TestState extends ChangeNotifier {
   
   /// 获取 Linux 蓝牙数据流（用于监听设备推送数据）
   Stream<Uint8List> get linuxBluetoothDataStream => _linuxBtService.dataStream;
+  
+  /// 获取 Linux 蓝牙推送数据流（已解析的 payload，用于监听设备主动推送的数据）
+  Stream<Uint8List> get linuxBluetoothPushPayloadStream => _linuxBtService.pushPayloadStream;
 
   /// 通过 Linux 蓝牙发送命令并等待响应（GTP 协议封装）
   Future<Map<String, dynamic>?> sendCommandViaLinuxBluetooth(

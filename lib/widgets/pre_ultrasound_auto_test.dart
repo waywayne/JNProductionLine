@@ -5098,42 +5098,41 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
   }
 
   void _startListeningForPush() {
-    _subscription = widget.state.linuxBluetoothDataStream.listen((data) {
-      // 解析GTP协议数据
-      if (data.length >= 8) {
-        final moduleId = (data[2] << 8) | data[3];
-        final messageId = (data[4] << 8) | data[5];
-        final payloadLength = (data[6] << 8) | data[7];
-        
-        if (moduleId == ProductionTestCommands.moduleId &&
-            messageId == ProductionTestCommands.messageId &&
-            data.length >= 8 + payloadLength) {
-          final payload = data.sublist(8, 8 + payloadLength);
-          _handlePush({'moduleId': moduleId, 'messageId': messageId, 'payload': payload});
-        }
+    // 监听推送数据流（已解析的payload）
+    _subscription = widget.state.linuxBluetoothPushPayloadStream.listen((payload) {
+      if (payload.isNotEmpty) {
+        widget.logState.info('📥 收到推送数据 [${payload.length}字节]: ${payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ')}', type: LogType.debug);
+        _handlePushPayload(payload);
       }
     });
   }
 
-  void _handlePush(Map<String, dynamic> push) {
-    if (push['moduleId'] == ProductionTestCommands.moduleId &&
-        push['messageId'] == ProductionTestCommands.messageId) {
-      final payload = push['payload'];
-      if (payload is List && payload.isNotEmpty) {
-        final cmdId = payload[0];
-        if (cmdId == 0x0D) {
-          if (payload.length >= 2) {
-            final status = payload[1];
-            if (status == 0x00) {
-              widget.logState.success('✅ IMU校准成功！', type: LogType.debug);
-              _onSuccess();
-            } else {
-              _retryCount++;
-              widget.logState.warning('⚠️ IMU校准中... ($status) 重试 $_retryCount/$_maxRetries', type: LogType.debug);
-              setState(() => _statusText = 'IMU校准中... 重试 $_retryCount/$_maxRetries');
-              if (_retryCount >= _maxRetries) {
-                _onMaxRetriesExceeded();
-              }
+  void _handlePushPayload(Uint8List payload) {
+    if (payload.isNotEmpty) {
+      final cmdId = payload[0];
+      // IMU校准命令 cmd = 0x10
+      if (cmdId == 0x10) {
+        if (payload.length >= 2) {
+          final opt = payload[1];
+          // opt 状态：0x00=启动中, 0x01=朝向检测中, 0x02=校准中, 0x03=校准完成
+          if (opt == 0x03) {
+            widget.logState.success('✅ IMU校准完成！', type: LogType.debug);
+            _onSuccess();
+          } else if (opt == 0x00) {
+            widget.logState.info('🔄 设备IMU启动中...', type: LogType.debug);
+            setState(() => _statusText = '设备IMU启动中...');
+          } else if (opt == 0x01) {
+            widget.logState.info('🔄 设备朝向检测中...', type: LogType.debug);
+            setState(() => _statusText = '设备朝向检测中...');
+          } else if (opt == 0x02) {
+            widget.logState.info('🔄 设备校准中...', type: LogType.debug);
+            setState(() => _statusText = '设备校准中...');
+          } else {
+            _retryCount++;
+            widget.logState.warning('⚠️ 未知状态: 0x${opt.toRadixString(16).toUpperCase()} 重试 $_retryCount/$_maxRetries', type: LogType.debug);
+            setState(() => _statusText = '未知状态... 重试 $_retryCount/$_maxRetries');
+            if (_retryCount >= _maxRetries) {
+              _onMaxRetriesExceeded();
             }
           }
         }
