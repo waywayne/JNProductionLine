@@ -3,6 +3,9 @@ import '../screens/gpib_test_screen.dart';
 import '../screens/production_config_screen.dart';
 import '../screens/native_spp_debug_screen.dart';
 import 'byd_mes_test_dialog.dart';
+import 'ota_upgrade_widget.dart';
+import 'wifi_range_test_widget.dart';
+import 'image_algorithm_test_widget.dart';
 
 class MenuBarWidget extends StatelessWidget {
   const MenuBarWidget({super.key});
@@ -64,6 +67,60 @@ class MenuBarWidget extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const NativeSppDebugScreen()),
+              );
+            },
+          ),
+          _MenuButton(
+            title: '产测OTA',
+            icon: Icons.system_update,
+            onPressed: () {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => Dialog(
+                  child: Container(
+                    width: 900,
+                    height: 700,
+                    padding: const EdgeInsets.all(16),
+                    child: const OTAUpgradeWidget(),
+                  ),
+                ),
+              );
+            },
+          ),
+          _MenuButton(
+            title: 'WiFi拉距',
+            icon: Icons.wifi,
+            onPressed: () {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => Dialog(
+                  child: Container(
+                    width: 900,
+                    height: 700,
+                    padding: const EdgeInsets.all(16),
+                    child: const WiFiRangeTestWidget(),
+                  ),
+                ),
+              );
+            },
+          ),
+          _MenuButton(
+            title: '图像算法',
+            icon: Icons.image,
+            onPressed: () {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => Dialog(
+                  child: Container(
+                    width: 900,
+                    height: 700,
+                    padding: const EdgeInsets.all(16),
+                    child: const ImageAlgorithmTestWidget(),
+                  ),
+                ),
               );
             },
           ),

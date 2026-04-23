@@ -84,14 +84,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final List<TestStepResult> _stepResults3 = [];
   ProductSNInfo? _productInfo3;
   String? _scannedSN3;
-  BluetoothTestMethod _selectedMethod3 = BluetoothTestMethod.rfcommBind;
+  BluetoothTestMethod _selectedMethod3 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService3 = BydMesService();
   final ProductionConfig _config = ProductionConfig();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _initializeSteps1();
     _initializeSteps3();
     _initializeSteps4();
@@ -188,24 +188,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                       isScrollable: true,
                       tabs: const [
                         Tab(
-                          icon: Icon(Icons.wifi),
-                          text: '工位1: 射频图像',
-                        ),
-                        Tab(
-                          icon: Icon(Icons.volume_up),
-                          text: '工位2: 音频测试',
-                        ),
-                        Tab(
                           icon: Icon(Icons.power),
                           text: '工位3: 电源外设',
                         ),
                         Tab(
                           icon: Icon(Icons.signal_cellular_alt),
                           text: '工位4: 超声后射频图像',
-                        ),
-                        Tab(
-                          icon: Icon(Icons.hearing),
-                          text: '工位5: 超声后音频',
                         ),
                         Tab(
                           icon: Icon(Icons.electrical_services),
@@ -222,16 +210,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    // 工位1: 射频图像测试
-                    _buildWorkstation1Content(state),
-                    // 工位2: 音频测试（待实现）
-                    _buildWorkstation2Content(state),
                     // 工位3: 电源外设测试
                     _buildWorkstation3Content(state),
                     // 工位4: 超声后射频图像测试
                     _buildWorkstation4Content(state),
-                    // 工位5: 超声后音频测试
-                    _buildWorkstation5Content(state),
                     // 工位6: 超声后电源外设测试
                     _buildWorkstation6Content(state),
                   ],
@@ -437,19 +419,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // 调试模式开关
-              Row(
-                children: [
-                  Icon(Icons.bug_report, color: _debugMode3 ? Colors.red : Colors.grey, size: 20),
-                  const SizedBox(width: 4),
-                  Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode3 ? Colors.red : Colors.grey)),
-                  Switch(
-                    value: _debugMode3,
-                    onChanged: _isAutoTesting3 ? null : (value) => setState(() => _debugMode3 = value),
-                    activeColor: Colors.red,
-                  ),
-                ],
-              ),
               // 跳过充电电流测试（使用GPIB采集）
               Row(
                 children: [
@@ -463,55 +432,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                   ),
                 ],
               ),
-              Row(
-                children: [
-              if (!_isAutoTesting3) ...[
-                // 蓝牙方案选择
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<BluetoothTestMethod>(
-                      value: _selectedMethod3,
-                      isDense: true,
-                      items: const [
-                        DropdownMenuItem(
-                          value: BluetoothTestMethod.autoScan,
-                          child: Text('方案1: 扫描配对', style: TextStyle(fontSize: 12)),
-                        ),
-                        DropdownMenuItem(
-                          value: BluetoothTestMethod.directConnect,
-                          child: Text('方案2: 直接连接', style: TextStyle(fontSize: 12)),
-                        ),
-                        DropdownMenuItem(
-                          value: BluetoothTestMethod.rfcommBind,
-                          child: Text('方案3: RFCOMM Bind ⭐', style: TextStyle(fontSize: 12)),
-                        ),
-                        DropdownMenuItem(
-                          value: BluetoothTestMethod.rfcommSocket,
-                          child: Text('方案4: RFCOMM Socket', style: TextStyle(fontSize: 12)),
-                        ),
-                        DropdownMenuItem(
-                          value: BluetoothTestMethod.serial,
-                          child: Text('方案5: 串口设备', style: TextStyle(fontSize: 12)),
-                        ),
-                        DropdownMenuItem(
-                          value: BluetoothTestMethod.commandLine,
-                          child: Text('方案6: 命令行工具', style: TextStyle(fontSize: 12)),
-                        ),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => _selectedMethod3 = value);
-                        }
-                      },
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
+              // 蓝牙方案选择器已隐藏，默认使用 RFCOMM Socket
+              if (!_isAutoTesting3)
                 ElevatedButton.icon(
                   onPressed: () => _startAutoTest3(state),
                   icon: const Icon(Icons.play_arrow),
@@ -521,8 +443,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
-                ),
-              ] else
+                )
+              else
                 ElevatedButton.icon(
                   onPressed: _stopAutoTest3,
                   icon: const Icon(Icons.stop),
@@ -533,8 +455,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
                 ),
-                ],
-              ),
             ],
           ),
         ],
@@ -4363,22 +4283,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               ),
             ),
 
-          Row(
-            children: [
-              Icon(Icons.bug_report, color: _debugMode4 ? Colors.orange : Colors.grey, size: 20),
-              const SizedBox(width: 4),
-              Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode4 ? Colors.orange : Colors.grey)),
-              Switch(
-                value: _debugMode4,
-                onChanged: _isAutoTesting4 ? null : (value) => setState(() => _debugMode4 = value),
-                activeColor: Colors.orange,
-              ),
-              if (_debugMode4)
-                Text('(失败后可跳过)', style: TextStyle(fontSize: 11, color: Colors.orange.shade700)),
-            ],
-          ),
-          const SizedBox(height: 8),
-
           Expanded(
             child: Container(
               decoration: BoxDecoration(
@@ -4572,20 +4476,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 ],
               ),
             ),
-
-          Row(
-            children: [
-              Icon(Icons.bug_report, color: _debugMode6 ? Colors.orange : Colors.grey, size: 20),
-              const SizedBox(width: 4),
-              Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode6 ? Colors.orange : Colors.grey)),
-              Switch(
-                value: _debugMode6,
-                onChanged: _isAutoTesting6 ? null : (value) => setState(() => _debugMode6 = value),
-                activeColor: Colors.orange,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
 
           Expanded(
             child: Container(

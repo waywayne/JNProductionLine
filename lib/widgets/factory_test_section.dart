@@ -41,7 +41,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
   
   @override
@@ -174,9 +174,6 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
           tabs: const [
             Tab(text: '自动测试'),
             Tab(text: '手动测试'),
-            Tab(text: '产测OTA'),
-            Tab(text: 'WiFi拉距'),
-            Tab(text: '图像算法'),
           ],
         ),
         const SizedBox(height: 8),
@@ -192,12 +189,6 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
               ),
               // Tab 2: 手动测试
               const ManualTestSection(),
-              // Tab 3: 产测OTA
-              const OTAUpgradeWidget(),
-              // Tab 4: WiFi拉距测试
-              const WiFiRangeTestWidget(),
-              // Tab 5: 图像算法测试
-              const ImageAlgorithmTestWidget(),
             ],
           ),
         ),
