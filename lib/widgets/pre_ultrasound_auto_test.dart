@@ -1203,8 +1203,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       logState.info('🔌 准备连接GPIB程控电源...');
       
+      String? gpibAddressToUse = state.gpibAddress;
+      
       // 检查是否已配置GPIB地址
-      if (state.gpibAddress == null || state.gpibAddress!.isEmpty) {
+      if (gpibAddressToUse == null || gpibAddressToUse.isEmpty) {
         logState.warning('⚠️  GPIB地址未配置');
         
         // 弹出GPIB地址配置对话框
@@ -1222,13 +1224,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           return;
         }
         
-        logState.info('✅ GPIB地址已配置: $address');
+        gpibAddressToUse = address;
+        logState.info('✅ GPIB地址已配置: $gpibAddressToUse');
       }
       
       // 主动连接GPIB设备
       logState.info('📡 正在连接GPIB设备...');
       final connected = await state.detectAndConnectGpib(
-        state.gpibAddress!,
+        gpibAddressToUse,
         skipLeakageTest: true,  // 跳过漏电流测试，只建立连接
       );
       
