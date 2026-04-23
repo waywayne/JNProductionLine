@@ -59,6 +59,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   String? _scannedSN4;
   BluetoothTestMethod _selectedMethod4 = BluetoothTestMethod.rfcommBind;
   final BydMesService _mesService4 = BydMesService();
+  bool _cancelRestartCommand4 = false; // 取消重启命令标志
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -77,6 +78,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   String? _scannedSN6;
   BluetoothTestMethod _selectedMethod6 = BluetoothTestMethod.rfcommBind;
   final BydMesService _mesService6 = BydMesService();
+  bool _cancelRestartCommand6 = false; // 取消重启命令标志
 
   // 工位3状态
   bool _isAutoTesting3 = false;
@@ -87,6 +89,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   BluetoothTestMethod _selectedMethod3 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService3 = BydMesService();
   final ProductionConfig _config = ProductionConfig();
+  bool _cancelRestartCommand3 = false; // 取消重启命令标志
 
   @override
   void initState() {
@@ -647,6 +650,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return;
       }
     }
+    
+    // 取消之前可能还在运行的重启命令重试
+    _cancelRestartCommand1 = true;
+    await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
+    _cancelRestartCommand1 = false; // 重置标志
     
     setState(() {
       _isAutoTesting1 = true;
@@ -1277,6 +1285,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     }
     
+    // 取消之前可能还在运行的重启命令重试
+    _cancelRestartCommand3 = true;
+    await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
+    _cancelRestartCommand3 = false; // 重置标志
+    
     setState(() {
       _isAutoTesting3 = true;
       _currentStep3 = 0;
@@ -1522,9 +1535,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
 
-    // 测试全部通过，发送设备重启命令 (module id: 6, msg id: 0, payload: 2004)
-    logState.info('🔄 发送设备重启命令...');
-    await _sendDeviceRestartCommand(state, logState);
+    // 只有测试全部通过时，才发送设备重启命令
+    if (allPassed) {
+      logState.info('🔄 发送设备重启命令...');
+      await _sendDeviceRestartCommand(state, logState);
+    }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
@@ -2775,9 +2790,21 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     const maxRetries = 3;
 
     for (int retry = 0; retry < maxRetries; retry++) {
+      // 检查是否被取消（检查所有工位的取消标志）
+      if (_cancelRestartCommand1 || _cancelRestartCommand3 || _cancelRestartCommand4 || _cancelRestartCommand6) {
+        logState.warning('⚠️ 重启命令已被取消（新测试开始）');
+        return;
+      }
+      
       if (retry > 0) {
         logState.info('   重启命令重试 ($retry/$maxRetries)...');
         await Future.delayed(const Duration(seconds: 2));
+        
+        // 延迟后再次检查是否被取消
+        if (_cancelRestartCommand1 || _cancelRestartCommand3 || _cancelRestartCommand4 || _cancelRestartCommand6) {
+          logState.warning('⚠️ 重启命令已被取消（新测试开始）');
+          return;
+        }
       }
 
       // 检查蓝牙连接状态
@@ -2945,6 +2972,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
 
+    // 取消之前可能还在运行的重启命令重试
+    _cancelRestartCommand4 = true;
+    await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
+    _cancelRestartCommand4 = false; // 重置标志
+    
     setState(() {
       _isAutoTesting4 = true;
       _currentStep4 = 0;
@@ -3257,6 +3289,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
 
+    // 取消之前可能还在运行的重启命令重试
+    _cancelRestartCommand6 = true;
+    await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
+    _cancelRestartCommand6 = false; // 重置标志
+    
     setState(() {
       _isAutoTesting6 = true;
       _currentStep6 = 0;
