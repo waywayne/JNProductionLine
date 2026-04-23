@@ -2832,16 +2832,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     _stepResults4.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: 'WiFi连接并获取IP', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: 'WiFi拉距测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '光敏传感器测试(亮/暗)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: '纯色画面测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: 'IMU校准', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: 'IMU值测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: '24色色卡测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: 'WiFi连接并获取IP', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: 'WiFi拉距测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '光敏传感器测试(亮/暗)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: '纯色画面测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'IMU校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: 'IMU值测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '24色色卡测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -2862,21 +2863,22 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     _stepResults6.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '电池电压测试(>2.5V)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '电量检测(0~100%)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '充电状态(充电中)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: 'LED外侧亮', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: 'LED外侧关', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: 'LED内侧亮', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: 'LED内侧关', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: '右Touch-TK1(>500)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: '右Touch-TK2(>500)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '右Touch-TK3(>500)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '佩戴检测', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '左触控-点击', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: '左触控-双击', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 16, name: '左触控-长按', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 17, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '电池电压测试(>2.5V)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '电量检测(0~100%)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '充电状态(充电中)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: 'LED外侧亮', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: 'LED外侧关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: 'LED内侧亮', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: 'LED内侧关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '右Touch-TK1(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '右Touch-TK2(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '右Touch-TK3(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '左触控-点击', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '左触控-双击', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: '左触控-长按', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 18, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -3019,54 +3021,59 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             }
             break;
           case 2:
-            logState.info('步骤3: WIFI连接热点并获取IP');
+            logState.info('步骤3: 产测开始');
+            success = await _testProductionStart(state, logState);
+            message = success ? '产测开始命令发送成功' : '产测开始命令失败';
+            break;
+          case 3:
+            logState.info('步骤4: WIFI连接热点并获取IP');
             final ip = await _testWiFiConnection4(state, logState);
             success = ip != null && ip.isNotEmpty;
             _deviceIP4 = ip;
             message = success ? 'WiFi连接成功，IP: $ip' : 'WiFi连接失败';
             break;
-          case 3:
-            logState.info('步骤4: 拉距测试WIFI');
+          case 4:
+            logState.info('步骤5: 拉距测试WIFI');
             success = await _testWiFiRange4(state, logState);
             message = success ? 'WiFi拉距测试通过' : 'WiFi拉距测试失败';
             break;
-          case 4:
-            logState.info('步骤5: 光源箱不同照度光敏值(亮/暗)');
+          case 5:
+            logState.info('步骤6: 光源箱不同照度光敏值(亮/暗)');
             success = await _testLightSensorBrightDark4(state, logState);
             message = success ? '光敏值测试通过' : '光敏值测试失败';
             break;
-          case 5:
-            logState.info('步骤6: 摄像头位置与IMU位置标定');
+          case 6:
+            logState.info('步骤7: 摄像头位置与IMU位置标定');
             success = await _testCameraIMUCalibration4(state, logState);
             message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
             break;
-          case 6:
-            logState.info('步骤7: 纯色画面测试');
+          case 7:
+            logState.info('步骤8: 纯色画面测试');
             success = await _testPureColorStream4(state, logState);
             message = success ? '纯色画面测试通过' : '纯色画面测试失败';
             break;
-          case 7:
-            logState.info('步骤8: IMU校准(棋盘格)');
+          case 8:
+            logState.info('步骤9: IMU校准(棋盘格)');
             success = await _testIMUCalibration4(state, logState);
             message = success ? 'IMU校准完成' : 'IMU校准失败';
             break;
-          case 8:
-            logState.info('步骤9: IMU值测试');
+          case 9:
+            logState.info('步骤10: IMU值测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
             break;
-          case 9:
-            logState.info('步骤10: ISO12233图卡MTF测试');
+          case 10:
+            logState.info('步骤11: ISO12233图卡MTF测试');
             success = await _testISO12233MTF4(state, logState);
             message = success ? 'MTF测试通过' : 'MTF测试失败';
             break;
-          case 10:
-            logState.info('步骤11: 24色色卡色彩误差测试');
+          case 11:
+            logState.info('步骤12: 24色色卡色彩误差测试');
             success = await _testColorChart4(state, logState);
             message = success ? '色彩误差测试通过' : '色彩误差测试失败';
             break;
-          case 11:
-            logState.info('步骤12: 产测结束');
+          case 12:
+            logState.info('步骤13: 产测结束');
             success = await _testProductionEnd4(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -3332,80 +3339,85 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             }
             break;
           case 2:
-            logState.info('步骤3: 电池电压测试(>2.5V)');
+            logState.info('步骤3: 产测开始');
+            success = await _testProductionStart(state, logState);
+            message = success ? '产测开始命令发送成功' : '产测开始命令失败';
+            break;
+          case 3:
+            logState.info('步骤4: 电池电压测试(>2.5V)');
             final voltageResult = await _testBatteryVoltage6(state, logState);
             success = voltageResult['success'] == true;
             message = voltageResult['message'] as String?;
             break;
-          case 3:
-            logState.info('步骤4: 电量检测(0~100%)');
+          case 4:
+            logState.info('步骤5: 电量检测(0~100%)');
             final batteryResult = await _testBattery6(state, logState);
             success = batteryResult['success'] == true;
             message = batteryResult['message'] as String?;
             break;
-          case 4:
-            logState.info('步骤5: 充电状态(充电中)');
+          case 5:
+            logState.info('步骤6: 充电状态(充电中)');
             final chargeResult = await _testChargeStatus6(state, logState);
             success = chargeResult['success'] == true;
             message = chargeResult['message'] as String?;
             break;
-          case 5:
-            logState.info('步骤6: LED外侧亮');
+          case 6:
+            logState.info('步骤7: LED外侧亮');
             success = await _testLED6(state, logState, isOuter: true, turnOn: true);
             message = success ? 'LED外侧亮测试通过' : 'LED外侧亮测试失败';
             break;
-          case 6:
-            logState.info('步骤7: LED外侧关');
+          case 7:
+            logState.info('步骤8: LED外侧关');
             success = await _testLED6(state, logState, isOuter: true, turnOn: false);
             message = success ? 'LED外侧关测试通过' : 'LED外侧关测试失败';
             break;
-          case 7:
-            logState.info('步骤8: LED内侧亮');
+          case 8:
+            logState.info('步骤9: LED内侧亮');
             success = await _testLED6(state, logState, isOuter: false, turnOn: true);
             message = success ? 'LED内侧亮测试通过' : 'LED内侧亮测试失败';
             break;
-          case 8:
-            logState.info('步骤9: LED内侧关');
+          case 9:
+            logState.info('步骤10: LED内侧关');
             success = await _testLED6(state, logState, isOuter: false, turnOn: false);
             message = success ? 'LED内侧关测试通过' : 'LED内侧关测试失败';
             break;
-          case 9:
-            logState.info('步骤10: 右Touch-TK1(>500)');
+          case 10:
+            logState.info('步骤11: 右Touch-TK1(>500)');
             success = await _testTouch6(state, logState, touchType: 'TK1');
             message = success ? 'TK1测试通过' : 'TK1测试失败';
             break;
-          case 10:
-            logState.info('步骤11: 右Touch-TK2(>500)');
+          case 11:
+            logState.info('步骤12: 右Touch-TK2(>500)');
             success = await _testTouch6(state, logState, touchType: 'TK2');
             message = success ? 'TK2测试通过' : 'TK2测试失败';
             break;
-          case 11:
-            logState.info('步骤12: 右Touch-TK3(>500)');
+          case 12:
+            logState.info('步骤13: 右Touch-TK3(>500)');
             success = await _testTouch6(state, logState, touchType: 'TK3');
             message = success ? 'TK3测试通过' : 'TK3测试失败';
             break;
-          case 12:
-            logState.info('步骤13: 佩戴检测');
+          case 13:
+            logState.info('步骤14: 佩戴检测');
             success = await _testWearDetection6(state, logState);
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 13:
-            logState.info('步骤14: 左触控-点击');
+          case 14:
+            logState.info('步骤15: 左触控-点击');
             success = await _testLeftTouch6(state, logState, touchType: '点击');
             message = success ? '左触控点击测试通过' : '左触控点击测试失败';
             break;
-          case 14:
-            logState.info('步骤15: 左触控-双击');
+          case 15:
+            logState.info('步骤16: 左触控-双击');
             success = await _testLeftTouch6(state, logState, touchType: '双击');
             message = success ? '左触控双击测试通过' : '左触控双击测试失败';
             break;
-          case 15:
-            logState.info('步骤16: 左触控-长按');
+          case 16:
+            logState.info('步骤17: 左触控-长按');
             success = await _testLeftTouch6(state, logState, touchType: '长按');
             message = success ? '左触控长按测试通过' : '左触控长按测试失败';
             break;
-          case 16:
-            logState.info('步骤17: 产测结束');
+          case 17:
+            logState.info('步骤18: 产测结束');
             success = await _testProductionEnd6(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
