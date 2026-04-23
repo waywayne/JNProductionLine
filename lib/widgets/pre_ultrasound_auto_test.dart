@@ -91,7 +91,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _initializeSteps1();
     _initializeSteps3();
     _initializeSteps4();
@@ -185,18 +185,24 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                       unselectedLabelColor: Colors.grey,
                       indicatorColor: Colors.orange.shade700,
                       indicatorWeight: 3,
-                      isScrollable: true,
+                      isScrollable: false,
+                      labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      unselectedLabelStyle: const TextStyle(fontSize: 12),
                       tabs: const [
                         Tab(
-                          icon: Icon(Icons.power),
+                          icon: Icon(Icons.wifi, size: 20),
+                          text: '工位1: 射频图像',
+                        ),
+                        Tab(
+                          icon: Icon(Icons.power, size: 20),
                           text: '工位3: 电源外设',
                         ),
                         Tab(
-                          icon: Icon(Icons.signal_cellular_alt),
+                          icon: Icon(Icons.signal_cellular_alt, size: 20),
                           text: '工位4: 超声后射频图像',
                         ),
                         Tab(
-                          icon: Icon(Icons.electrical_services),
+                          icon: Icon(Icons.electrical_services, size: 20),
                           text: '工位6: 超声后电源外设',
                         ),
                       ],
@@ -210,6 +216,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 child: TabBarView(
                   controller: _tabController,
                   children: [
+                    // 工位1: 射频图像测试
+                    _buildWorkstation1Content(state),
                     // 工位3: 电源外设测试
                     _buildWorkstation3Content(state),
                     // 工位4: 超声后射频图像测试
