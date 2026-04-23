@@ -47,7 +47,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   ProductSNInfo? _productInfo1;
   String? _deviceIP1;
   String? _scannedSN1;
-  BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommBind;
+  BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService1 = BydMesService();
 
   // 工位4状态
@@ -296,134 +296,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           
           const SizedBox(height: 16),
           
-          // 蓝牙测试方案按钮区域
-          if (!_isAutoTesting1) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue[200]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.bluetooth, color: Colors.blue[700], size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        '蓝牙连接测试方案',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[700],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _buildMethodButton(
-                        label: '方案1: 扫描配对',
-                        color: Colors.blue,
-                        icon: Icons.search,
-                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.autoScan),
-                      ),
-                      _buildMethodButton(
-                        label: '方案2: 直接连接',
-                        color: Colors.green,
-                        icon: Icons.link,
-                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.directConnect),
-                      ),
-                      _buildMethodButton(
-                        label: '方案3: RFCOMM Bind',
-                        color: Colors.orange,
-                        icon: Icons.cable,
-                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommBind),
-                      ),
-                      _buildMethodButton(
-                        label: '方案4: RFCOMM Socket',
-                        color: Colors.purple,
-                        icon: Icons.code,
-                        onPressed: () => _testSingleMethod(state, BluetoothTestMethod.rfcommSocket),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
+          // 蓝牙连接测试方案面板已隐藏，默认使用 RFCOMM Socket
           
           // 控制按钮
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              // 调试模式开关
-              Row(
-                children: [
-                  Icon(Icons.bug_report, color: _debugMode1 ? Colors.red : Colors.grey, size: 20),
-                  const SizedBox(width: 4),
-                  Text('调试模式', style: TextStyle(fontSize: 12, color: _debugMode1 ? Colors.red : Colors.grey)),
-                  Switch(
-                    value: _debugMode1,
-                    onChanged: _isAutoTesting1 ? null : (value) => setState(() => _debugMode1 = value),
-                    activeColor: Colors.red,
-                  ),
-                ],
-              ),
-              Row(
-                children: [
               if (!_isAutoTesting1) ...[
-                // 蓝牙方案选择
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<BluetoothTestMethod>(
-                          value: _selectedMethod1,
-                          isDense: true,
-                          items: const [
-                            DropdownMenuItem(
-                              value: BluetoothTestMethod.autoScan,
-                              child: Text('方案1: 扫描配对', style: TextStyle(fontSize: 12)),
-                            ),
-                            DropdownMenuItem(
-                              value: BluetoothTestMethod.directConnect,
-                              child: Text('方案2: 直接连接', style: TextStyle(fontSize: 12)),
-                            ),
-                            DropdownMenuItem(
-                              value: BluetoothTestMethod.rfcommBind,
-                              child: Text('方案3: RFCOMM Bind ⭐', style: TextStyle(fontSize: 12)),
-                            ),
-                            DropdownMenuItem(
-                              value: BluetoothTestMethod.rfcommSocket,
-                              child: Text('方案4: RFCOMM Socket', style: TextStyle(fontSize: 12)),
-                            ),
-                            DropdownMenuItem(
-                              value: BluetoothTestMethod.serial,
-                              child: Text('方案5: 串口设备', style: TextStyle(fontSize: 12)),
-                            ),
-                            DropdownMenuItem(
-                              value: BluetoothTestMethod.commandLine,
-                              child: Text('方案6: 命令行工具', style: TextStyle(fontSize: 12)),
-                            ),
-                          ],
-                          onChanged: (value) {
-                            if (value != null) {
-                              setState(() => _selectedMethod1 = value);
-                            }
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
                     // 数据解析模式选择
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1389,6 +1268,89 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
     
+    // 如果需要进行充电电流测试，先连接GPIB
+    if (!_skipChargingCurrentTest3) {
+      logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      logState.info('🔌 准备连接GPIB程控电源...');
+      
+      // 检查是否已配置GPIB地址
+      if (state.gpibAddress == null || state.gpibAddress!.isEmpty) {
+        logState.warning('⚠️  GPIB地址未配置');
+        
+        // 弹出GPIB地址配置对话框
+        if (!mounted) return;
+        final address = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => _GpibAddressDialog(
+            initialAddress: state.gpibAddress,
+          ),
+        );
+        
+        if (address == null || address.isEmpty) {
+          logState.warning('用户取消配置GPIB地址');
+          return;
+        }
+        
+        logState.info('✅ GPIB地址已配置: $address');
+      }
+      
+      // 主动连接GPIB设备
+      logState.info('📡 正在连接GPIB设备...');
+      final connected = await state.detectAndConnectGpib(
+        state.gpibAddress!,
+        skipLeakageTest: true,  // 跳过漏电流测试，只建立连接
+      );
+      
+      if (!connected) {
+        logState.error('❌ GPIB连接失败');
+        
+        if (!mounted) return;
+        final retry = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.error, color: Colors.red),
+                SizedBox(width: 8),
+                Text('GPIB连接失败'),
+              ],
+            ),
+            content: const Text(
+              'GPIB程控电源连接失败，无法进行充电电流测试。\n\n'
+              '请检查：\n'
+              '1. GPIB设备是否已开机\n'
+              '2. GPIB地址是否正确\n'
+              '3. USB-GPIB适配器是否连接\n\n'
+              '或者选择跳过充电电流测试。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消测试'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('重试连接'),
+              ),
+            ],
+          ),
+        );
+        
+        if (retry == true) {
+          // 递归重试
+          return _startAutoTest3(state);
+        } else {
+          logState.warning('用户取消测试');
+          return;
+        }
+      }
+      
+      logState.success('✅ GPIB连接成功，设备已就绪');
+      logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    }
+    
     setState(() {
       _isAutoTesting3 = true;
       _currentStep3 = 0;
@@ -1400,6 +1362,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   SN: ${_scannedSN3 ?? "MAC直连"}');
     logState.info('   蓝牙: ${_productInfo3!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod3)}');
+    if (_skipChargingCurrentTest3) {
+      logState.info('   充电电流测试: 已跳过');
+    }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
@@ -5283,6 +5248,88 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('关闭'),
           ),
+      ],
+    );
+  }
+}
+
+/// GPIB地址配置对话框
+class _GpibAddressDialog extends StatefulWidget {
+  final String? initialAddress;
+  
+  const _GpibAddressDialog({this.initialAddress});
+  
+  @override
+  State<_GpibAddressDialog> createState() => _GpibAddressDialogState();
+}
+
+class _GpibAddressDialogState extends State<_GpibAddressDialog> {
+  late TextEditingController _controller;
+  
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialAddress ?? 'GPIB0::5::INSTR');
+  }
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.cable, color: Colors.blue),
+          SizedBox(width: 8),
+          Text('配置GPIB地址'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '充电电流测试需要使用GPIB程控电源。\n请输入GPIB设备地址：',
+            style: TextStyle(fontSize: 14),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            decoration: const InputDecoration(
+              labelText: 'GPIB地址',
+              hintText: 'GPIB0::5::INSTR',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.settings_input_component),
+            ),
+            autofocus: true,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '常用地址格式：\n'
+            '• GPIB0::5::INSTR\n'
+            '• GPIB0::6::INSTR',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            final address = _controller.text.trim();
+            if (address.isNotEmpty) {
+              Navigator.of(context).pop(address);
+            }
+          },
+          child: const Text('确定'),
+        ),
       ],
     );
   }
