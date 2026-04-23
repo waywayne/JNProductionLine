@@ -81,8 +81,48 @@ class MenuBarWidget extends StatelessWidget {
                   child: Container(
                     width: 900,
                     height: 700,
-                    padding: const EdgeInsets.all(16),
-                    child: const OTAUpgradeWidget(),
+                    child: Column(
+                      children: [
+                        // 标题栏带关闭按钮
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade600,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(4),
+                              topRight: Radius.circular(4),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.system_update, color: Colors.white, size: 24),
+                              const SizedBox(width: 8),
+                              const Text(
+                                '产测OTA升级',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white),
+                                onPressed: () => Navigator.of(context).pop(),
+                                tooltip: '关闭',
+                              ),
+                            ],
+                          ),
+                        ),
+                        // 内容区域
+                        const Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: OTAUpgradeWidget(),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -99,8 +139,48 @@ class MenuBarWidget extends StatelessWidget {
                   child: Container(
                     width: 900,
                     height: 700,
-                    padding: const EdgeInsets.all(16),
-                    child: const WiFiRangeTestWidget(),
+                    child: Column(
+                      children: [
+                        // 标题栏带关闭按钮
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade600,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(4),
+                              topRight: Radius.circular(4),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.wifi, color: Colors.white, size: 24),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'WiFi拉距测试',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white),
+                                onPressed: () => Navigator.of(context).pop(),
+                                tooltip: '关闭',
+                              ),
+                            ],
+                          ),
+                        ),
+                        // 内容区域
+                        const Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: WiFiRangeTestWidget(),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -117,8 +197,48 @@ class MenuBarWidget extends StatelessWidget {
                   child: Container(
                     width: 900,
                     height: 700,
-                    padding: const EdgeInsets.all(16),
-                    child: const ImageAlgorithmTestWidget(),
+                    child: Column(
+                      children: [
+                        // 标题栏带关闭按钮
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade600,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(4),
+                              topRight: Radius.circular(4),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.image, color: Colors.white, size: 24),
+                              const SizedBox(width: 8),
+                              const Text(
+                                '图像算法测试',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white),
+                                onPressed: () => Navigator.of(context).pop(),
+                                tooltip: '关闭',
+                              ),
+                            ],
+                          ),
+                        ),
+                        // 内容区域
+                        const Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: ImageAlgorithmTestWidget(),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               );
