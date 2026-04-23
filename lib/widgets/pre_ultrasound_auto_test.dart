@@ -58,7 +58,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   ProductSNInfo? _productInfo4;
   String? _deviceIP4;
   String? _scannedSN4;
-  BluetoothTestMethod _selectedMethod4 = BluetoothTestMethod.rfcommBind;
+  BluetoothTestMethod _selectedMethod4 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService4 = BydMesService();
   bool _cancelRestartCommand4 = false; // 取消重启命令标志
 
@@ -68,7 +68,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final List<TestStepResult> _stepResults5 = [];
   ProductSNInfo? _productInfo5;
   String? _scannedSN5;
-  BluetoothTestMethod _selectedMethod5 = BluetoothTestMethod.rfcommBind;
+  BluetoothTestMethod _selectedMethod5 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService5 = BydMesService();
 
   // 工位6状态
@@ -77,7 +77,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final List<TestStepResult> _stepResults6 = [];
   ProductSNInfo? _productInfo6;
   String? _scannedSN6;
-  BluetoothTestMethod _selectedMethod6 = BluetoothTestMethod.rfcommBind;
+  BluetoothTestMethod _selectedMethod6 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService6 = BydMesService();
   bool _cancelRestartCommand6 = false; // 取消重启命令标志
 
@@ -1106,35 +1106,30 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
       
       final bluetoothAddress = _productInfo1!.bluetoothAddress;
+      if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙地址为空');
+        return false;
+      }
+
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 ${_getMethodName(_selectedMethod1)}');
+      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
       
-      bool success = false;
-      
-      switch (_selectedMethod1) {
-        case BluetoothTestMethod.autoScan:
-          success = await state.testBluetoothMethod1AutoScan(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.directConnect:
-          success = await state.testBluetoothMethod2DirectConnect(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.rfcommBind:
-          success = await state.testBluetoothMethod3RfcommBind(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.rfcommSocket:
-          success = await state.testBluetoothMethod4RfcommSocket(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.serial:
-          success = await state.testBluetoothMethod5Serial(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.commandLine:
-          success = await state.testBluetoothMethod6CommandLine(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
+      // 使用RFCOMM Socket方式，固定channel 5
+      final success = await state.testBluetoothMethod4RfcommSocket(
+        deviceAddress: bluetoothAddress,
+        channel: 5,
+        uuid: '7033',
+      );
+
+      if (success) {
+        logState.success('✅ 蓝牙连接成功');
+      } else {
+        logState.error('❌ 蓝牙连接失败');
       }
       
       return success;
     } catch (e) {
-      logState.error('蓝牙连接测试失败: $e');
+      logState.error('❌ 蓝牙连接测试异常: $e');
       return false;
     }
   }
@@ -1559,30 +1554,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
 
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 ${_getMethodName(_selectedMethod3)}');
+      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
       
-      bool success = false;
-      
-      switch (_selectedMethod3) {
-        case BluetoothTestMethod.autoScan:
-          success = await state.testBluetoothMethod1AutoScan(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.directConnect:
-          success = await state.testBluetoothMethod2DirectConnect(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.rfcommBind:
-          success = await state.testBluetoothMethod3RfcommBind(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.rfcommSocket:
-          success = await state.testBluetoothMethod4RfcommSocket(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.serial:
-          success = await state.testBluetoothMethod5Serial(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-        case BluetoothTestMethod.commandLine:
-          success = await state.testBluetoothMethod6CommandLine(deviceAddress: bluetoothAddress, channel: 5, uuid: '7033');
-          break;
-      }
+      // 使用RFCOMM Socket方式，固定channel 5
+      final success = await state.testBluetoothMethod4RfcommSocket(
+        deviceAddress: bluetoothAddress,
+        channel: 5,
+        uuid: '7033',
+      );
 
       if (success) {
         logState.info('✅ 蓝牙连接成功');
@@ -3531,14 +3510,30 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
       
       final bluetoothAddress = _productInfo4!.bluetoothAddress;
+      if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙地址为空');
+        return false;
+      }
+
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
       
-      final success = await state.testLinuxBluetooth(
+      // 使用RFCOMM Socket方式，固定channel 5
+      final success = await state.testBluetoothMethod4RfcommSocket(
         deviceAddress: bluetoothAddress,
+        channel: 5,
+        uuid: '7033',
       );
+
+      if (success) {
+        logState.success('✅ 蓝牙连接成功');
+      } else {
+        logState.error('❌ 蓝牙连接失败');
+      }
+      
       return success;
     } catch (e) {
-      logState.error('蓝牙连接测试失败: $e');
+      logState.error('❌ 蓝牙连接测试异常: $e');
       return false;
     }
   }
@@ -3835,14 +3830,30 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
       
       final bluetoothAddress = _productInfo6!.bluetoothAddress;
+      if (bluetoothAddress == null || bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙地址为空');
+        return false;
+      }
+
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
       
-      final success = await state.testLinuxBluetooth(
+      // 使用RFCOMM Socket方式，固定channel 5
+      final success = await state.testBluetoothMethod4RfcommSocket(
         deviceAddress: bluetoothAddress,
+        channel: 5,
+        uuid: '7033',
       );
+
+      if (success) {
+        logState.success('✅ 蓝牙连接成功');
+      } else {
+        logState.error('❌ 蓝牙连接失败');
+      }
+      
       return success;
     } catch (e) {
-      logState.error('蓝牙连接测试失败: $e');
+      logState.error('❌ 蓝牙连接测试异常: $e');
       return false;
     }
   }
