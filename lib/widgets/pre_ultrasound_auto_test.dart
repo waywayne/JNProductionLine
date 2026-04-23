@@ -3546,7 +3546,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       final String password = WiFiConfig.defaultPassword;
       
       if (ssid.isEmpty) {
-        logState.error('❌ WiFi SSID未配置');
+        logState.error('❌ WiFi SSID未配置，请在通用配置中设置');
         return null;
       }
 
@@ -3554,44 +3554,68 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       final ssidBytes = ssid.codeUnits + [0x00];
       final pwdBytes = password.codeUnits + [0x00];
-      final wifiPayload = [...ssidBytes, ...pwdBytes];
-      final wifiCommand = ProductionTestCommands.createControlWifiCommand(0x05, data: wifiPayload);
+      final payload = [...ssidBytes, ...pwdBytes];
+      final command = ProductionTestCommands.createControlWifiCommand(0x05, data: payload);
 
+      // 重试机制：最多尝试3次，每次超时10秒
       for (int retry = 0; retry < 3; retry++) {
         if (retry > 0) {
-          logState.info('   WiFi重试 ($retry/3)...');
+          logState.info('   重试 ($retry/3)...');
           await Future.delayed(const Duration(seconds: 2));
         }
 
+        logState.info('📤 发送WiFi连接命令 (0x05)...');
+
         try {
+          // 使用 Linux 蓝牙发送命令并等待响应（10秒超时）
           final response = await state.sendCommandViaLinuxBluetooth(
-            wifiCommand,
+            command,
             timeout: const Duration(seconds: 10),
             moduleId: ProductionTestCommands.moduleId,
             messageId: ProductionTestCommands.messageId,
           );
 
           if (response != null && !response.containsKey('error')) {
+            // 显示响应数据
             if (response.containsKey('payload') && response['payload'] != null) {
               final responsePayload = response['payload'] as Uint8List;
+              final payloadHex = responsePayload
+                  .map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0'))
+                  .join(' ');
+              logState.info('📥 响应: [$payloadHex] (${responsePayload.length} bytes)');
+              
+              // 解析WiFi响应，传入opt 0x05
               final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x05);
 
-              if (wifiResult != null && wifiResult['success'] == true && wifiResult.containsKey('ip')) {
-                final deviceIP = wifiResult['ip'];
-                logState.success('✅ 获取到设备IP: $deviceIP');
-                return deviceIP;
+              if (wifiResult != null && wifiResult['success'] == true) {
+                if (wifiResult.containsKey('ip')) {
+                  final deviceIP = wifiResult['ip'];
+                  logState.success('✅ 获取到设备IP: $deviceIP');
+                  logState.info('✅ WiFi连接成功');
+                  return deviceIP;
+                } else {
+                  logState.warning('⚠️ 响应成功但未包含IP地址');
+                }
+              } else {
+                logState.warning('⚠️ WiFi响应解析失败或返回失败');
               }
+            } else {
+              logState.warning('⚠️ 响应中无payload数据');
             }
+          } else {
+            final errorMsg = response?['error'] ?? '未知错误';
+            logState.warning('⚠️ 命令响应失败: $errorMsg');
           }
         } catch (e) {
-          logState.warning('⚠️ WiFi连接异常: $e');
+          logState.warning('⚠️ 发送命令异常: $e');
         }
       }
 
-      logState.error('❌ WiFi连接失败');
+      // 3次重试后仍未获取到IP
+      logState.error('❌ 3次重试后仍未获取到IP地址');
       return null;
     } catch (e) {
-      logState.error('WiFi连接测试失败: $e');
+      logState.error('❌ WiFi连接测试失败: $e');
       return null;
     }
   }
