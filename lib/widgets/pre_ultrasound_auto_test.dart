@@ -3641,17 +3641,181 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       return false;
     }
 
-    try {
-      logState.info('📡 开始WiFi拉距测试...');
-      logState.info('   设备IP: $_deviceIP4');
-      logState.info('   提示：此测试需要设备运行 iperf3 服务器');
-      
-      await Future.delayed(const Duration(seconds: 2));
-      logState.success('✅ WiFi拉距测试完成（模拟通过）');
-      return true;
-    } catch (e) {
-      logState.error('WiFi拉距测试失败: $e');
+    final threshold = _config.iperfSpeedThresholdMbps;
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('📡 WiFi 拉距测试');
+    logState.info('   设备IP: $_deviceIP4');
+    logState.info('   速率阈值: ≥${threshold}Mbps');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    // ========== 第一轮测试 ==========
+    if (!mounted) return false;
+    final round1Confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.wifi, color: Colors.blue),
+            SizedBox(width: 8),
+            Text('WiFi拉距测试 - 第一轮'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('设备IP: $_deviceIP4', style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 8),
+            Text('速率阈值: ≥${threshold}Mbps', style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 16),
+            const Text('请确保设备已连接WiFi，然后点击确定开始第一轮测试'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+
+    if (round1Confirm != true) {
+      logState.warning('⚠️ 用户取消第一轮测试');
       return false;
+    }
+
+    logState.info('🚀 第一轮测试: iperf3 → $_deviceIP4 ...');
+    final result1 = await _runIperf(_deviceIP4!, logState);
+    
+    if (result1 == null) {
+      logState.error('❌ 第一轮测试失败');
+      return false;
+    }
+
+    final speed1 = result1['speed'];
+    logState.info('📊 第一轮速率: ${speed1.toStringAsFixed(2)} Mbps');
+    
+    if (speed1 < threshold) {
+      logState.error('❌ 第一轮速率 ${speed1.toStringAsFixed(2)} Mbps < 阈值 ${threshold} Mbps');
+      return false;
+    }
+    
+    logState.success('✅ 第一轮测试通过: ${speed1.toStringAsFixed(2)} Mbps ≥ ${threshold} Mbps');
+
+    // ========== 第二轮测试 ==========
+    await Future.delayed(const Duration(seconds: 1));
+    
+    if (!mounted) return false;
+    final round2Confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.wifi_tethering, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('WiFi拉距测试 - 第二轮'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('第一轮速率: ${speed1.toStringAsFixed(2)} Mbps ✅', 
+                style: const TextStyle(fontSize: 14, color: Colors.green)),
+            const SizedBox(height: 16),
+            const Text('请将设备远离路由器（拉远距离），然后点击确定开始第二轮测试', 
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+
+    if (round2Confirm != true) {
+      logState.warning('⚠️ 用户取消第二轮测试');
+      return false;
+    }
+
+    logState.info('🚀 第二轮测试（设备已拉远）: iperf3 → $_deviceIP4 ...');
+    final result2 = await _runIperf(_deviceIP4!, logState);
+    
+    if (result2 == null) {
+      logState.error('❌ 第二轮测试失败');
+      return false;
+    }
+
+    final speed2 = result2['speed'];
+    logState.info('📊 第二轮速率: ${speed2.toStringAsFixed(2)} Mbps');
+    
+    if (speed2 < threshold) {
+      logState.error('❌ 第二轮速率 ${speed2.toStringAsFixed(2)} Mbps < 阈值 ${threshold} Mbps');
+      return false;
+    }
+    
+    logState.success('✅ 第二轮测试通过: ${speed2.toStringAsFixed(2)} Mbps ≥ ${threshold} Mbps');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.success('🎉 WiFi拉距测试全部通过！');
+    logState.info('   第一轮: ${speed1.toStringAsFixed(2)} Mbps');
+    logState.info('   第二轮: ${speed2.toStringAsFixed(2)} Mbps');
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    
+    return true;
+  }
+
+  /// 执行iperf3测试
+  /// 返回 Map 包含 speed (Mbps) 和 rawOutput
+  Future<Map<String, dynamic>?> _runIperf(String deviceIP, LogState logState) async {
+    final cmd = 'iperf3';
+    final args = ['-c', deviceIP, '-p', '5001', '-t', '3', '-i', '1', '--json'];
+    logState.info('🚀 执行: $cmd ${args.join(' ')}');
+
+    try {
+      final result = await Process.run(cmd, args, stdoutEncoding: utf8, stderrEncoding: utf8);
+
+      if (result.exitCode == 0) {
+        final jsonStr = result.stdout as String;
+        try {
+          final data = json.decode(jsonStr) as Map<String, dynamic>;
+          final end = data['end'] as Map<String, dynamic>?;
+          if (end != null) {
+            final sumReceived = end['sum_received'] as Map<String, dynamic>?;
+            if (sumReceived != null) {
+              final bps = (sumReceived['bits_per_second'] as num?) ?? 0;
+              final mbps = bps / 1000000;
+              logState.success('📥 接收速率: ${mbps.toStringAsFixed(2)} Mbps');
+              return {'speed': mbps, 'rawOutput': jsonStr};
+            }
+          }
+        } catch (e) {
+          logState.warning('⚠️ JSON解析失败: $e');
+        }
+        logState.error('❌ 无法从iperf3输出中提取速率');
+        return null;
+      } else {
+        final err = '退出码: ${result.exitCode}\n${result.stderr}';
+        logState.error('❌ iperf3 失败: $err');
+        return null;
+      }
+    } catch (e) {
+      final err = '执行iperf3异常: $e\n请确认已安装 iperf3';
+      logState.error('❌ $err');
+      return null;
     }
   }
 

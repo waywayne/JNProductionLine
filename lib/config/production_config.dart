@@ -34,6 +34,7 @@ class ProductionConfig {
   static const String _keyBydMesIp = 'byd_mes_ip';
   static const String _keyBydMesClientId = 'byd_mes_client_id';
   static const String _keyBydMesStation = 'byd_mes_station';
+  static const String _keyIperfSpeedThresholdMbps = 'iperf_speed_threshold_mbps';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -58,6 +59,7 @@ class ProductionConfig {
   static const String defaultBydMesIp = '192.168.1.100';  // BYD MES 服务器 IP
   static const String defaultBydMesClientId = 'DEFAULT_CLIENT';  // BYD MES 客户端 ID
   static const String defaultBydMesStation = 'STATION1';  // BYD MES 站点名称
+  static const double defaultIperfSpeedThresholdMbps = 10.0;  // iperf 速率阈值 (Mbps)
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -231,6 +233,12 @@ class ProductionConfig {
     await _prefs?.setString(_keyBydMesStation, value);
   }
 
+  // ========== iperf 速率阈值 (Mbps) ==========
+  double get iperfSpeedThresholdMbps => _prefs?.getDouble(_keyIperfSpeedThresholdMbps) ?? defaultIperfSpeedThresholdMbps;
+  Future<void> setIperfSpeedThresholdMbps(double value) async {
+    await _prefs?.setDouble(_keyIperfSpeedThresholdMbps, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -254,6 +262,7 @@ class ProductionConfig {
     await setBydMesIp(defaultBydMesIp);
     await setBydMesClientId(defaultBydMesClientId);
     await setBydMesStation(defaultBydMesStation);
+    await setIperfSpeedThresholdMbps(defaultIperfSpeedThresholdMbps);
   }
 
   /// 获取所有配置的摘要
@@ -279,6 +288,7 @@ class ProductionConfig {
       'BYD MES IP': bydMesIp,
       'BYD MES Client ID': bydMesClientId,
       'BYD MES 站点': bydMesStation,
+      'iperf 速率阈值': '≥${iperfSpeedThresholdMbps}Mbps',
     };
   }
 }
