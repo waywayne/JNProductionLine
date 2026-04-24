@@ -225,6 +225,15 @@ hciconfig hci0 up 2>/dev/null || true
     try {
       _logState?.info('🔗 配对并连接蓝牙设备...');
       
+      // 0. 先断开可能存在的旧连接（避免设备被占用）
+      _logState?.info('   清理旧连接...');
+      try {
+        await Process.run('bash', ['-c', 'echo "disconnect $deviceAddress" | bluetoothctl']);
+        await Future.delayed(const Duration(milliseconds: 800));
+      } catch (e) {
+        _logState?.debug('   清理旧连接失败（可能不存在）: $e');
+      }
+      
       // 1. 检查是否已配对
       final checkPaired = await Process.run('bash', ['-c', 'echo "paired-devices" | bluetoothctl | grep -i $deviceAddress']);
       final alreadyPaired = checkPaired.exitCode == 0;
@@ -250,38 +259,19 @@ hciconfig hci0 up 2>/dev/null || true
   sleep 0.5
 ) | bluetoothctl
 ''';
+        await Process.run('bash', ['-c', scanScript]);
         
-        final scanResult = await Process.run('bash', ['-c', scanScript]);
-        _logState?.debug('   扫描输出: ${scanResult.stdout}');
-        
-        // 检查设备是否被发现
-        final checkDevice = await Process.run('bash', ['-c', 'echo "info $deviceAddress" | bluetoothctl']);
-        final deviceFound = !checkDevice.stdout.toString().contains('Device $deviceAddress not available');
-        
-        if (!deviceFound) {
-          _logState?.error('❌ 扫描后仍未发现设备: $deviceAddress');
-          _logState?.info('   请确保设备已开机并处于可发现状态');
-          return false;
-        }
-        
-        _logState?.success('✅ 设备已发现');
-        
-        // 配对设备
-        _logState?.info('   🔐 开始配对设备...');
+        // 配对设备（使用 expect 自动确认配对）
         final pairScript = '''
-(
-  echo "pair $deviceAddress"
-  sleep 5
-  echo "trust $deviceAddress"
-  sleep 1
-) | bluetoothctl
+echo "pair $deviceAddress" | bluetoothctl
+sleep 2
+echo "trust $deviceAddress" | bluetoothctl
 ''';
-        
         final pairResult = await Process.run('bash', ['-c', pairScript]);
         _logState?.debug('   配对输出: ${pairResult.stdout}');
         
         // 等待配对完成
-        await Future.delayed(const Duration(seconds: 2));
+        await Future.delayed(const Duration(seconds: 3));
         
         // 验证配对
         final checkAgain = await Process.run('bash', ['-c', 'echo "paired-devices" | bluetoothctl | grep -i $deviceAddress']);

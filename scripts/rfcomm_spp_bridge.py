@@ -220,28 +220,20 @@ def main():
     # 1. 清理旧进程（已移到 Dart 端在启动前执行，避免 Python 误杀自身 sudo 父进程）
     # cleanup_old_processes()
 
-    # 2. 连接（带重试，尝试指定通道 + 常见通道）
+    # 2. 连接（只使用指定通道，重试3次）
     client_sock = None
-    candidates = [channel]
-    for ch in [1, 2, 3, 4, 5, 6]:
-        if ch not in candidates:
-            candidates.append(ch)
-
     for attempt in range(1, 4):
         log(f"🔗 第 {attempt}/3 轮连接尝试")
-        for ch in candidates:
-            client_sock = connect_spp(mac, ch, timeout=10)
-            if client_sock:
-                log(f"✅ 成功连接到 Channel {ch}")
-                break
+        client_sock = connect_spp(mac, channel, timeout=10)
         if client_sock:
+            log(f"✅ 成功连接到 Channel {channel}")
             break
         if attempt < 3:
             log(f"⏳ 等待 2 秒后重试...")
             time.sleep(2)
 
     if not client_sock:
-        log("❌ 所有通道连接均失败")
+        log(f"❌ Channel {channel} 连接失败（已重试3次）")
         log("提示：请检查设备是否进入配对模式或被其他设备占用。")
         sys.exit(1)
 
