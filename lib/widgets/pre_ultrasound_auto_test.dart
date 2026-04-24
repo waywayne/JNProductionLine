@@ -3983,15 +3983,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     final payload = response['payload'];
     if (payload is List && payload.length >= 3) {
       final chargeStatus = payload[1];
-      final isCharging = chargeStatus == 0x01;
+      final faultCode = payload[2];
       
-      final chargeDesc = isCharging ? '充电中' : (chargeStatus == 0x02 ? '未充电' : '状态: 0x${chargeStatus.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+      final chargeDesc = chargeStatus == 0x01 ? '充电中' : (chargeStatus == 0x02 ? '未充电' : '状态: 0x${chargeStatus.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+      final hasFault = faultCode != 0x00;
       
       logState.info('   充电状态: $chargeDesc');
+      logState.info('   故障码: 0x${faultCode.toRadixString(16).toUpperCase().padLeft(2, '0')} ${hasFault ? "❌ 有故障" : "✅ 无故障"}');
       
       return {
-        'success': isCharging,
-        'message': '$chargeDesc ${isCharging ? "✅" : "❌"}',
+        'success': !hasFault,
+        'message': '$chargeDesc, 故障码: 0x${faultCode.toRadixString(16).toUpperCase().padLeft(2, '0')} ${!hasFault ? "✅" : "❌"}',
       };
     }
 
@@ -5226,6 +5228,15 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
         ),
       ),
       actions: [
+        if (_isRunning)
+          TextButton(
+            onPressed: () {
+              _subscription?.cancel();
+              _timeoutTimer?.cancel();
+              Navigator.of(context).pop(false);
+            },
+            child: const Text('取消'),
+          ),
         if (_isFailed)
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
