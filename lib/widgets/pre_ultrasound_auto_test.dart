@@ -4277,46 +4277,141 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   }
 
   Future<bool> _testWearDetection6(TestState state, LogState logState) async {
-    logState.info('👓 佩戴检测测试');
+    logState.info('👆 左佩戴检测');
     
-    final wearCommand = ProductionTestCommands.createSensorCommand(0x00);
+    // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, TouchTestConfig.leftActionWearDetect,
+    );
+    logState.info('📤 发送佩戴检测命令...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
     
-    for (int retry = 0; retry < 5; retry++) {
-      if (retry > 0) {
-        logState.info('   重试 ($retry/5)...');
-        await Future.delayed(const Duration(milliseconds: 800));
-      }
-
-      try {
-        final response = await state.sendCommandViaLinuxBluetooth(
-          wearCommand,
-          timeout: const Duration(seconds: 3),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 佩戴检测命令发送失败');
+      return false;
+    }
+    
+    logState.info('✅ 命令已发送，开始监听佩戴检测推送...');
+    logState.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...');
+    
+    if (!mounted) return false;
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    bool testPassed = false;
+    String statusInfo = '请佩戴设备...';
+    
+    // 用于从外部更新 dialog UI 的回调
+    void Function(void Function())? _setDialogState;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            _setDialogState = setDialogState;
+            
+            final statusColor = testPassed ? Colors.green : Colors.orange;
+            
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.touch_app, color: statusColor),
+                  const SizedBox(width: 12),
+                  const Text('左佩戴检测'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('请将设备佩戴到耳朵上', style: TextStyle(fontSize: 16)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Text(statusInfo, 
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor)),
+                  ),
+                ],
+              ),
+              actions: [
+                if (!testPassed)
+                  TextButton(
+                    onPressed: () {
+                      subscription?.cancel();
+                      Navigator.of(dialogContext).pop();
+                      if (!completer.isCompleted) completer.complete(false);
+                    },
+                    child: const Text('取消测试'),
+                  ),
+              ],
+            );
+          },
         );
-
-        if (response == null || response.containsKey('error')) {
-          continue;
-        }
-
-        final payload = response['payload'];
-        if (payload is List && payload.length >= 2) {
-          final wearStatus = payload[1];
+      },
+    );
+    
+    // 等待 dialog 初始化
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    // 设置超时
+    final timeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!completer.isCompleted) {
+        logState.error('❌ 佩戴检测超时（15秒）');
+        subscription?.cancel();
+        statusInfo = '❌ 超时';
+        _setDialogState?.call(() {});
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) Navigator.of(context, rootNavigator: true).pop();
+          if (!completer.isCompleted) completer.complete(false);
+        });
+      }
+    });
+    
+    subscription = state.linuxBluetoothDataStream.listen((data) {
+      try {
+        final gtpResponse = GTPProtocol.parseGTPResponse(data);
+        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
+          final payload = gtpResponse['payload'] as Uint8List;
           
-          if (wearStatus == 0x01) {
-            logState.success('✅ 检测到佩戴 (0x01)');
-            return true;
-          } else {
-            logState.info('   佩戴状态: 0x${wearStatus.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+          // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
+          if (payload.length >= 3 && 
+              payload[0] == ProductionTestCommands.cmdTouch && 
+              payload[1] == TouchTestConfig.touchLeft && 
+              payload[2] == TouchTestConfig.leftActionWearDetect) {
+            if (!testPassed) {
+              testPassed = true;
+              statusInfo = '✅ 佩戴检测通过！';
+              logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+              
+              _setDialogState?.call(() {});
+              timeoutTimer.cancel();
+              subscription?.cancel();
+              
+              Future.delayed(const Duration(seconds: 1), () {
+                if (mounted) Navigator.of(context, rootNavigator: true).pop();
+                if (!completer.isCompleted) completer.complete(true);
+              });
+            }
           }
         }
       } catch (e) {
-        logState.warning('⚠️ 佩戴检测异常: $e');
+        logState.warning('⚠️ 解析推送数据出错: $e');
       }
-    }
+    });
     
-    logState.error('❌ 佩戴检测失败');
-    return false;
+    return completer.future;
   }
 
   Future<bool> _testLeftTouch6(TestState state, LogState logState, {required String touchType}) async {
