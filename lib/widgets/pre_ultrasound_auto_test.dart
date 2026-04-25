@@ -3398,42 +3398,57 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             message = success ? 'LED内侧关测试通过' : 'LED内侧关测试失败';
             break;
           case 10:
-            logState.info('步骤11: 右Touch-TK1(>500)');
+            logState.info('步骤11: 右Touch-TK1校准');
+            success = await _testTouchCalibration6(state, logState, touchType: 'TK1');
+            message = success ? 'TK1校准通过' : 'TK1校准失败';
+            break;
+          case 11:
+            logState.info('步骤12: 右Touch-TK2校准');
+            success = await _testTouchCalibration6(state, logState, touchType: 'TK2');
+            message = success ? 'TK2校准通过' : 'TK2校准失败';
+            break;
+          case 12:
+            logState.info('步骤13: 右Touch-TK3校准');
+            success = await _testTouchCalibration6(state, logState, touchType: 'TK3');
+            message = success ? 'TK3校准通过' : 'TK3校准失败';
+            break;
+          case 13:
+            logState.info('步骤14: 右Touch-TK1(>500)');
             success = await _testTouch6(state, logState, touchType: 'TK1');
             message = success ? 'TK1测试通过' : 'TK1测试失败';
             break;
-          case 11:
-            logState.info('步骤12: 右Touch-TK2(>500)');
+          case 14:
+            logState.info('步骤15: 右Touch-TK2(>500)');
             success = await _testTouch6(state, logState, touchType: 'TK2');
             message = success ? 'TK2测试通过' : 'TK2测试失败';
             break;
-          case 12:
-            logState.info('步骤13: 右Touch-TK3(>500)');
+          case 15:
+            logState.info('步骤16: 右Touch-TK3(>500)');
             success = await _testTouch6(state, logState, touchType: 'TK3');
             message = success ? 'TK3测试通过' : 'TK3测试失败';
             break;
-          case 13:
-            logState.info('步骤14: 佩戴检测');
+          case 16:
+            logState.info('步骤17: 佩戴检测');
             success = await _testWearDetection6(state, logState);
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 14:
-            logState.info('步骤15: 左触控-点击');
+          case 17:
+            logState.info('步骤18: 左触控-点击');
             success = await _testLeftTouch6(state, logState, touchType: '点击');
             message = success ? '左触控点击测试通过' : '左触控点击测试失败';
             break;
-          case 15:
-            logState.info('步骤16: 左触控-双击');
+          case 18:
+            logState.info('步骤19: 左触控-双击');
             success = await _testLeftTouch6(state, logState, touchType: '双击');
             message = success ? '左触控双击测试通过' : '左触控双击测试失败';
             break;
-          case 16:
-            logState.info('步骤17: 左触控-长按');
+          case 19:
+            logState.info('步骤20: 左触控-长按');
             success = await _testLeftTouch6(state, logState, touchType: '长按');
             message = success ? '左触控长按测试通过' : '左触控长按测试失败';
             break;
-          case 17:
-            logState.info('步骤18: 产测结束');
+          case 20:
+            logState.info('步骤21: 产测结束');
             success = await _testProductionEnd6(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -4602,6 +4617,204 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     });
     
     return completer.future;
+  }
+
+  Future<bool> _testTouchCalibration6(TestState state, LogState logState, {required String touchType}) async {
+    logState.info('🔧 右Touch校准: $touchType');
+    
+    final int tkArea;
+    final String tkName;
+    switch (touchType) {
+      case 'TK1':
+        tkArea = 0x01;
+        tkName = 'TK1';
+        break;
+      case 'TK2':
+        tkArea = 0x02;
+        tkName = 'TK2';
+        break;
+      case 'TK3':
+        tkArea = 0x03;
+        tkName = 'TK3';
+        break;
+      default:
+        logState.error('❌ 未知Touch区域: $touchType');
+        return false;
+    }
+    
+    // ========== 步骤1: 未按压校准 ==========
+    logState.info('📍 步骤1: 未按压校准');
+    
+    if (!mounted) return false;
+    
+    // 弹窗提示：请勿按压
+    final unpressedConfirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.touch_app, color: Colors.orange),
+            const SizedBox(width: 12),
+            Text('右Touch $tkName 校准 - 未按压'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '请确保 $tkName 区域未被按压',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            const Text('⚠️ 请勿触摸或按压 TK 区域'),
+            const SizedBox(height: 8),
+            const Text('点击"开始校准"进行未按压状态校准'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('开始校准'),
+          ),
+        ],
+      ),
+    );
+    
+    if (unpressedConfirmed != true) {
+      logState.warning('⚠️ 用户取消校准');
+      return false;
+    }
+    
+    // 发送未按压校准命令: 0x07 + 0x03 + TK区域 + 0x01(未按压)
+    logState.info('📤 发送未按压校准命令...');
+    final unpressedCommand = Uint8List.fromList([0x07, 0x03, tkArea, 0x01]);
+    final unpressedResponse = await state.sendCommandViaLinuxBluetooth(
+      unpressedCommand,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (unpressedResponse == null || unpressedResponse.containsKey('error')) {
+      logState.error('❌ 未按压校准命令失败');
+      return false;
+    }
+    
+    // 验证响应
+    final unpressedPayload = unpressedResponse['payload'];
+    if (unpressedPayload is List && unpressedPayload.length >= 4) {
+      final cmdByte = unpressedPayload[0];
+      final subCmd = unpressedPayload[1];
+      final areaByte = unpressedPayload[2];
+      final stateByte = unpressedPayload[3];
+      
+      if (cmdByte != 0x07 || subCmd != 0x03 || areaByte != tkArea || stateByte != 0x01) {
+        logState.error('❌ 未按压校准响应不匹配');
+        logState.error('   期望: 07 03 ${tkArea.toRadixString(16).padLeft(2, '0').toUpperCase()} 01');
+        logState.error('   实际: ${unpressedPayload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        return false;
+      }
+      
+      logState.success('✅ 未按压校准成功');
+    } else {
+      logState.error('❌ 未按压校准响应格式错误');
+      return false;
+    }
+    
+    // ========== 步骤2: 按压校准 ==========
+    logState.info('📍 步骤2: 按压校准');
+    
+    if (!mounted) return false;
+    
+    // 弹窗提示：请按压
+    final pressedConfirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.touch_app, color: Colors.green),
+            const SizedBox(width: 12),
+            Text('右Touch $tkName 校准 - 按压'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '请按压 $tkName 区域',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            const Text('👆 请用手指按压 TK 区域'),
+            const SizedBox(height: 8),
+            const Text('保持按压状态，然后点击"开始校准"'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('开始校准'),
+          ),
+        ],
+      ),
+    );
+    
+    if (pressedConfirmed != true) {
+      logState.warning('⚠️ 用户取消校准');
+      return false;
+    }
+    
+    // 发送按压校准命令: 0x07 + 0x03 + TK区域 + 0x00(按压)
+    logState.info('📤 发送按压校准命令...');
+    final pressedCommand = Uint8List.fromList([0x07, 0x03, tkArea, 0x00]);
+    final pressedResponse = await state.sendCommandViaLinuxBluetooth(
+      pressedCommand,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (pressedResponse == null || pressedResponse.containsKey('error')) {
+      logState.error('❌ 按压校准命令失败');
+      return false;
+    }
+    
+    // 验证响应
+    final pressedPayload = pressedResponse['payload'];
+    if (pressedPayload is List && pressedPayload.length >= 4) {
+      final cmdByte = pressedPayload[0];
+      final subCmd = pressedPayload[1];
+      final areaByte = pressedPayload[2];
+      final stateByte = pressedPayload[3];
+      
+      if (cmdByte != 0x07 || subCmd != 0x03 || areaByte != tkArea || stateByte != 0x00) {
+        logState.error('❌ 按压校准响应不匹配');
+        logState.error('   期望: 07 03 ${tkArea.toRadixString(16).padLeft(2, '0').toUpperCase()} 00');
+        logState.error('   实际: ${pressedPayload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        return false;
+      }
+      
+      logState.success('✅ 按压校准成功');
+      logState.success('✅ $tkName 校准完成');
+      return true;
+    } else {
+      logState.error('❌ 按压校准响应格式错误');
+      return false;
+    }
   }
 
   Future<bool> _testLeftTouch6(TestState state, LogState logState, {required String touchType}) async {
