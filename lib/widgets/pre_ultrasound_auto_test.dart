@@ -1667,6 +1667,19 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     final payload = response['payload'];
     if (payload is List && payload.length >= 3) {
+      // 验证第一个字节是否为命令 0x03
+      // 如果不是，可能是其他场景推送的数据，直接忽略
+      final cmdByte = payload[0];
+      if (cmdByte != 0x03) {
+        logState.warning('⚠️ 收到非充电状态命令响应，忽略');
+        logState.info('   期望命令: 0x03');
+        logState.info('   实际命令: 0x${cmdByte.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+        logState.info('   完整 Payload: ${payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ')}');
+        logState.info('   (可能是设备推送数据，已过滤)');
+        // 返回特殊标记，让调用者知道需要重试
+        return {'success': false, 'message': '收到非预期命令响应，已过滤', 'shouldRetry': true};
+      }
+      
       final chargeStatus = payload[1];
       final faultCode = payload[2];
       
@@ -4146,6 +4159,19 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     final payload = response['payload'];
     if (payload is List && payload.length >= 3) {
+      // 验证第一个字节是否为命令 0x03
+      // 如果不是，可能是其他场景推送的数据，直接忽略
+      final cmdByte = payload[0];
+      if (cmdByte != 0x03) {
+        logState.warning('⚠️ 收到非充电状态命令响应，忽略');
+        logState.info('   期望命令: 0x03');
+        logState.info('   实际命令: 0x${cmdByte.toRadixString(16).toUpperCase().padLeft(2, '0')}');
+        logState.info('   完整 Payload: ${payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ')}');
+        logState.info('   (可能是设备推送数据，已过滤)');
+        // 返回特殊标记，让调用者知道需要重试
+        return {'success': false, 'message': '收到非预期命令响应，已过滤', 'shouldRetry': true};
+      }
+      
       final chargeStatus = payload[1];
       final faultCode = payload[2];
       
