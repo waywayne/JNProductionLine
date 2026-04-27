@@ -97,7 +97,7 @@ class GpibCommands {
   
   /// 测量电流（单次）
   Future<double?> measureCurrent() async {
-    final response = await _gpibService.query(':READ1?');
+    final response = await _gpibService.query(':READ[1]?');
     if (response != null && response != 'TIMEOUT') {
       try {
         final current = double.parse(response.trim());

@@ -284,7 +284,7 @@ class AutomationTestState extends ChangeNotifier {
     final samples = <double>[];
     
     for (int i = 0; i < AutomationTestConfig.sampleCount; i++) {
-      final response = await _gpibService.query(':READ1?');
+      final response = await _gpibService.query(':READ[1]?');
       if (response != null && response != 'TIMEOUT') {
         final current = double.tryParse(response) ?? 0.0;
         samples.add(current.abs());
@@ -341,7 +341,7 @@ class AutomationTestState extends ChangeNotifier {
     final samples = <double>[];
     
     for (int i = 0; i < AutomationTestConfig.sampleCount; i++) {
-      final response = await _gpibService.query(':READ1?');
+      final response = await _gpibService.query(':READ[1]?');
       if (response != null && response != 'TIMEOUT') {
         final current = double.tryParse(response) ?? 0.0;
         samples.add(current.abs());

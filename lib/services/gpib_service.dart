@@ -533,9 +533,9 @@ for res in sorted(found_resources):
       _logState?.debug('采样间隔: ${sampleIntervalMs}ms', type: LogType.gpib);
       
       for (int i = 0; i < sampleCount; i++) {
-        // 使用新版SCPI命令读取电流: :READ1? 或 :MEASure1[:CURRent]?
+        // 使用WFP60H READ命令读取电流: :READ[1]? (方括号表示通道1)
         _logState?.debug('正在采样 ${i + 1}/$sampleCount...', type: LogType.gpib);
-        final response = await query(':READ1?', timeout: const Duration(seconds: 10));
+        final response = await query(':READ[1]?', timeout: const Duration(seconds: 10));
         
         if (response == null || response == 'TIMEOUT') {
           _logState?.warning('采样 ${i + 1}/$sampleCount 超时（10秒）', type: LogType.gpib);
@@ -589,7 +589,7 @@ for res in sorted(found_resources):
     }
     
     try {
-      final response = await query(':READ1?', timeout: const Duration(seconds: 5));
+      final response = await query(':READ[1]?', timeout: const Duration(seconds: 5));
       
       if (response == null || response == 'TIMEOUT') {
         _logState?.warning('读取电流超时', type: LogType.gpib);
