@@ -3,7 +3,7 @@ import 'gpib_service.dart';
 import '../models/log_state.dart';
 
 /// GPIB 命令封装类
-/// 专门用于 Keysight 66319D 电源的 SCPI 命令
+/// 用于 WFP60H 系列程控电源的 SCPI 命令
 class GpibCommands {
   final GpibService _gpibService;
   LogState? _logState;
@@ -41,7 +41,7 @@ class GpibCommands {
   /// voltage: 电压值（单位：V）
   Future<bool> setVoltage(double voltage) async {
     _logState?.info('设置输出电压: ${voltage}V', type: LogType.gpib);
-    final response = await _gpibService.sendCommand('VOLT:LEV $voltage');
+    final response = await _gpibService.sendCommand(':SOURce1:VOLTage $voltage');
     if (response != null && response != 'TIMEOUT') {
       _logState?.success('电压设置成功: ${voltage}V', type: LogType.gpib);
       return true;
@@ -53,7 +53,7 @@ class GpibCommands {
   /// current: 电流限制值（单位：A）
   Future<bool> setCurrentLimit(double current) async {
     _logState?.info('设置电流限制: ${current}A', type: LogType.gpib);
-    final response = await _gpibService.sendCommand('CURR:LEV $current');
+    final response = await _gpibService.sendCommand(':SOURce1:CURRent:LIMit $current');
     if (response != null && response != 'TIMEOUT') {
       _logState?.success('电流限制设置成功: ${current}A', type: LogType.gpib);
       return true;
@@ -61,13 +61,13 @@ class GpibCommands {
     return false;
   }
   
-  /// 设置电流测量范围
-  /// range: 电流范围（单位：A）
+  /// 设置电流测量范围（自动）
+  /// range: 电流范围（单位：A），WFP60H使用自动量程
   Future<bool> setCurrentRange(double range) async {
-    _logState?.info('设置电流测量范围: ${range}A', type: LogType.gpib);
-    final response = await _gpibService.sendCommand('CURR:RANG $range');
+    _logState?.info('设置电流测量范围: 自动', type: LogType.gpib);
+    final response = await _gpibService.sendCommand(':SENSe1:CURRent:RANGe:AUTO ON');
     if (response != null && response != 'TIMEOUT') {
-      _logState?.success('电流范围设置成功: ${range}A', type: LogType.gpib);
+      _logState?.success('电流范围设置成功: 自动', type: LogType.gpib);
       return true;
     }
     return false;
@@ -76,7 +76,7 @@ class GpibCommands {
   /// 开启电源输出
   Future<bool> enableOutput() async {
     _logState?.info('开启电源输出...', type: LogType.gpib);
-    final response = await _gpibService.sendCommand('OUTP:STAT ON');
+    final response = await _gpibService.sendCommand(':OUTPut1 ON');
     if (response != null && response != 'TIMEOUT') {
       _logState?.success('电源输出已开启', type: LogType.gpib);
       return true;
@@ -87,7 +87,7 @@ class GpibCommands {
   /// 关闭电源输出
   Future<bool> disableOutput() async {
     _logState?.info('关闭电源输出...', type: LogType.gpib);
-    final response = await _gpibService.sendCommand('OUTP:STAT OFF');
+    final response = await _gpibService.sendCommand(':OUTPut1 OFF');
     if (response != null && response != 'TIMEOUT') {
       _logState?.success('电源输出已关闭', type: LogType.gpib);
       return true;
@@ -97,7 +97,7 @@ class GpibCommands {
   
   /// 测量电流（单次）
   Future<double?> measureCurrent() async {
-    final response = await _gpibService.query('MEAS:CURR?');
+    final response = await _gpibService.query(':READ1?');
     if (response != null && response != 'TIMEOUT') {
       try {
         final current = double.parse(response.trim());
@@ -111,7 +111,7 @@ class GpibCommands {
   
   /// 查询当前电流限制设置
   Future<double?> queryCurrentLimit() async {
-    final response = await _gpibService.query('CURR:LEV?');
+    final response = await _gpibService.query(':SOURce1:CURRent:LIMit?');
     if (response != null && response != 'TIMEOUT') {
       try {
         return double.parse(response.trim());
@@ -124,10 +124,14 @@ class GpibCommands {
   
   /// 查询当前电流测量范围
   Future<double?> queryCurrentRange() async {
-    final response = await _gpibService.query('CURR:RANG?');
+    final response = await _gpibService.query(':SENSe1:CURRent:RANGe:AUTO?');
     if (response != null && response != 'TIMEOUT') {
       try {
-        return double.parse(response.trim());
+        final isAuto = response.trim();
+        if (isAuto == '1' || isAuto.toUpperCase() == 'ON') {
+          return 0; // 0表示自动量程
+        }
+        return 1; // 非自动
       } catch (e) {
         _logState?.error('解析电流范围值失败: $e', type: LogType.gpib);
       }
@@ -135,39 +139,47 @@ class GpibCommands {
     return null;
   }
   
-  /// 初始化电源（按照 demo 中的参数）
+  /// 初始化电源（WFP60H）
   /// voltage: 输出电压（默认 5.0V）
   /// currentLimit: 电流限制（默认 1.5A）
-  /// currentRange: 电流测量范围（默认 1.0A）
+  /// currentRange: 电流测量范围（保留参数兼容性，WFP60H使用自动量程）
   Future<bool> initializePowerSupply({
     double voltage = 5.0,
     double currentLimit = 1.5,
     double currentRange = 1.0,
   }) async {
     _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
-    _logState?.info('开始初始化电源...', type: LogType.gpib);
+    _logState?.info('开始初始化电源 (WFP60H)...', type: LogType.gpib);
     
     // 1. 复位
     if (!await reset()) {
       return false;
     }
     
-    // 2. 设置电压
+    // 2. 配置测量功能为电流
+    _logState?.info('配置测量功能: 电流', type: LogType.gpib);
+    final funcResponse = await _gpibService.sendCommand(':SENSe1:FUNCtion CURR');
+    if (funcResponse == null || funcResponse == 'TIMEOUT') {
+      _logState?.error('配置测量功能失败', type: LogType.gpib);
+      return false;
+    }
+    
+    // 3. 设置电压
     if (!await setVoltage(voltage)) {
       return false;
     }
     
-    // 3. 设置电流限制
+    // 4. 设置电流限制
     if (!await setCurrentLimit(currentLimit)) {
       return false;
     }
     
-    // 4. 设置电流测量范围
+    // 5. 设置电流测量范围（自动）
     if (!await setCurrentRange(currentRange)) {
       return false;
     }
     
-    // 5. 开启输出
+    // 6. 开启输出
     if (!await enableOutput()) {
       return false;
     }

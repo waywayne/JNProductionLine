@@ -99,10 +99,12 @@ class AutomationTestState extends ChangeNotifier {
     
     _logState?.info('正在初始化电源参数...');
     
-    // 设置电压和电流限制
-    await _gpibService.sendCommand('VOLT ${AutomationTestConfig.defaultVoltage}');
-    await _gpibService.sendCommand('CURR ${AutomationTestConfig.currentLimit}');
-    await _gpibService.sendCommand('OUTP ON');
+    // 设置电压和电流限制（WFP60H）
+    await _gpibService.sendCommand(':SOURce1:VOLTage ${AutomationTestConfig.defaultVoltage}');
+    await _gpibService.sendCommand(':SOURce1:CURRent:LIMit ${AutomationTestConfig.currentLimit}');
+    await _gpibService.sendCommand(':SENSe1:FUNCtion CURR');
+    await _gpibService.sendCommand(':SENSe1:CURRent:RANGe:AUTO ON');
+    await _gpibService.sendCommand(':OUTPut1 ON');
     
     _logState?.success('电源参数初始化完成: ${AutomationTestConfig.defaultVoltage}V, ${AutomationTestConfig.currentLimit}A');
   }
@@ -282,7 +284,7 @@ class AutomationTestState extends ChangeNotifier {
     final samples = <double>[];
     
     for (int i = 0; i < AutomationTestConfig.sampleCount; i++) {
-      final response = await _gpibService.query('MEAS:CURR?');
+      final response = await _gpibService.query(':READ1?');
       if (response != null && response != 'TIMEOUT') {
         final current = double.tryParse(response) ?? 0.0;
         samples.add(current.abs());
@@ -339,7 +341,7 @@ class AutomationTestState extends ChangeNotifier {
     final samples = <double>[];
     
     for (int i = 0; i < AutomationTestConfig.sampleCount; i++) {
-      final response = await _gpibService.query('MEAS:CURR?');
+      final response = await _gpibService.query(':READ1?');
       if (response != null && response != 'TIMEOUT') {
         final current = double.tryParse(response) ?? 0.0;
         samples.add(current.abs());

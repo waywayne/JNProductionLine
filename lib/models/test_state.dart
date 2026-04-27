@@ -7542,13 +7542,13 @@ class TestState extends ChangeNotifier {
       if (_isGpibReady) {
         // 1. 先关闭电源输出
         _logState?.info('📴 关闭程控电源输出...', type: LogType.debug);
-        await _gpibService.sendCommand('OUTPut:STATe OFF');
+        await _gpibService.sendCommand(':OUTPut1 OFF');
         await Future.delayed(const Duration(milliseconds: 500));
         _logState?.success('✅ 电源输出已关闭', type: LogType.debug);
         
         // 2. 开启电源输出
         _logState?.info('📳 开启程控电源输出...', type: LogType.debug);
-        await _gpibService.sendCommand('OUTPut:STATe ON');
+        await _gpibService.sendCommand(':OUTPut1 ON');
         await Future.delayed(const Duration(milliseconds: 500));
         _logState?.success('✅ 电源输出已开启', type: LogType.debug);
         
@@ -10221,11 +10221,15 @@ class TestState extends ChangeNotifier {
       
       // 设置电压为5V
       _logState?.debug('设置电压: 5.0V', type: LogType.gpib);
-      await _gpibService.sendCommand('VOLT 5.0');
+      await _gpibService.sendCommand(':SOURce1:VOLTage 5.0');
       
       // 设置电流限制为1A
       _logState?.debug('设置电流限制: 1.0A', type: LogType.gpib);
-      await _gpibService.sendCommand('CURR 1.0');
+      await _gpibService.sendCommand(':SOURce1:CURRent:LIMit 1.0');
+      
+      // 配置测量功能和自动量程
+      await _gpibService.sendCommand(':SENSe1:FUNCtion CURR');
+      await _gpibService.sendCommand(':SENSe1:CURRent:RANGe:AUTO ON');
       
       // 查询设备ID
       final idn = await _gpibService.query('*IDN?');
