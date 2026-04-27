@@ -449,7 +449,70 @@ for res in sorted(found_resources):
     return await sendCommand(command, timeout: timeout);
   }
   
+  /// 初始化程控电源（WFP60H系列）
+  /// 设置输出电压、电流限制等参数
+  Future<bool> initializePowerSupply({
+    double voltage = 5.0,
+    double currentLimit = 3.0,
+  }) async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return false;
+    }
+    
+    try {
+      _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.info('初始化程控电源 (WFP60H)...', type: LogType.gpib);
+      
+      // 1. 选择输出通道1
+      await sendCommand(':SOURce1:VOLTage $voltage');
+      _logState?.info('✓ 设置电压: ${voltage}V', type: LogType.gpib);
+      
+      // 2. 设置电流限制
+      await sendCommand(':SOURce1:CURRent:LIMit $currentLimit');
+      _logState?.info('✓ 设置电流限制: ${currentLimit}A', type: LogType.gpib);
+      
+      // 3. 配置电流测量功能
+      await sendCommand(':SENSe1:FUNCtion CURR');
+      _logState?.info('✓ 配置测量功能: 电流', type: LogType.gpib);
+      
+      // 4. 设置电流测量范围为自动
+      await sendCommand(':SENSe1:CURRent:RANGe:AUTO ON');
+      _logState?.info('✓ 电流测量范围: 自动', type: LogType.gpib);
+      
+      // 5. 启用输出
+      await sendCommand(':OUTPut1 ON');
+      _logState?.info('✓ 输出已启用', type: LogType.gpib);
+      
+      _logState?.success('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+      _logState?.success('程控电源初始化完成', type: LogType.gpib);
+      
+      return true;
+    } catch (e) {
+      _logState?.error('程控电源初始化失败: $e', type: LogType.gpib);
+      return false;
+    }
+  }
+  
+  /// 关闭输出
+  Future<bool> disableOutput() async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return false;
+    }
+    
+    try {
+      await sendCommand(':OUTPut1 OFF');
+      _logState?.info('输出已关闭', type: LogType.gpib);
+      return true;
+    } catch (e) {
+      _logState?.error('关闭输出失败: $e', type: LogType.gpib);
+      return false;
+    }
+  }
+  
   /// 测量电流（多次采样并计算平均值）
+  /// 使用新版WFP60H SCPI命令
   /// sampleCount: 采样次数
   /// sampleRate: 采样率 (Hz)
   /// 返回平均电流值（安培 A），如果失败返回 null
@@ -470,9 +533,9 @@ for res in sorted(found_resources):
       _logState?.debug('采样间隔: ${sampleIntervalMs}ms', type: LogType.gpib);
       
       for (int i = 0; i < sampleCount; i++) {
-        // 查询当前电流值 (MEAS:CURR? 或 READ?)
+        // 使用新版SCPI命令读取电流: :READ1? 或 :MEASure1[:CURRent]?
         _logState?.debug('正在采样 ${i + 1}/$sampleCount...', type: LogType.gpib);
-        final response = await query('MEAS:CURR?', timeout: const Duration(seconds: 10));
+        final response = await query(':READ1?', timeout: const Duration(seconds: 10));
         
         if (response == null || response == 'TIMEOUT') {
           _logState?.warning('采样 ${i + 1}/$sampleCount 超时（10秒）', type: LogType.gpib);
@@ -514,6 +577,86 @@ for res in sorted(found_resources):
       return average;
     } catch (e) {
       _logState?.error('电流测量失败: $e', type: LogType.gpib);
+      return null;
+    }
+  }
+  
+  /// 读取单次电流值（快速读取）
+  Future<double?> readCurrent() async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return null;
+    }
+    
+    try {
+      final response = await query(':READ1?', timeout: const Duration(seconds: 5));
+      
+      if (response == null || response == 'TIMEOUT') {
+        _logState?.warning('读取电流超时', type: LogType.gpib);
+        return null;
+      }
+      
+      final current = double.parse(response.trim());
+      return current;
+    } catch (e) {
+      _logState?.error('读取电流失败: $e', type: LogType.gpib);
+      return null;
+    }
+  }
+  
+  /// 设置输出电压
+  Future<bool> setVoltage(double voltage) async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return false;
+    }
+    
+    try {
+      await sendCommand(':SOURce1:VOLTage $voltage');
+      _logState?.info('电压已设置: ${voltage}V', type: LogType.gpib);
+      return true;
+    } catch (e) {
+      _logState?.error('设置电压失败: $e', type: LogType.gpib);
+      return false;
+    }
+  }
+  
+  /// 设置电流限制
+  Future<bool> setCurrentLimit(double currentLimit) async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return false;
+    }
+    
+    try {
+      await sendCommand(':SOURce1:CURRent:LIMit $currentLimit');
+      _logState?.info('电流限制已设置: ${currentLimit}A', type: LogType.gpib);
+      return true;
+    } catch (e) {
+      _logState?.error('设置电流限制失败: $e', type: LogType.gpib);
+      return false;
+    }
+  }
+  
+  /// 查询输出状态
+  Future<bool?> getOutputState() async {
+    if (!_isConnected || _process == null) {
+      _logState?.error('GPIB 设备未连接', type: LogType.gpib);
+      return null;
+    }
+    
+    try {
+      final response = await query(':OUTPut1:STATe?', timeout: const Duration(seconds: 5));
+      
+      if (response == null || response == 'TIMEOUT') {
+        return null;
+      }
+      
+      // 响应可能是 "1" 或 "0", 或 "ON" 或 "OFF"
+      final state = response.trim().toUpperCase();
+      return state == '1' || state == 'ON';
+    } catch (e) {
+      _logState?.error('查询输出状态失败: $e', type: LogType.gpib);
       return null;
     }
   }
