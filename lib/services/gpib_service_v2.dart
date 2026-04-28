@@ -336,9 +336,24 @@ import sys
 import pyvisa
 
 try:
-    # 初始化VISA
-    rm = pyvisa.ResourceManager('@py')
-    print("INFO: Using pyvisa-py backend", file=sys.stderr)
+    # 初始化VISA - 优先使用NI-VISA (GPIB需要)
+    backend = None
+    rm = None
+    
+    # 尝试NI-VISA后端（支持GPIB）
+    try:
+        rm = pyvisa.ResourceManager('@ni')
+        backend = '@ni'
+        print("INFO: Using NI-VISA backend", file=sys.stderr)
+    except:
+        # 回退到默认后端
+        try:
+            rm = pyvisa.ResourceManager()
+            backend = 'default'
+            print("INFO: Using default VISA backend", file=sys.stderr)
+        except Exception as e:
+            print(f"ERROR: Cannot initialize VISA: {e}", file=sys.stderr)
+            sys.exit(1)
     
     # 连接设备
     print(f"INFO: Connecting to $address...", file=sys.stderr)

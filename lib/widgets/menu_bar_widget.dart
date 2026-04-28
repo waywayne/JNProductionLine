@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../screens/gpib_test_screen.dart';
 import '../screens/gpib_test_comparison_screen.dart';
+import '../screens/gpib_diagnostic_screen.dart';
 import '../screens/production_config_screen.dart';
 import '../screens/native_spp_debug_screen.dart';
 import 'byd_mes_test_dialog.dart';
@@ -39,6 +40,16 @@ class MenuBarWidget extends StatelessWidget {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const GpibTestComparisonScreen()),
+              );
+            },
+          ),
+          _MenuButton(
+            title: 'GPIB诊断',
+            icon: Icons.healing,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const GpibDiagnosticScreen()),
               );
             },
           ),

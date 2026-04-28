@@ -812,10 +812,6 @@ def main():
         print(f"DEBUG: Instrument object created: {type(instrument)}", file=sys.stderr)
         print(f"DEBUG: Instrument resource name: {instrument.resource_name}", file=sys.stderr)
         
-        # 设置超时（增加到15秒，因为电流测量可能需要更长时间）
-        instrument.timeout = 15000  # 15秒超时
-        print(f"DEBUG: Timeout set to {instrument.timeout}ms", file=sys.stderr)
-        
         # 设置读写终止符（对于某些设备很重要）
         try:
             instrument.read_termination = '\\n'
@@ -824,29 +820,34 @@ def main():
         except:
             pass
         
-        # 测试连接 - 发送 *IDN? 查询
+        # 设置超时（先用短超时测试*IDN?，后续命令用长超时）
+        instrument.timeout = 3000  # 3秒超时用于*IDN?测试
+        print(f"DEBUG: Timeout set to {instrument.timeout}ms for *IDN? test", file=sys.stderr)
+        
+        # 测试连接 - 发送 *IDN? 查询（使用短超时）
         idn_ok = False
         try:
-            print(f"DEBUG: Sending *IDN? query...", file=sys.stderr)
+            print(f"DEBUG: Sending *IDN? query (3s timeout)...", file=sys.stderr)
             idn = instrument.query("*IDN?").strip()
             print(f"INFO: Device identified: {idn}", file=sys.stderr)
             idn_ok = True
         except Exception as e:
-            print(f"WARNING: Could not query *IDN?: {type(e).__name__}: {e}", file=sys.stderr)
-            # 如果 *IDN? 失败且不是 GPIB 资源，说明连接到了错误的设备
-            if not address.upper().startswith('GPIB'):
-                print(f"ERROR: Connected to non-GPIB resource and *IDN? failed, likely wrong device", file=sys.stderr)
+            print(f"WARNING: Could not query *IDN? (this is OK for some devices): {type(e).__name__}", file=sys.stderr)
+            # GPIB设备即使*IDN?失败也可能正常工作
+            if address.upper().startswith('GPIB'):
+                print(f"INFO: GPIB device - will proceed without *IDN?", file=sys.stderr)
+            else:
+                print(f"ERROR: Non-GPIB resource and *IDN? failed", file=sys.stderr)
                 instrument.close()
                 rm.close()
                 sys.exit(1)
         
+        # 设置正常工作超时（15秒用于电流测量等）
+        instrument.timeout = 15000
+        print(f"DEBUG: Timeout set to {instrument.timeout}ms for normal operations", file=sys.stderr)
+        
         # 发送连接成功信号
-        if idn_ok:
-            print("CONNECTED|OK")
-        else:
-            # *IDN? 失败但资源打开成功（某些设备不支持 *IDN?）
-            print("CONNECTED|OK")
-            print(f"WARNING: Device connected but *IDN? failed - commands may not work", file=sys.stderr)
+        print("CONNECTED|OK")
         sys.stdout.flush()
         
         # 等待一小段时间确保信号被接收
