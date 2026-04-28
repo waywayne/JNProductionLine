@@ -38,8 +38,7 @@ rm.close()
       final result = await Process.run(
         pythonCmd,
         ['-c', script],
-        timeout: const Duration(seconds: 10),
-      );
+      ).timeout(const Duration(seconds: 10));
       
       stopwatch.stop();
       
@@ -105,8 +104,7 @@ except Exception as e:
       final result = await Process.run(
         pythonCmd,
         [scriptFile.path],
-        timeout: const Duration(seconds: 10),
-      );
+      ).timeout(const Duration(seconds: 10));
       
       stopwatch.stop();
       
@@ -188,8 +186,7 @@ except Exception as e:
       final result = await Process.run(
         pythonCmd,
         ['-c', script],
-        timeout: const Duration(seconds: 15),
-      );
+      ).timeout(const Duration(seconds: 15));
       
       stopwatch.stop();
       
@@ -251,8 +248,7 @@ rm.close()
       final result = await Process.run(
         pythonCmd,
         ['-c', script],
-        timeout: const Duration(seconds: 5),
-      );
+      ).timeout(const Duration(seconds: 5));
       
       stopwatch.stop();
       
@@ -298,8 +294,7 @@ rm.close()
       final result = await Process.run(
         pythonCmd,
         ['-c', script],
-        timeout: const Duration(seconds: 5),
-      );
+      ).timeout(const Duration(seconds: 5));
       
       stopwatch.stop();
       
@@ -369,8 +364,7 @@ rm.close()
       final result = await Process.run(
         pythonCmd,
         ['-c', script],
-        timeout: const Duration(seconds: 15),
-      );
+      ).timeout(const Duration(seconds: 15));
       
       stopwatch.stop();
       
@@ -449,8 +443,7 @@ rm.close()
       final result = await Process.run(
         pythonCmd,
         ['-c', script],
-        timeout: const Duration(seconds: 30),
-      );
+      ).timeout(const Duration(seconds: 30));
       
       stopwatch.stop();
       
