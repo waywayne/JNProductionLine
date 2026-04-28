@@ -808,17 +808,31 @@ def main():
         print(f"INFO: Connecting to {address}...", file=sys.stderr)
         instrument = rm.open_resource(address)
         
+        # 打印instrument对象信息
+        print(f"DEBUG: Instrument object created: {type(instrument)}", file=sys.stderr)
+        print(f"DEBUG: Instrument resource name: {instrument.resource_name}", file=sys.stderr)
+        
         # 设置超时（增加到15秒，因为电流测量可能需要更长时间）
         instrument.timeout = 15000  # 15秒超时
+        print(f"DEBUG: Timeout set to {instrument.timeout}ms", file=sys.stderr)
+        
+        # 设置读写终止符（对于某些设备很重要）
+        try:
+            instrument.read_termination = '\\n'
+            instrument.write_termination = '\\n'
+            print(f"DEBUG: Termination characters set", file=sys.stderr)
+        except:
+            pass
         
         # 测试连接 - 发送 *IDN? 查询
         idn_ok = False
         try:
+            print(f"DEBUG: Sending *IDN? query...", file=sys.stderr)
             idn = instrument.query("*IDN?").strip()
             print(f"INFO: Device identified: {idn}", file=sys.stderr)
             idn_ok = True
         except Exception as e:
-            print(f"WARNING: Could not query *IDN?: {e}", file=sys.stderr)
+            print(f"WARNING: Could not query *IDN?: {type(e).__name__}: {e}", file=sys.stderr)
             # 如果 *IDN? 失败且不是 GPIB 资源，说明连接到了错误的设备
             if not address.upper().startswith('GPIB'):
                 print(f"ERROR: Connected to non-GPIB resource and *IDN? failed, likely wrong device", file=sys.stderr)
@@ -879,26 +893,42 @@ def main():
                     command_id, command = parts
                     
                     try:
+                        # 记录命令
+                        print(f"DEBUG: Executing command: {command}", file=sys.stderr)
+                        sys.stderr.flush()
+                        
                         # 判断是写命令还是查询命令
                         if '?' in command:
-                            response = instrument.query(command).strip()
-                            print(f"{command_id}|{response}")
+                            # 查询命令
+                            response = instrument.query(command)
+                            if response:
+                                response = response.strip()
+                                print(f"DEBUG: Query response: {response}", file=sys.stderr)
+                                print(f"{command_id}|{response}")
+                            else:
+                                print(f"DEBUG: Empty response", file=sys.stderr)
+                                print(f"{command_id}|")
                         else:
+                            # 写命令
                             instrument.write(command)
+                            print(f"DEBUG: Write command executed", file=sys.stderr)
                             print(f"{command_id}|OK")
                         
                         sys.stdout.flush()
+                        sys.stderr.flush()
                     except pyvisa.errors.VisaIOError as e:
                         # VISA 超时或通信错误
-                        error_msg = str(e).replace('|', '_')
+                        error_code = getattr(e, 'error_code', 'UNKNOWN')
+                        print(f"ERROR: VISA IO error for command '{command}': {e} (code: {error_code})", file=sys.stderr)
+                        sys.stderr.flush()
                         print(f"{command_id}|TIMEOUT")
                         sys.stdout.flush()
-                        print(f"ERROR: VISA error for command '{command}': {e}", file=sys.stderr)
                     except Exception as e:
                         error_msg = str(e).replace('|', '_')
+                        print(f"ERROR: Command '{command}' failed: {type(e).__name__}: {e}", file=sys.stderr)
+                        sys.stderr.flush()
                         print(f"{command_id}|ERROR:{error_msg}")
                         sys.stdout.flush()
-                        print(f"ERROR: Command failed: {e}", file=sys.stderr)
                         
             except KeyboardInterrupt:
                 print("INFO: Keyboard interrupt", file=sys.stderr)
