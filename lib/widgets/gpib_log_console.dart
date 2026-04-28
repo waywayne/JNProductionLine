@@ -1,5 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/log_state.dart';
 
 /// GPIB 专用日志控制台
@@ -57,6 +60,74 @@ class _GpibLogConsoleState extends State<GpibLogConsole> {
         return Icons.error_outline;
       case LogLevel.success:
         return Icons.check_circle_outline;
+    }
+  }
+  
+  Future<void> _exportLogs(List<LogEntry> logs) async {
+    try {
+      // 生成日志文本
+      final buffer = StringBuffer();
+      buffer.writeln('GPIB诊断日志导出');
+      buffer.writeln('导出时间: ${DateTime.now()}');
+      buffer.writeln('总日志数: ${logs.length}');
+      buffer.writeln('=' * 80);
+      buffer.writeln();
+      
+      for (final log in logs) {
+        final levelStr = log.level.toString().split('.').last.toUpperCase();
+        buffer.writeln('[${log.timestamp}] [$levelStr] ${log.message}');
+      }
+      
+      // 选择保存位置
+      final result = await FilePicker.platform.saveFile(
+        dialogTitle: '导出GPIB日志',
+        fileName: 'gpib_diagnostic_${DateTime.now().millisecondsSinceEpoch}.txt',
+        type: FileType.custom,
+        allowedExtensions: ['txt'],
+      );
+      
+      if (result != null && mounted) {
+        // 写入文件
+        final file = File(result);
+        await file.writeAsString(buffer.toString());
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('日志已导出到: $result'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('导出失败: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<void> _copyLogsToClipboard(List<LogEntry> logs) async {
+    final buffer = StringBuffer();
+    for (final log in logs) {
+      final levelStr = log.level.toString().split('.').last.toUpperCase();
+      buffer.writeln('[${log.timestamp}] [$levelStr] ${log.message}');
+    }
+    
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('日志已复制到剪贴板'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -123,6 +194,18 @@ class _GpibLogConsoleState extends State<GpibLogConsole> {
                     ],
                   ),
                   const SizedBox(width: 8),
+                  // 复制日志按钮
+                  IconButton(
+                    icon: const Icon(Icons.copy),
+                    tooltip: '复制日志',
+                    onPressed: gpibLogs.isEmpty ? null : () => _copyLogsToClipboard(gpibLogs),
+                  ),
+                  // 导出日志按钮
+                  IconButton(
+                    icon: const Icon(Icons.download),
+                    tooltip: '导出日志',
+                    onPressed: gpibLogs.isEmpty ? null : () => _exportLogs(gpibLogs),
+                  ),
                   // 清空日志按钮
                   IconButton(
                     icon: const Icon(Icons.delete_outline),

@@ -820,14 +820,14 @@ def main():
         except:
             pass
         
-        # 设置超时（先用短超时测试*IDN?，后续命令用长超时）
-        instrument.timeout = 3000  # 3秒超时用于*IDN?测试
-        print(f"DEBUG: Timeout set to {instrument.timeout}ms for *IDN? test", file=sys.stderr)
+        # 设置超时（使用30秒超时，因为某些设备响应很慢）
+        instrument.timeout = 30000  # 30秒超时
+        print(f"DEBUG: Timeout set to {instrument.timeout}ms", file=sys.stderr)
         
-        # 测试连接 - 发送 *IDN? 查询（使用短超时）
+        # 测试连接 - 发送 *IDN? 查询（使用30秒超时）
         idn_ok = False
         try:
-            print(f"DEBUG: Sending *IDN? query (3s timeout)...", file=sys.stderr)
+            print(f"DEBUG: Sending *IDN? query (30s timeout)...", file=sys.stderr)
             idn = instrument.query("*IDN?").strip()
             print(f"INFO: Device identified: {idn}", file=sys.stderr)
             idn_ok = True
@@ -841,10 +841,6 @@ def main():
                 instrument.close()
                 rm.close()
                 sys.exit(1)
-        
-        # 设置正常工作超时（15秒用于电流测量等）
-        instrument.timeout = 15000
-        print(f"DEBUG: Timeout set to {instrument.timeout}ms for normal operations", file=sys.stderr)
         
         # 发送连接成功信号
         print("CONNECTED|OK")

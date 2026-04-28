@@ -359,10 +359,11 @@ try:
     print(f"INFO: Connecting to $address...", file=sys.stderr)
     inst = rm.open_resource('$address')
     
-    # 配置超时和终止符
-    inst.timeout = 5000  # 5秒超时
+    # 配置超时和终止符（使用30秒超时，因为某些设备响应很慢）
+    inst.timeout = 30000  # 30秒超时
     inst.read_termination = '\\\\n'
     inst.write_termination = '\\\\n'
+    print(f"INFO: Timeout set to 30s", file=sys.stderr)
     
     print("INFO: Connection successful", file=sys.stderr)
     print("CONNECTED")

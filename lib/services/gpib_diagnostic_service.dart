@@ -28,7 +28,7 @@ class GpibDiagnosticService {
 import pyvisa
 rm = pyvisa.ResourceManager()
 inst = rm.open_resource('$address')
-inst.timeout = 3000
+inst.timeout = 30000  # 30秒超时
 result = inst.query('*IDN?')
 print(result)
 inst.close()
@@ -86,7 +86,7 @@ try:
     
     print("Opening resource: $address", file=sys.stderr)
     inst = rm.open_resource('$address')
-    inst.timeout = 3000
+    inst.timeout = 30000  # 30秒超时
     
     print("Sending *IDN? query...", file=sys.stderr)
     result = inst.query('*IDN?')
@@ -238,7 +238,7 @@ except Exception as e:
 import pyvisa
 rm = pyvisa.ResourceManager()
 inst = rm.open_resource('$address')
-inst.timeout = 2000
+inst.timeout = 30000  # 30秒超时
 inst.write('*CLS')  # 清除状态，不需要响应
 print("Write successful")
 inst.close()
@@ -284,7 +284,7 @@ rm.close()
 import pyvisa
 rm = pyvisa.ResourceManager()
 inst = rm.open_resource('$address')
-inst.timeout = 2000
+inst.timeout = 30000  # 30秒超时
 result = inst.query('*OPC?')  # 操作完成查询，应该返回1
 print(result)
 inst.close()
@@ -344,7 +344,7 @@ for read_term, write_term, name in terminators:
     try:
         print(f"Testing {name}...", file=sys.stderr)
         inst = rm.open_resource('$address')
-        inst.timeout = 2000
+        inst.timeout = 30000  # 30秒超时
         
         if read_term:
             inst.read_termination = read_term
