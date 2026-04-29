@@ -471,8 +471,186 @@ rm.close()
     }
   }
   
-  /// 方法8: Linux特定测试 - 检查权限和设备文件
-  Future<Map<String, dynamic>> testMethod8_LinuxDiagnostics() async {
+  /// 方法8: WFP60H设备专用测试
+  Future<Map<String, dynamic>> testMethod8_WFP60HSpecific(String address) async {
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    _logState?.info('方法8: WFP60H设备专用测试', type: LogType.gpib);
+    
+    final stopwatch = Stopwatch()..start();
+    
+    final pythonCmd = await _getPythonCommand();
+    if (pythonCmd == null) {
+      return {'success': false, 'error': 'Python未安装'};
+    }
+    
+    try {
+      final script = '''
+import pyvisa
+import sys
+
+try:
+    rm = pyvisa.ResourceManager()
+    inst = rm.open_resource('$address')
+    inst.timeout = 30000
+    
+    # WFP60H可能不支持标准SCPI查询，只支持写入命令
+    # 测试1: 清除状态（写入）
+    print("Test 1: Clearing status (*CLS)...", file=sys.stderr)
+    inst.write('*CLS')
+    print("  *CLS: OK", file=sys.stderr)
+    
+    # 测试2: 设置电压（写入）
+    print("Test 2: Setting voltage...", file=sys.stderr)
+    inst.write(':SOURce1:VOLTage 5.0')
+    print("  :SOURce1:VOLTage 5.0: OK", file=sys.stderr)
+    
+    # 测试3: 设置电流限制（写入）
+    print("Test 3: Setting current limit...", file=sys.stderr)
+    inst.write(':SOURce1:CURRent:LIMit 0.1')
+    print("  :SOURce1:CURRent:LIMit 0.1: OK", file=sys.stderr)
+    
+    # 测试4: 打开输出（写入）
+    print("Test 4: Enabling output...", file=sys.stderr)
+    inst.write(':OUTPut1 ON')
+    print("  :OUTPut1 ON: OK", file=sys.stderr)
+    
+    # 等待一小段时间
+    import time
+    time.sleep(0.5)
+    
+    # 测试5: 关闭输出（写入）
+    print("Test 5: Disabling output...", file=sys.stderr)
+    inst.write(':OUTPut1 OFF')
+    print("  :OUTPut1 OFF: OK", file=sys.stderr)
+    
+    print("SUCCESS: All WFP60H write commands executed successfully")
+    print("NOTE: This device may not support query commands (*IDN?, *OPC?, etc.)")
+    
+    inst.close()
+    rm.close()
+    
+except Exception as e:
+    print(f"ERROR: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+''';
+      
+      final result = await Process.run(
+        pythonCmd,
+        ['-c', script],
+      ).timeout(const Duration(seconds: 15));
+      
+      stopwatch.stop();
+      
+      // 输出所有日志
+      final stderr = (result.stderr as String).trim();
+      if (stderr.isNotEmpty) {
+        for (final line in stderr.split('\n')) {
+          _logState?.debug('  $line', type: LogType.gpib);
+        }
+      }
+      
+      final stdout = (result.stdout as String).trim();
+      if (result.exitCode == 0) {
+        _logState?.success('✅ WFP60H写入命令全部成功 (${stopwatch.elapsedMilliseconds}ms)', type: LogType.gpib);
+        _logState?.warning('⚠️  设备可能不支持查询命令（*IDN?, *OPC?等）', type: LogType.gpib);
+        _logState?.info('💡 建议：仅使用写入命令控制设备', type: LogType.gpib);
+        return {'success': true, 'time': stopwatch.elapsedMilliseconds, 'note': 'Write-only device'};
+      } else {
+        _logState?.error('❌ 失败 (${stopwatch.elapsedMilliseconds}ms)', type: LogType.gpib);
+        return {'success': false, 'time': stopwatch.elapsedMilliseconds, 'error': stderr};
+      }
+    } catch (e) {
+      stopwatch.stop();
+      _logState?.error('❌ 异常 (${stopwatch.elapsedMilliseconds}ms): $e', type: LogType.gpib);
+      return {'success': false, 'time': stopwatch.elapsedMilliseconds, 'error': e.toString()};
+    }
+  }
+  
+  /// 方法9: 通用SCPI指令测试
+  Future<Map<String, dynamic>> testMethod9_GenericSCPI(String address, String command) async {
+    _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
+    _logState?.info('方法9: 通用SCPI指令测试', type: LogType.gpib);
+    _logState?.info('命令: $command', type: LogType.gpib);
+    
+    final stopwatch = Stopwatch()..start();
+    
+    final pythonCmd = await _getPythonCommand();
+    if (pythonCmd == null) {
+      return {'success': false, 'error': 'Python未安装'};
+    }
+    
+    try {
+      final isQuery = command.contains('?');
+      final script = '''
+import pyvisa
+import sys
+
+try:
+    rm = pyvisa.ResourceManager()
+    inst = rm.open_resource('$address')
+    inst.timeout = 30000
+    
+    command = '''$command'''
+    
+    if $isQuery:
+        # 查询命令
+        print(f"Sending query: {command}", file=sys.stderr)
+        result = inst.query(command)
+        print(f"Response: {result.strip()}")
+    else:
+        # 写入命令
+        print(f"Sending write: {command}", file=sys.stderr)
+        inst.write(command)
+        print("OK")
+    
+    inst.close()
+    rm.close()
+    
+except Exception as e:
+    print(f"ERROR: {e}", file=sys.stderr)
+    import traceback
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+''';
+      
+      final result = await Process.run(
+        pythonCmd,
+        ['-c', script],
+      ).timeout(const Duration(seconds: 35));
+      
+      stopwatch.stop();
+      
+      // 输出stderr日志
+      final stderr = (result.stderr as String).trim();
+      if (stderr.isNotEmpty) {
+        for (final line in stderr.split('\n')) {
+          _logState?.debug('  $line', type: LogType.gpib);
+        }
+      }
+      
+      if (result.exitCode == 0) {
+        final response = (result.stdout as String).trim();
+        if (isQuery) {
+          _logState?.success('✅ 查询成功 (${stopwatch.elapsedMilliseconds}ms): $response', type: LogType.gpib);
+        } else {
+          _logState?.success('✅ 写入成功 (${stopwatch.elapsedMilliseconds}ms)', type: LogType.gpib);
+        }
+        return {'success': true, 'time': stopwatch.elapsedMilliseconds, 'response': response};
+      } else {
+        _logState?.error('❌ 失败 (${stopwatch.elapsedMilliseconds}ms)', type: LogType.gpib);
+        return {'success': false, 'time': stopwatch.elapsedMilliseconds, 'error': stderr};
+      }
+    } catch (e) {
+      stopwatch.stop();
+      _logState?.error('❌ 异常 (${stopwatch.elapsedMilliseconds}ms): $e', type: LogType.gpib);
+      return {'success': false, 'time': stopwatch.elapsedMilliseconds, 'error': e.toString()};
+    }
+  }
+  
+  /// 方法10: Linux系统诊断
+  Future<Map<String, dynamic>> testMethod10_LinuxDiagnostics() async {
     _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.gpib);
     _logState?.info('方法8: Linux系统诊断', type: LogType.gpib);
     

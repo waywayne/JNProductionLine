@@ -15,6 +15,7 @@ class GpibDiagnosticScreen extends StatefulWidget {
 class _GpibDiagnosticScreenState extends State<GpibDiagnosticScreen> {
   final GpibDiagnosticService _diagnosticService = GpibDiagnosticService();
   final TextEditingController _addressController = TextEditingController(text: 'GPIB0::5::INSTR');
+  final TextEditingController _scpiCommandController = TextEditingController();
   
   bool _isRunning = false;
   Map<String, dynamic> _results = {};
@@ -31,6 +32,7 @@ class _GpibDiagnosticScreenState extends State<GpibDiagnosticScreen> {
   @override
   void dispose() {
     _addressController.dispose();
+    _scpiCommandController.dispose();
     super.dispose();
   }
   
@@ -92,6 +94,8 @@ class _GpibDiagnosticScreenState extends State<GpibDiagnosticScreen> {
                     _buildAddressSection(),
                     const SizedBox(height: 16),
                     _buildQuickTestsSection(),
+                    const SizedBox(height: 16),
+                    _buildGenericSCPISection(),
                     const SizedBox(height: 16),
                     _buildDetailedTestsSection(),
                     const SizedBox(height: 16),
@@ -242,15 +246,113 @@ class _GpibDiagnosticScreenState extends State<GpibDiagnosticScreen> {
               () => _runSingleTest('method7', () => _diagnosticService.testMethod7_Timeouts(address)),
             ),
             _buildTestButton(
-              '方法8: Linux诊断',
+              '方法8: WFP60H专用',
+              'WFP60H设备写入命令测试',
+              Icons.power,
+              () => _runSingleTest('method8', () => _diagnosticService.testMethod8_WFP60HSpecific(address)),
+            ),
+            _buildTestButton(
+              '方法10: Linux诊断',
               '检查Linux权限和驱动',
               Icons.computer,
-              () => _runSingleTest('method8', () => _diagnosticService.testMethod8_LinuxDiagnostics()),
+              () => _runSingleTest('method10', () => _diagnosticService.testMethod10_LinuxDiagnostics()),
             ),
           ],
         ),
       ),
     );
+  }
+  
+  Widget _buildGenericSCPISection() {
+    final address = _addressController.text.trim();
+    
+    return Card(
+      color: Colors.blue.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.terminal, color: Colors.blue.shade700),
+                const SizedBox(width: 8),
+                const Text(
+                  '通用SCPI指令测试',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _scpiCommandController,
+              decoration: const InputDecoration(
+                labelText: 'SCPI命令',
+                hintText: '例如: *CLS, :SOURce1:VOLTage 5.0, :READ[1]?',
+                border: OutlineInputBorder(),
+                helperText: '写入命令不需要?, 查询命令需要?结尾',
+              ),
+              enabled: !_isRunning,
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _isRunning ? null : _sendGenericSCPI,
+              icon: const Icon(Icons.send),
+              label: const Text('发送命令'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildQuickCommandChip('*CLS'),
+                _buildQuickCommandChip(':OUTPut1 ON'),
+                _buildQuickCommandChip(':OUTPut1 OFF'),
+                _buildQuickCommandChip(':SOURce1:VOLTage 5.0'),
+                _buildQuickCommandChip(':SOURce1:CURRent:LIMit 0.1'),
+                _buildQuickCommandChip(':READ[1]?'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildQuickCommandChip(String command) {
+    return ActionChip(
+      label: Text(command, style: const TextStyle(fontSize: 12)),
+      onPressed: _isRunning ? null : () {
+        _scpiCommandController.text = command;
+        _sendGenericSCPI();
+      },
+    );
+  }
+  
+  Future<void> _sendGenericSCPI() async {
+    final address = _addressController.text.trim();
+    final command = _scpiCommandController.text.trim();
+    
+    if (address.isEmpty) {
+      _showError('请输入GPIB地址');
+      return;
+    }
+    
+    if (command.isEmpty) {
+      _showError('请输入SCPI命令');
+      return;
+    }
+    
+    setState(() => _isRunning = true);
+    
+    await _diagnosticService.testMethod9_GenericSCPI(address, command);
+    
+    setState(() => _isRunning = false);
   }
   
   Widget _buildTestButton(String title, String subtitle, IconData icon, VoidCallback onPressed) {
