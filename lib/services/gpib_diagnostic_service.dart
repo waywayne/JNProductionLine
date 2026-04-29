@@ -583,6 +583,8 @@ except Exception as e:
     
     try {
       final isQuery = command.contains('?');
+      // 转义命令中的特殊字符
+      final escapedCommand = command.replaceAll("'", "\\'");
       final script = '''
 import pyvisa
 import sys
@@ -592,7 +594,7 @@ try:
     inst = rm.open_resource('$address')
     inst.timeout = 30000
     
-    command = '''$command'''
+    command = '$escapedCommand'
     
     if $isQuery:
         # 查询命令
@@ -729,7 +731,7 @@ except Exception as e:
     
     // Linux系统诊断（如果适用）
     if (Platform.isLinux) {
-      results['linux_diagnostics'] = await testMethod8_LinuxDiagnostics();
+      results['linux_diagnostics'] = await testMethod10_LinuxDiagnostics();
     }
     
     // VISA资源列表
