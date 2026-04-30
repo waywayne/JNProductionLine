@@ -243,41 +243,7 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
   }
 
   Widget _buildSingleBoardAutoTest(BuildContext context, TestState state) {
-    if (!state.isConnected) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.cable, size: 64, color: Colors.grey[400]),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              '请先连接串口设备',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey[700],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '连接设备后即可开始自动化测试',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[500],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
+    // 临时修改：单板产测模式下直接显示测试项，不检查串口连接
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -415,7 +381,8 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
                       ],
                     )
                   : ElevatedButton(
-                      onPressed: () => _showSNScanDialog(context, state),
+                      // 临时修改：单板产测模式下直接开始测试，不弹出SN扫描对话框
+                      onPressed: () => state.startAutoTest(),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green[600],
                         foregroundColor: Colors.white,

@@ -6100,9 +6100,12 @@ class TestState extends ChangeNotifier {
       return;
     }
 
-    if (!_serialService.isConnected && !_linuxBtService.isConnected) {
-      _logState?.error('设备未连接（串口和蓝牙均未连接），无法开始自动化测试', type: LogType.debug);
-      return;
+    // 临时修改：单板产测模式下跳过连接检查
+    if (_testMode != TestMode.singleBoard) {
+      if (!_serialService.isConnected && !_linuxBtService.isConnected) {
+        _logState?.error('设备未连接（串口和蓝牙均未连接），无法开始自动化测试', type: LogType.debug);
+        return;
+      }
     }
 
     // 保存扫码枪扫描的SN号
