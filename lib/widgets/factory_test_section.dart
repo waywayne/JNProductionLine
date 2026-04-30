@@ -412,89 +412,91 @@ class _FactoryTestSectionState extends State<FactoryTestSection> with SingleTick
             const SizedBox(height: 12),
           
           // 测试进度显示 - 优化样式
-          if (state.isAutoTesting || state.testReportItems.isNotEmpty)
-            Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    // 进度标题 - 优化样式
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.grey[100]!, Colors.grey[50]!],
-                        ),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(12),
-                          topRight: Radius.circular(12),
-                        ),
+          // 临时修改：单板产测模式下始终显示测试项列表
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  // 进度标题 - 优化样式
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.grey[100]!, Colors.grey[50]!],
                       ),
-                      child: Row(
-                        children: [
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(12),
+                        topRight: Radius.circular(12),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[100],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(Icons.assignment, size: 20, color: Colors.blue[700]),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          state.testReportItems.isEmpty ? '测试项列表' : '测试进度',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (state.testReportItems.isNotEmpty)
                           Container(
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: Colors.blue[100],
-                              borderRadius: BorderRadius.circular(8),
+                              color: Colors.green[50],
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.green[200]!),
                             ),
-                            child: Icon(Icons.assignment, size: 20, color: Colors.blue[700]),
-                          ),
-                          const SizedBox(width: 12),
-                          const Text(
-                            '测试进度',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Spacer(),
-                          if (state.testReportItems.isNotEmpty)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.green[50],
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.green[200]!),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    '${state.testReportItems.where((item) => item.status.toString().contains('pass')).length}/${state.testReportItems.length}',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.green[700],
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '${state.testReportItems.where((item) => item.status.toString().contains('pass')).length}/${state.testReportItems.length}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.green[700],
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
-                    
-                    // 测试项列表 - 优化样式
-                    Expanded(
-                      child: ListView.separated(
-                        padding: const EdgeInsets.all(8),
-                        itemCount: state.testReportItems.length,
-                        separatorBuilder: (context, index) => const SizedBox(height: 4),
-                        itemBuilder: (context, index) {
-                          final item = state.testReportItems[index];
-                          final isCurrentTest = state.isAutoTesting && index == state.currentAutoTestIndex;
+                  ),
+                  
+                  // 测试项列表 - 优化样式
+                  Expanded(
+                    child: state.testReportItems.isEmpty
+                        ? _buildPlannedTestList(state)
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(8),
+                            itemCount: state.testReportItems.length,
+                            separatorBuilder: (context, index) => const SizedBox(height: 4),
+                            itemBuilder: (context, index) {
+                              final item = state.testReportItems[index];
+                              final isCurrentTest = state.isAutoTesting && index == state.currentAutoTestIndex;
                           
                           return Container(
                             decoration: BoxDecoration(
@@ -867,6 +869,76 @@ class _TableCell extends StatelessWidget {
         ),
         overflow: TextOverflow.ellipsis,
       ),
+    );
+  }
+}
+
+// 扩展方法：构建计划中的测试项列表
+extension _FactoryTestSectionStateExtension on _FactoryTestSectionState {
+  Widget _buildPlannedTestList(TestState state) {
+    final testSequence = state.testSequence;
+    
+    return ListView.separated(
+      padding: const EdgeInsets.all(8),
+      itemCount: testSequence.length,
+      separatorBuilder: (context, index) => const SizedBox(height: 4),
+      itemBuilder: (context, index) {
+        final testItem = testSequence[index];
+        final testName = testItem['name'] as String;
+        final testType = testItem['type'] as String;
+        
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: Colors.grey[200]!,
+              width: 1,
+            ),
+          ),
+          child: ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            leading: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Icon(
+                  Icons.radio_button_unchecked,
+                  size: 18,
+                  color: Colors.grey[400],
+                ),
+              ),
+            ),
+            title: Text(
+              testName,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: Text(
+                testType,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

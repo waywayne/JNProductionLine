@@ -320,6 +320,9 @@ class TestState extends ChangeNotifier {
   bool get showSensorDialog => _showSensorDialog;
   List<Map<String, dynamic>> get sensorDataList => _sensorDataList;
   Uint8List? get completeImageData => _completeImageData;
+  
+  // 获取测试序列（用于UI显示所有测试项）
+  List<Map<String, dynamic>> get testSequence => _getTestSequence();
 
   // 图片质量检测状态getter
   bool get showImageQualityDialog => _showImageQualityDialog;
