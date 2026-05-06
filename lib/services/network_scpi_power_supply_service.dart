@@ -20,14 +20,13 @@ class NetworkScpiPowerSupplyService {
       // 构建 lxi scpi 命令
       final fullCommand = 'lxi scpi --address $ipAddress "$command"';
       
-      print('� 执行命令: $fullCommand');
+      print('📤 执行命令: $fullCommand');
       
-      // 执行命令
+      // 执行命令（带超时）
       final result = await Process.run(
         'sh',
         ['-c', fullCommand],
-        timeout: Duration(seconds: timeout),
-      );
+      ).timeout(Duration(seconds: timeout));
       
       if (result.exitCode == 0) {
         final output = result.stdout.toString().trim();
