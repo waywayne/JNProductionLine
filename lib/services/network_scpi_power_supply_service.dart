@@ -2,60 +2,74 @@ import 'dart:async';
 import 'dart:io';
 
 /// 网络SCPI程控电源服务
-/// 通过TCP/IP Socket直接发送SCPI命令控制程控电源
+/// 通过 lxi 命令行工具发送SCPI命令控制程控电源
+/// 
+/// 安装 lxi-tools:
+///   sudo apt-get install lxi-tools  (Ubuntu/Debian)
+///   或从源码编译: https://github.com/lxi-tools/lxi-tools
 class NetworkScpiPowerSupplyService {
-  Socket? _socket;
   String? _currentAddress;
-  int? _currentPort;
   bool _isConnected = false;
   
-  final StreamController<String> _responseController = StreamController<String>.broadcast();
-  Stream<String> get responseStream => _responseController.stream;
+  /// 执行 lxi SCPI 命令
+  /// [ipAddress] 程控电源的IP地址
+  /// [command] SCPI命令
+  /// [timeout] 超时时间（秒）
+  Future<String?> _runLxiCommand(String ipAddress, String command, {int timeout = 10}) async {
+    try {
+      // 构建 lxi scpi 命令
+      final fullCommand = 'lxi scpi --address $ipAddress "$command"';
+      
+      print('� 执行命令: $fullCommand');
+      
+      // 执行命令
+      final result = await Process.run(
+        'sh',
+        ['-c', fullCommand],
+        timeout: Duration(seconds: timeout),
+      );
+      
+      if (result.exitCode == 0) {
+        final output = result.stdout.toString().trim();
+        if (output.isNotEmpty) {
+          print('📥 响应: $output');
+        }
+        return output.isEmpty ? null : output;
+      } else {
+        final error = result.stderr.toString().trim();
+        print('❌ 命令失败: $error');
+        return null;
+      }
+    } on TimeoutException {
+      print('⏱️ 命令超时: $command');
+      return null;
+    } catch (e) {
+      print('❌ 执行命令异常: $e');
+      return null;
+    }
+  }
   
-  /// 连接到程控电源
+  /// 连接到程控电源（测试连接）
   /// [ipAddress] 程控电源的IP地址，如 '192.168.1.13'
-  /// [port] SCPI端口，默认5025
+  /// [port] SCPI端口（lxi工具会自动使用，此参数保留兼容性）
   /// [timeout] 连接超时时间
   Future<bool> connect(String ipAddress, {int port = 5025, Duration timeout = const Duration(seconds: 5)}) async {
     try {
-      // 如果已连接，先断开
-      if (_isConnected) {
-        await disconnect();
-      }
+      print('🔌 测试程控电源连接: $ipAddress');
       
-      print('🔌 连接到程控电源: $ipAddress:$port');
-      
-      _socket = await Socket.connect(ipAddress, port, timeout: timeout);
       _currentAddress = ipAddress;
-      _currentPort = port;
-      _isConnected = true;
-      
-      // 监听数据
-      _socket!.listen(
-        (data) {
-          final response = String.fromCharCodes(data).trim();
-          _responseController.add(response);
-        },
-        onError: (error) {
-          print('❌ Socket错误: $error');
-          _isConnected = false;
-        },
-        onDone: () {
-          print('🔌 Socket连接已关闭');
-          _isConnected = false;
-        },
-      );
-      
-      print('✅ 程控电源连接成功');
       
       // 测试连接：查询设备ID
-      final idn = await query('*IDN?', timeout: const Duration(seconds: 3));
-      if (idn != null) {
+      final idn = await _runLxiCommand(ipAddress, '*IDN?', timeout: timeout.inSeconds);
+      if (idn != null && idn.isNotEmpty) {
+        print('✅ 程控电源连接成功');
         print('📟 设备ID: $idn');
+        _isConnected = true;
         return true;
       } else {
-        print('⚠️ 无法查询设备ID，但连接已建立');
-        return true;
+        print('❌ 无法查询设备ID');
+        _isConnected = false;
+        return false;
       }
     } catch (e) {
       print('❌ 连接程控电源失败: $e');
@@ -66,86 +80,33 @@ class NetworkScpiPowerSupplyService {
   
   /// 断开连接
   Future<void> disconnect() async {
-    if (_socket != null) {
-      try {
-        await _socket!.close();
-        print('✅ 程控电源已断开');
-      } catch (e) {
-        print('⚠️ 断开连接时出错: $e');
-      }
-      _socket = null;
-      _isConnected = false;
-      _currentAddress = null;
-      _currentPort = null;
-    }
+    _isConnected = false;
+    _currentAddress = null;
+    print('✅ 程控电源已断开');
   }
   
   /// 发送SCPI写命令
   /// [command] SCPI命令，如 'VOLT 12.5'
   Future<bool> write(String command) async {
-    if (!_isConnected || _socket == null) {
-      print('❌ 未连接到程控电源');
+    if (_currentAddress == null) {
+      print('❌ 未设置程控电源地址');
       return false;
     }
     
-    try {
-      _socket!.write('$command\n');
-      await _socket!.flush();
-      print('📤 发送命令: $command');
-      return true;
-    } catch (e) {
-      print('❌ 发送命令失败: $e');
-      return false;
-    }
+    final result = await _runLxiCommand(_currentAddress!, command);
+    return result != null || result == ''; // 写命令可能没有返回值
   }
   
   /// 发送SCPI查询命令并等待响应
   /// [command] SCPI查询命令，如 '*IDN?'
   /// [timeout] 响应超时时间
   Future<String?> query(String command, {Duration timeout = const Duration(seconds: 5)}) async {
-    if (!_isConnected || _socket == null) {
-      print('❌ 未连接到程控电源');
+    if (_currentAddress == null) {
+      print('❌ 未设置程控电源地址');
       return null;
     }
     
-    try {
-      // 清空之前的响应
-      final completer = Completer<String>();
-      StreamSubscription? subscription;
-      
-      // 监听响应
-      subscription = responseStream.listen((response) {
-        if (!completer.isCompleted) {
-          completer.complete(response);
-        }
-      });
-      
-      // 发送查询命令
-      _socket!.write('$command\n');
-      await _socket!.flush();
-      print('📤 查询命令: $command');
-      
-      // 等待响应
-      final response = await completer.future.timeout(
-        timeout,
-        onTimeout: () {
-          print('⏱️ 查询超时: $command');
-          return '';
-        },
-      );
-      
-      await subscription.cancel();
-      
-      if (response.isNotEmpty) {
-        print('📥 响应: $response');
-        return response;
-      } else {
-        return null;
-      }
-    } catch (e) {
-      print('❌ 查询失败: $e');
-      return null;
-    }
+    return await _runLxiCommand(_currentAddress!, command, timeout: timeout.inSeconds);
   }
   
   /// 设置电压 (V)
@@ -268,12 +229,8 @@ class NetworkScpiPowerSupplyService {
   /// 获取当前连接地址
   String? get currentAddress => _currentAddress;
   
-  /// 获取当前连接端口
-  int? get currentPort => _currentPort;
-  
   /// 释放资源
   void dispose() {
     disconnect();
-    _responseController.close();
   }
 }
