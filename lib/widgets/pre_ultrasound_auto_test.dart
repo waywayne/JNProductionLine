@@ -1200,45 +1200,60 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
     
-    // 如果需要进行充电电流测试，先连接GPIB
+    // 如果需要进行充电电流测试，先连接网络程控电源
     if (!_skipChargingCurrentTest3) {
       logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      logState.info('🔌 准备连接GPIB程控电源...');
+      logState.info('🔌 准备连接网络程控电源...');
       
-      String? gpibAddressToUse = state.gpibAddress;
+      final powerSupplyIp = _config.networkPowerSupplyIp;
+      final powerSupplyPort = _config.networkPowerSupplyPort;
       
-      // 检查是否已配置GPIB地址
-      if (gpibAddressToUse == null || gpibAddressToUse.isEmpty) {
-        logState.warning('⚠️  GPIB地址未配置');
+      logState.info('   IP地址: $powerSupplyIp');
+      logState.info('   端口: $powerSupplyPort');
+      
+      // 检查是否已配置IP地址
+      if (powerSupplyIp.isEmpty) {
+        logState.error('❌ 网络程控电源IP地址未配置');
+        logState.error('   请在"产测通用配置"中配置程控电源IP地址');
         
-        // 弹出GPIB地址配置对话框
         if (!mounted) return;
-        final address = await showDialog<String>(
+        await showDialog(
           context: context,
-          barrierDismissible: false,
-          builder: (context) => _GpibAddressDialog(
-            initialAddress: state.gpibAddress,
+          builder: (context) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.warning, color: Colors.orange),
+                SizedBox(width: 8),
+                Text('配置缺失'),
+              ],
+            ),
+            content: const Text(
+              '网络程控电源IP地址未配置。\n\n'
+              '请前往"产测通用配置"页面，在"5.1 网络程控电源配置"中设置：\n'
+              '• 程控电源 IP 地址\n'
+              '• 程控电源端口（默认5025）',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('确定'),
+              ),
+            ],
           ),
         );
-        
-        if (address == null || address.isEmpty) {
-          logState.warning('用户取消配置GPIB地址');
-          return;
-        }
-        
-        gpibAddressToUse = address;
-        logState.info('✅ GPIB地址已配置: $gpibAddressToUse');
+        return;
       }
       
-      // 主动连接GPIB设备
-      logState.info('📡 正在连接GPIB设备...');
-      final connected = await state.detectAndConnectGpib(
-        gpibAddressToUse,
-        skipLeakageTest: true,  // 跳过漏电流测试，只建立连接
+      // 连接网络程控电源
+      logState.info('📡 正在连接网络程控电源...');
+      final connected = await _networkPowerSupply3.connect(
+        powerSupplyIp,
+        port: powerSupplyPort,
+        timeout: const Duration(seconds: 5),
       );
       
       if (!connected) {
-        logState.error('❌ GPIB连接失败');
+        logState.error('❌ 网络程控电源连接失败');
         
         if (!mounted) return;
         final retry = await showDialog<bool>(
@@ -1249,15 +1264,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               children: [
                 Icon(Icons.error, color: Colors.red),
                 SizedBox(width: 8),
-                Text('GPIB连接失败'),
+                Text('网络程控电源连接失败'),
               ],
             ),
-            content: const Text(
-              'GPIB程控电源连接失败，无法进行充电电流测试。\n\n'
+            content: Text(
+              '网络程控电源连接失败，无法进行充电电流测试。\n\n'
               '请检查：\n'
-              '1. GPIB设备是否已开机\n'
-              '2. GPIB地址是否正确\n'
-              '3. USB-GPIB适配器是否连接\n\n'
+              '1. 程控电源是否已开机\n'
+              '2. 程控电源IP地址是否正确: $powerSupplyIp\n'
+              '3. 网络连接是否正常\n'
+              '4. 台式机静态IP是否配置 (192.168.1.100/24)\n'
+              '5. lxi-tools 是否已安装\n\n'
               '或者选择跳过充电电流测试。',
             ),
             actions: [
@@ -1282,7 +1299,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
       }
       
-      logState.success('✅ GPIB连接成功，设备已就绪');
+      logState.success('✅ 网络程控电源连接成功，设备已就绪');
       logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     }
     
