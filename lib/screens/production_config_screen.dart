@@ -34,6 +34,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _bydMesIpController;
   late TextEditingController _bydMesClientIdController;
   late TextEditingController _bydMesStationController;
+  late TextEditingController _networkPowerSupplyIpController;
+  late TextEditingController _networkPowerSupplyPortController;
 
   @override
   void initState() {
@@ -61,6 +63,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _bydMesIpController = TextEditingController(text: _config.bydMesIp);
     _bydMesClientIdController = TextEditingController(text: _config.bydMesClientId);
     _bydMesStationController = TextEditingController(text: _config.bydMesStation);
+    _networkPowerSupplyIpController = TextEditingController(text: _config.networkPowerSupplyIp);
+    _networkPowerSupplyPortController = TextEditingController(text: _config.networkPowerSupplyPort.toString());
   }
 
   @override
@@ -84,6 +88,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _bydMesIpController.dispose();
     _bydMesClientIdController.dispose();
     _bydMesStationController.dispose();
+    _networkPowerSupplyIpController.dispose();
+    _networkPowerSupplyPortController.dispose();
     super.dispose();
   }
 
@@ -108,6 +114,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setBydMesIp(_bydMesIpController.text);
       await _config.setBydMesClientId(_bydMesClientIdController.text);
       await _config.setBydMesStation(_bydMesStationController.text);
+      await _config.setNetworkPowerSupplyIp(_networkPowerSupplyIpController.text);
+      await _config.setNetworkPowerSupplyPort(int.parse(_networkPowerSupplyPortController.text));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -350,7 +358,51 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
                 }
                 return null;
               },
-              helperText: '程控电源的GPIB地址，用于电流测试',
+              helperText: '程控电源的GPIB地址，用于电流测试（单板产测）',
+            ),
+            const SizedBox(height: 24),
+
+            // 网络程控电源配置
+            _buildSectionTitle('5.1 网络程控电源配置'),
+            _buildTextField(
+              controller: _networkPowerSupplyIpController,
+              label: '程控电源 IP 地址',
+              hint: '例如: 192.168.1.13',
+              suffix: '',
+              icon: Icons.power,
+              inputType: TextInputType.text,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入IP地址';
+                }
+                // 简单的IP格式验证
+                final ipPattern = RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$');
+                if (!ipPattern.hasMatch(value)) {
+                  return '请输入有效的IP地址';
+                }
+                return null;
+              },
+              helperText: '网络SCPI程控电源的IP地址（整机产测-工位3）',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _networkPowerSupplyPortController,
+              label: '程控电源端口',
+              hint: '5025',
+              suffix: '',
+              icon: Icons.settings_ethernet,
+              inputType: TextInputType.number,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入端口号';
+                }
+                final port = int.tryParse(value);
+                if (port == null || port < 1 || port > 65535) {
+                  return '请输入1~65535之间的端口号';
+                }
+                return null;
+              },
+              helperText: 'SCPI标准端口为5025',
             ),
             const SizedBox(height: 24),
 
