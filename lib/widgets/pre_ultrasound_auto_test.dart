@@ -16,6 +16,7 @@ import '../config/production_config.dart';
 import '../config/test_config.dart';
 import '../models/touch_test_step.dart';
 import '../services/gtp_protocol.dart';
+import '../services/network_scpi_power_supply_service.dart';
 import 'sn_input_dialog.dart';
 import 'bluetooth_test_options_dialog.dart';
 
@@ -91,6 +92,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final BydMesService _mesService3 = BydMesService();
   final ProductionConfig _config = ProductionConfig();
   bool _cancelRestartCommand3 = false; // 取消重启命令标志
+  final NetworkScpiPowerSupplyService _networkPowerSupply3 = NetworkScpiPowerSupplyService();
 
   @override
   void initState() {
@@ -1698,31 +1700,52 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return {'success': false, 'message': '充电状态数据解析失败 (payload长度不足)'};
   }
 
-  // ========== 工位3: 充电电流测试（使用GPIB直接采集）==========
+  // ========== 工位3: 充电电流测试（使用网络SCPI直接采集）==========
   Future<Map<String, dynamic>> _testChargingCurrent3(TestState state, LogState logState) async {
-    logState.info('⚡ 充电电流测试 (GPIB直接采集)');
+    logState.info('⚡ 充电电流测试 (网络SCPI直接采集)');
     logState.info('   采样: ${TestConfig.gpibSampleCount} 次 @ ${TestConfig.gpibSampleRate} Hz');
     
-    // 检查GPIB是否就绪
-    if (!state.isGpibReady) {
-      logState.error('❌ GPIB设备未就绪，无法测量充电电流');
-      logState.error('   请先连接GPIB程控电源');
-      return {'success': false, 'message': 'GPIB设备未就绪'};
-    }
-    
     try {
-      // 使用GPIB测量电流（多次采样）
-      final currentA = await state.gpibService.measureCurrent(
+      // 1. 连接到网络程控电源
+      final powerSupplyIp = _config.networkPowerSupplyIp;
+      final powerSupplyPort = _config.networkPowerSupplyPort;
+      
+      logState.info('🔌 连接网络程控电源: $powerSupplyIp:$powerSupplyPort');
+      
+      if (!_networkPowerSupply3.isConnected) {
+        final connected = await _networkPowerSupply3.connect(
+          powerSupplyIp,
+          port: powerSupplyPort,
+          timeout: const Duration(seconds: 5),
+        );
+        
+        if (!connected) {
+          logState.error('❌ 无法连接到网络程控电源');
+          logState.error('   请检查:');
+          logState.error('   1. 程控电源IP地址: $powerSupplyIp');
+          logState.error('   2. 程控电源端口: $powerSupplyPort');
+          logState.error('   3. 网络连接是否正常');
+          logState.error('   4. 台式机静态IP是否配置 (192.168.1.100/24)');
+          return {'success': false, 'message': '无法连接到网络程控电源'};
+        }
+        
+        logState.success('✅ 网络程控电源连接成功');
+      } else {
+        logState.info('✅ 使用现有网络程控电源连接');
+      }
+      
+      // 2. 使用网络SCPI测量电流（多次采样）
+      final currentA = await _networkPowerSupply3.measureCurrent(
         sampleCount: TestConfig.gpibSampleCount,
         sampleRate: TestConfig.gpibSampleRate,
       );
       
       if (currentA == null) {
-        logState.error('❌ GPIB电流测量失败');
-        return {'success': false, 'message': 'GPIB电流测量失败'};
+        logState.error('❌ 网络SCPI电流测量失败');
+        return {'success': false, 'message': '网络SCPI电流测量失败'};
       }
       
-      // 转换为毫安 (mA)
+      // 3. 转换为毫安 (mA)
       final currentMa = currentA * 1000;
       final threshold = _config.minChargingCurrentMa;
       final success = currentMa >= threshold;

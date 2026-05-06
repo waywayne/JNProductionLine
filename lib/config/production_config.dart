@@ -35,6 +35,8 @@ class ProductionConfig {
   static const String _keyBydMesClientId = 'byd_mes_client_id';
   static const String _keyBydMesStation = 'byd_mes_station';
   static const String _keyIperfSpeedThresholdMbps = 'iperf_speed_threshold_mbps';
+  static const String _keyNetworkPowerSupplyIp = 'network_power_supply_ip';
+  static const String _keyNetworkPowerSupplyPort = 'network_power_supply_port';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -60,6 +62,8 @@ class ProductionConfig {
   static const String defaultBydMesClientId = 'DEFAULT_CLIENT';  // BYD MES 客户端 ID
   static const String defaultBydMesStation = 'STATION1';  // BYD MES 站点名称
   static const double defaultIperfSpeedThresholdMbps = 10.0;  // iperf 速率阈值 (Mbps)
+  static const String defaultNetworkPowerSupplyIp = '192.168.1.13';  // 网络程控电源 IP
+  static const int defaultNetworkPowerSupplyPort = 5025;  // 网络程控电源端口 (SCPI标准端口)
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -239,6 +243,18 @@ class ProductionConfig {
     await _prefs?.setDouble(_keyIperfSpeedThresholdMbps, value);
   }
 
+  // ========== 网络程控电源 IP ==========
+  String get networkPowerSupplyIp => _prefs?.getString(_keyNetworkPowerSupplyIp) ?? defaultNetworkPowerSupplyIp;
+  Future<void> setNetworkPowerSupplyIp(String value) async {
+    await _prefs?.setString(_keyNetworkPowerSupplyIp, value);
+  }
+
+  // ========== 网络程控电源端口 ==========
+  int get networkPowerSupplyPort => _prefs?.getInt(_keyNetworkPowerSupplyPort) ?? defaultNetworkPowerSupplyPort;
+  Future<void> setNetworkPowerSupplyPort(int value) async {
+    await _prefs?.setInt(_keyNetworkPowerSupplyPort, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -263,6 +279,8 @@ class ProductionConfig {
     await setBydMesClientId(defaultBydMesClientId);
     await setBydMesStation(defaultBydMesStation);
     await setIperfSpeedThresholdMbps(defaultIperfSpeedThresholdMbps);
+    await setNetworkPowerSupplyIp(defaultNetworkPowerSupplyIp);
+    await setNetworkPowerSupplyPort(defaultNetworkPowerSupplyPort);
   }
 
   /// 获取所有配置的摘要
@@ -289,6 +307,8 @@ class ProductionConfig {
       'BYD MES Client ID': bydMesClientId,
       'BYD MES 站点': bydMesStation,
       'iperf 速率阈值': '≥${iperfSpeedThresholdMbps}Mbps',
+      '网络程控电源IP': networkPowerSupplyIp,
+      '网络程控电源端口': networkPowerSupplyPort,
     };
   }
 }
