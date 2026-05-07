@@ -1561,7 +1561,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
-  // ========== 工位3: 蓝牙连接测试（与工位1一致） ==========
+  // ========== 工位3: 蓝牙连接测试（带重试机制） ==========
   Future<bool> _testBluetoothConnection3(TestState state, LogState logState) async {
     try {
       if (_productInfo3 == null) {
@@ -1578,18 +1578,42 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
       logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
       
-      // 使用RFCOMM Socket方式，固定channel 5
-      final success = await state.testBluetoothMethod4RfcommSocket(
-        deviceAddress: bluetoothAddress,
-        channel: 5,
-        uuid: '7033',
-      );
+      // 增加重试机制，最多尝试3次
+      const maxRetries = 3;
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        if (attempt > 1) {
+          logState.info('🔄 第 $attempt 次尝试连接...');
+          // 重试前等待一段时间，让蓝牙设备准备好
+          await Future.delayed(const Duration(seconds: 2));
+        }
+        
+        try {
+          // 使用RFCOMM Socket方式，固定channel 5
+          final success = await state.testBluetoothMethod4RfcommSocket(
+            deviceAddress: bluetoothAddress,
+            channel: 5,
+            uuid: '7033',
+          );
 
-      if (success) {
-        logState.info('✅ 蓝牙连接成功');
+          if (success) {
+            logState.info('✅ 蓝牙连接成功');
+            return true;
+          } else {
+            logState.warning('⚠️ 第 $attempt 次连接失败');
+            if (attempt < maxRetries) {
+              logState.info('   准备重试...');
+            }
+          }
+        } catch (e) {
+          logState.warning('⚠️ 第 $attempt 次连接异常: $e');
+          if (attempt < maxRetries) {
+            logState.info('   准备重试...');
+          }
+        }
       }
-
-      return success;
+      
+      logState.error('❌ 蓝牙连接失败（已尝试 $maxRetries 次）');
+      return false;
     } catch (e) {
       logState.error('蓝牙连接测试失败: $e');
       return false;
