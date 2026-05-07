@@ -789,11 +789,15 @@ echo "trust $deviceAddress" | bluetoothctl
       try {
         final seqNum = _sequenceNumber++;
         final completer = Completer<Map<String, dynamic>?>();
-        _pendingResponses[seqNum] = completer;
+        // 使用 CMD（payload 第一个字节）作为 key
+        final cmdByte = command.isNotEmpty ? command[0] : 0xFF;
+        _pendingResponses[cmdByte] = completer;
         
         _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         _logState?.info('📤 发送 GTP 数据包 (尝试 ${attempt + 1}/${maxRetries + 1})');
         _logState?.info('   序列号 (SN): $seqNum');
+        _logState?.info('   CMD: 0x${cmdByte.toRadixString(16).padLeft(2, '0').toUpperCase()}');
+        _logState?.info('   Message ID: 0x${messageId?.toRadixString(16).padLeft(4, '0').toUpperCase() ?? '0000'}');
         _logState?.info('   待处理响应数: ${_pendingResponses.length}');
         
         // 构建 GTP 数据包
@@ -1299,29 +1303,31 @@ echo "trust $deviceAddress" | bluetoothctl
         'result': parsedGTP['result'],
       };
       
-      // 根据响应的 SN 匹配对应的请求
+      // 根据响应的 CMD（payload 第一个字节）匹配对应的请求
       final responseSN = parsedGTP['sn'] as int?;
-      if (responseSN != null && _pendingResponses.containsKey(responseSN)) {
-        final completer = _pendingResponses[responseSN];
-        _logState?.info('✅ 响应数据包 #$_packetCount 匹配序列号: $responseSN');
+      final responseCMD = (payload != null && payload.isNotEmpty) ? payload[0] : null;
+      
+      if (responseCMD != null && _pendingResponses.containsKey(responseCMD)) {
+        final completer = _pendingResponses[responseCMD];
+        _logState?.info('✅ 响应数据包 #$_packetCount 匹配 CMD: 0x${responseCMD.toRadixString(16).padLeft(2, '0').toUpperCase()} (SN: $responseSN)');
         if (!completer!.isCompleted) {
           completer.complete(response);
-          _pendingResponses.remove(responseSN);
+          _pendingResponses.remove(responseCMD);
           _logState?.debug('   Completer 已完成并移除');
         } else {
           _logState?.warning('   ⚠️ Completer 已经完成');
         }
       } else if (_pendingResponses.isNotEmpty) {
-        // 如果 SN 不匹配，尝试匹配第一个（兼容旧逻辑）
+        // 如果 CMD 不匹配，尝试匹配第一个（兼容旧逻辑）
         final firstKey = _pendingResponses.keys.first;
         final completer = _pendingResponses[firstKey];
-        _logState?.warning('⚠️ 响应 SN ($responseSN) 不匹配，使用第一个待处理请求: $firstKey');
+        _logState?.warning('⚠️ 响应 CMD (0x${responseCMD?.toRadixString(16).padLeft(2, '0').toUpperCase() ?? 'NULL'}) 不匹配，使用第一个待处理请求: 0x${firstKey.toRadixString(16).padLeft(2, '0').toUpperCase()}');
         if (!completer!.isCompleted) {
           completer.complete(response);
           _pendingResponses.remove(firstKey);
         }
       } else {
-        _logState?.warning('⚠️ 收到数据包但没有待处理的响应 (SN: $responseSN)，推送到数据流');
+        _logState?.warning('⚠️ 收到数据包但没有待处理的响应 (CMD: 0x${responseCMD?.toRadixString(16).padLeft(2, '0').toUpperCase() ?? 'NULL'}, SN: $responseSN)，推送到数据流');
       }
       
       // 始终推送 payload 到 pushPayloadStream（供 IMU 数据流、佩戴检测等监听）

@@ -1625,37 +1625,75 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('🔋 设备电压测试');
     
     final command = ProductionTestCommands.createGetVoltageCommand();
-    final response = await state.sendCommandViaLinuxBluetooth(
-      command,
-      timeout: const Duration(seconds: 5),
-      moduleId: ProductionTestCommands.moduleId,
-      messageId: ProductionTestCommands.messageId,
-    );
-
-    if (response == null || response.containsKey('error')) {
-      return {'success': false, 'message': '获取电压失败'};
-    }
-
-    final payload = response['payload'];
-    if (payload is List && payload.length >= 3) {
-      final payloadBytes = Uint8List.fromList(payload.cast<int>());
-      final voltageMv = ProductionTestCommands.parseVoltageResponse(payloadBytes);
+    
+    // 增加重试机制
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) {
+        logState.info('   🔄 第 $attempt 次尝试...');
+        await Future.delayed(const Duration(seconds: 1));
+      }
       
-      if (voltageMv != null) {
-        final voltageV = voltageMv / 1000.0;
-        final threshold = _config.minVoltageV;
-        final success = voltageV > threshold;
+      final response = await state.sendCommandViaLinuxBluetooth(
+        command,
+        timeout: const Duration(seconds: 5),
+        moduleId: ProductionTestCommands.moduleId,
+        messageId: ProductionTestCommands.messageId,
+      );
+
+      if (response == null) {
+        logState.warning('   ⚠️ 响应为空');
+        continue;
+      }
+      
+      if (response.containsKey('error')) {
+        logState.warning('   ⚠️ 响应包含错误: ${response['error']}');
+        continue;
+      }
+
+      final payload = response['payload'];
+      
+      // 详细日志
+      if (payload == null) {
+        logState.warning('   ⚠️ Payload 为 null');
+        continue;
+      }
+      
+      if (payload is! List) {
+        logState.warning('   ⚠️ Payload 类型错误: ${payload.runtimeType}');
+        continue;
+      }
+      
+      if (payload.isEmpty) {
+        logState.warning('   ⚠️ Payload 为空列表');
+        continue;
+      }
+      
+      logState.info('   📦 Payload 长度: ${payload.length} 字节');
+      
+      if (payload.length >= 3) {
+        final payloadBytes = Uint8List.fromList(payload.cast<int>());
+        final voltageMv = ProductionTestCommands.parseVoltageResponse(payloadBytes);
         
-        logState.info('   电压值: ${voltageV.toStringAsFixed(2)}V (阈值: >${threshold}V)');
-        
-        return {
-          'success': success,
-          'message': '电压: ${voltageV.toStringAsFixed(2)}V ${success ? "✅" : "❌ <${threshold}V"}',
-        };
+        if (voltageMv != null) {
+          final voltageV = voltageMv / 1000.0;
+          final threshold = _config.minVoltageV;
+          final success = voltageV > threshold;
+          
+          logState.info('   电压值: ${voltageV.toStringAsFixed(2)}V (阈值: >${threshold}V)');
+          
+          return {
+            'success': success,
+            'message': '电压: ${voltageV.toStringAsFixed(2)}V ${success ? "✅" : "❌ <${threshold}V"}',
+          };
+        } else {
+          logState.warning('   ⚠️ 电压解析返回 null');
+        }
+      } else {
+        logState.warning('   ⚠️ Payload 长度不足: ${payload.length} < 3');
       }
     }
 
-    return {'success': false, 'message': '电压数据解析失败'};
+    return {'success': false, 'message': '电压数据解析失败（已重试3次）'};
   }
 
   // ========== 工位3: 电量测试 ==========
