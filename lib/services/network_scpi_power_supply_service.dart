@@ -32,8 +32,11 @@ class NetworkScpiPowerSupplyService {
         final output = result.stdout.toString().trim();
         if (output.isNotEmpty) {
           print('📥 响应: $output');
+        } else {
+          print('✅ 命令执行成功（无返回值）');
         }
-        return output.isEmpty ? null : output;
+        // 写命令成功时通常没有输出，返回空字符串表示成功
+        return output.isEmpty ? '' : output;
       } else {
         final error = result.stderr.toString().trim();
         print('❌ 命令失败: $error');
@@ -86,6 +89,7 @@ class NetworkScpiPowerSupplyService {
   
   /// 发送SCPI写命令
   /// [command] SCPI命令，如 'VOLT 12.5'
+  /// 返回 true 表示命令执行成功（写命令通常没有返回值）
   Future<bool> write(String command) async {
     if (_currentAddress == null) {
       print('❌ 未设置程控电源地址');
@@ -93,7 +97,8 @@ class NetworkScpiPowerSupplyService {
     }
     
     final result = await _runLxiCommand(_currentAddress!, command);
-    return result != null || result == ''; // 写命令可能没有返回值
+    // 写命令成功时返回空字符串 ''，失败时返回 null
+    return result != null;
   }
   
   /// 发送SCPI查询命令并等待响应
