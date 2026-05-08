@@ -2446,31 +2446,29 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     });
     
-    subscription = state.linuxBluetoothDataStream.listen((data) {
+    // 监听已解析的 payload 流（pushPayloadStream），不需要再解析 GTP
+    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
       try {
-        final gtpResponse = GTPProtocol.parseGTPResponse(data);
-        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
-          final payload = gtpResponse['payload'] as Uint8List;
-          
-          // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
-          if (payload.length >= 3 && 
-              payload[0] == ProductionTestCommands.cmdTouch && 
-              payload[1] == TouchTestConfig.touchLeft && 
-              payload[2] == TouchTestConfig.leftActionWearDetect) {
-            if (!testPassed) {
-              testPassed = true;
-              statusInfo = '✅ 佩戴检测通过！';
-              logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
-              
-              _setDialogState?.call(() {});
-              timeoutTimer.cancel();
-              subscription?.cancel();
-              
-              Future.delayed(const Duration(seconds: 1), () {
-                if (mounted) Navigator.of(context, rootNavigator: true).pop();
-                if (!completer.isCompleted) completer.complete(true);
-              });
-            }
+        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        
+        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft && 
+            payload[2] == TouchTestConfig.leftActionWearDetect) {
+          if (!testPassed) {
+            testPassed = true;
+            statusInfo = '✅ 佩戴检测通过！';
+            logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+            
+            _setDialogState?.call(() {});
+            timeoutTimer.cancel();
+            subscription?.cancel();
+            
+            Future.delayed(const Duration(seconds: 1), () {
+              if (mounted) Navigator.of(context, rootNavigator: true).pop();
+              if (!completer.isCompleted) completer.complete(true);
+            });
           }
         }
       } catch (e) {
@@ -2588,32 +2586,30 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     });
     
-    subscription = state.linuxBluetoothDataStream.listen((data) {
+    // 监听已解析的 payload 流（pushPayloadStream），不需要再解析 GTP
+    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
       try {
-        final gtpResponse = GTPProtocol.parseGTPResponse(data);
-        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
-          final payload = gtpResponse['payload'] as Uint8List;
-          
-          // 检查左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
-          if (payload.length >= 3 && 
-              payload[0] == ProductionTestCommands.cmdTouch && 
-              payload[1] == TouchTestConfig.touchLeft && 
-              TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
-            if (!testPassed) {
-              testPassed = true;
-              final actionName = TouchTestConfig.getLeftActionName(payload[2]);
-              statusInfo = '✅ 检测到: $actionName';
-              logState.info('✅ 左触控事件通过！检测到: $actionName');
-              
-              _setDialogState?.call(() {});
-              timeoutTimer.cancel();
-              subscription?.cancel();
-              
-              Future.delayed(const Duration(seconds: 1), () {
-                if (mounted) Navigator.of(context, rootNavigator: true).pop();
-                if (!completer.isCompleted) completer.complete(true);
-              });
-            }
+        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        
+        // 检查左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft && 
+            TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
+          if (!testPassed) {
+            testPassed = true;
+            final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+            statusInfo = '✅ 检测到: $actionName';
+            logState.info('✅ 左触控事件通过！检测到: $actionName');
+            
+            _setDialogState?.call(() {});
+            timeoutTimer.cancel();
+            subscription?.cancel();
+            
+            Future.delayed(const Duration(seconds: 1), () {
+              if (mounted) Navigator.of(context, rootNavigator: true).pop();
+              if (!completer.isCompleted) completer.complete(true);
+            });
           }
         }
       } catch (e) {
@@ -4908,31 +4904,29 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     });
     
-    subscription = state.linuxBluetoothDataStream.listen((data) {
+    // 监听已解析的 payload 流（pushPayloadStream），不需要再解析 GTP
+    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
       try {
-        final gtpResponse = GTPProtocol.parseGTPResponse(data);
-        if (gtpResponse != null && !gtpResponse.containsKey('error') && gtpResponse.containsKey('payload')) {
-          final payload = gtpResponse['payload'] as Uint8List;
-          
-          // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
-          if (payload.length >= 3 && 
-              payload[0] == ProductionTestCommands.cmdTouch && 
-              payload[1] == TouchTestConfig.touchLeft && 
-              payload[2] == TouchTestConfig.leftActionWearDetect) {
-            if (!testPassed) {
-              testPassed = true;
-              statusInfo = '✅ 佩戴检测通过！';
-              logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
-              
-              _setDialogState?.call(() {});
-              timeoutTimer.cancel();
-              subscription?.cancel();
-              
-              Future.delayed(const Duration(seconds: 1), () {
-                if (mounted) Navigator.of(context, rootNavigator: true).pop();
-                if (!completer.isCompleted) completer.complete(true);
-              });
-            }
+        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        
+        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft && 
+            payload[2] == TouchTestConfig.leftActionWearDetect) {
+          if (!testPassed) {
+            testPassed = true;
+            statusInfo = '✅ 佩戴检测通过！';
+            logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+            
+            _setDialogState?.call(() {});
+            timeoutTimer.cancel();
+            subscription?.cancel();
+            
+            Future.delayed(const Duration(seconds: 1), () {
+              if (mounted) Navigator.of(context, rootNavigator: true).pop();
+              if (!completer.isCompleted) completer.complete(true);
+            });
           }
         }
       } catch (e) {
