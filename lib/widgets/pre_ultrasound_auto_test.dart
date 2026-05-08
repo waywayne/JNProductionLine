@@ -2346,6 +2346,47 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testLeftWearDetect3(TestState state, LogState logState) async {
     logState.info('👆 左佩戴检测');
     
+    if (!mounted) return false;
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    Timer? timeoutTimer;
+    bool testPassed = false;
+    String statusInfo = '请佩戴设备...';
+    
+    // 用于从外部更新 dialog UI 的回调
+    void Function(void Function())? _setDialogState;
+    
+    // 🔧 关键修复：在发送命令之前就设置监听器，避免错过推送
+    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
+      try {
+        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        
+        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04 (+ 可选状态字节)
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft && 
+            payload[2] == TouchTestConfig.leftActionWearDetect) {
+          if (!testPassed) {
+            testPassed = true;
+            statusInfo = '✅ 佩戴检测通过！';
+            logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+            
+            _setDialogState?.call(() {});
+            timeoutTimer?.cancel();
+            subscription?.cancel();
+            
+            Future.delayed(const Duration(seconds: 1), () {
+              if (mounted) Navigator.of(context, rootNavigator: true).pop();
+              if (!completer.isCompleted) completer.complete(true);
+            });
+          }
+        }
+      } catch (e) {
+        logState.warning('⚠️ 解析推送数据出错: $e');
+      }
+    });
+    
     // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
     final command = ProductionTestCommands.createTouchCommand(
       TouchTestConfig.touchLeft, TouchTestConfig.leftActionWearDetect,
@@ -2360,21 +2401,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     if (response == null || response.containsKey('error')) {
       logState.error('❌ 佩戴检测命令发送失败');
+      subscription?.cancel();
       return false;
     }
     
     logState.info('✅ 命令已发送，开始监听佩戴检测推送...');
     logState.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...');
     
-    if (!mounted) return false;
-    
-    final completer = Completer<bool>();
-    StreamSubscription<Uint8List>? subscription;
-    bool testPassed = false;
-    String statusInfo = '请佩戴设备...';
-    
-    // 用于从外部更新 dialog UI 的回调
-    void Function(void Function())? _setDialogState;
+    // 如果在发送命令期间已经收到推送并通过，直接返回
+    if (testPassed) {
+      return true;
+    }
     
     showDialog(
       context: context,
@@ -2417,6 +2454,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                   TextButton(
                     onPressed: () {
                       subscription?.cancel();
+                      timeoutTimer?.cancel();
                       Navigator.of(dialogContext).pop();
                       if (!completer.isCompleted) completer.complete(false);
                     },
@@ -2433,7 +2471,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100));
     
     // 设置超时
-    final timeoutTimer = Timer(const Duration(seconds: 15), () {
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
       if (!completer.isCompleted) {
         logState.error('❌ 佩戴检测超时（15秒）');
         subscription?.cancel();
@@ -2446,23 +2484,43 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     });
     
-    // 监听已解析的 payload 流（pushPayloadStream），不需要再解析 GTP
+    return completer.future;
+  }
+
+  // ========== 工位3: 左触控事件测试 ==========
+  // 流程: 发送 0x07+0x00+0x00 → 监听 0x07+0x00+(0x01/0x02/0x03/0x05) 推送 → 通过
+  Future<bool> _testLeftTouchEvent3(TestState state, LogState logState) async {
+    logState.info('👆 左触控事件测试');
+    
+    if (!mounted) return false;
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    Timer? timeoutTimer;
+    bool testPassed = false;
+    String statusInfo = '请执行任意触控操作（单击/双击/长按/滑动）...';
+    
+    // 用于从外部更新 dialog UI 的回调
+    void Function(void Function())? _setDialogState;
+    
+    // 🔧 关键修复：在发送命令之前就设置监听器，避免错过推送
     subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
       try {
         logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
         
-        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
+        // 检查左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
         if (payload.length >= 3 && 
             payload[0] == ProductionTestCommands.cmdTouch && 
             payload[1] == TouchTestConfig.touchLeft && 
-            payload[2] == TouchTestConfig.leftActionWearDetect) {
+            TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
           if (!testPassed) {
             testPassed = true;
-            statusInfo = '✅ 佩戴检测通过！';
-            logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+            final actionName = TouchTestConfig.getLeftActionName(payload[2]);
+            statusInfo = '✅ 检测到: $actionName';
+            logState.info('✅ 左触控事件通过！检测到: $actionName');
             
             _setDialogState?.call(() {});
-            timeoutTimer.cancel();
+            timeoutTimer?.cancel();
             subscription?.cancel();
             
             Future.delayed(const Duration(seconds: 1), () {
@@ -2475,14 +2533,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         logState.warning('⚠️ 解析推送数据出错: $e');
       }
     });
-    
-    return completer.future;
-  }
-
-  // ========== 工位3: 左触控事件测试 ==========
-  // 流程: 发送 0x07+0x00+0x00 → 监听 0x07+0x00+(0x01/0x02/0x03/0x05) 推送 → 通过
-  Future<bool> _testLeftTouchEvent3(TestState state, LogState logState) async {
-    logState.info('👆 左触控事件测试');
     
     // 发送左触控命令: 0x07 + 0x00(左Touch) + 0x00(未触摸/查询)
     final command = ProductionTestCommands.createTouchCommand(
@@ -2498,21 +2548,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     if (response == null || response.containsKey('error')) {
       logState.error('❌ 左触控事件命令发送失败');
+      subscription?.cancel();
       return false;
     }
     
     logState.info('✅ 命令已发送，开始监听触控事件推送...');
     logState.info('👂 等待触控事件 (单击/双击/长按/滑动)...');
     
-    if (!mounted) return false;
-    
-    final completer = Completer<bool>();
-    StreamSubscription<Uint8List>? subscription;
-    bool testPassed = false;
-    String statusInfo = '请执行任意触控操作（单击/双击/长按/滑动）...';
-    
-    // 用于从外部更新 dialog UI 的回调
-    void Function(void Function())? _setDialogState;
+    // 如果在发送命令期间已经收到推送并通过，直接返回
+    if (testPassed) {
+      return true;
+    }
     
     showDialog(
       context: context,
@@ -2557,6 +2603,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                   TextButton(
                     onPressed: () {
                       subscription?.cancel();
+                      timeoutTimer?.cancel();
                       Navigator.of(dialogContext).pop();
                       if (!completer.isCompleted) completer.complete(false);
                     },
@@ -2573,7 +2620,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100));
     
     // 设置超时
-    final timeoutTimer = Timer(const Duration(seconds: 15), () {
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
       if (!completer.isCompleted) {
         logState.error('❌ 左触控事件检测超时（15秒）');
         subscription?.cancel();
@@ -2583,37 +2630,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           if (mounted) Navigator.of(context, rootNavigator: true).pop();
           if (!completer.isCompleted) completer.complete(false);
         });
-      }
-    });
-    
-    // 监听已解析的 payload 流（pushPayloadStream），不需要再解析 GTP
-    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
-      try {
-        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
-        
-        // 检查左触控事件: 0x07 + 0x00 + (0x01/0x02/0x03/0x05)
-        if (payload.length >= 3 && 
-            payload[0] == ProductionTestCommands.cmdTouch && 
-            payload[1] == TouchTestConfig.touchLeft && 
-            TouchTestConfig.leftTouchEventActionIds.contains(payload[2])) {
-          if (!testPassed) {
-            testPassed = true;
-            final actionName = TouchTestConfig.getLeftActionName(payload[2]);
-            statusInfo = '✅ 检测到: $actionName';
-            logState.info('✅ 左触控事件通过！检测到: $actionName');
-            
-            _setDialogState?.call(() {});
-            timeoutTimer.cancel();
-            subscription?.cancel();
-            
-            Future.delayed(const Duration(seconds: 1), () {
-              if (mounted) Navigator.of(context, rootNavigator: true).pop();
-              if (!completer.isCompleted) completer.complete(true);
-            });
-          }
-        }
-      } catch (e) {
-        logState.warning('⚠️ 解析推送数据出错: $e');
       }
     });
     
@@ -4804,6 +4820,47 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testWearDetection6(TestState state, LogState logState) async {
     logState.info('👆 左佩戴检测');
     
+    if (!mounted) return false;
+    
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    Timer? timeoutTimer;
+    bool testPassed = false;
+    String statusInfo = '请佩戴设备...';
+    
+    // 用于从外部更新 dialog UI 的回调
+    void Function(void Function())? _setDialogState;
+    
+    // 🔧 关键修复：在发送命令之前就设置监听器，避免错过推送
+    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
+      try {
+        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
+        
+        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04 (+ 可选状态字节)
+        if (payload.length >= 3 && 
+            payload[0] == ProductionTestCommands.cmdTouch && 
+            payload[1] == TouchTestConfig.touchLeft && 
+            payload[2] == TouchTestConfig.leftActionWearDetect) {
+          if (!testPassed) {
+            testPassed = true;
+            statusInfo = '✅ 佩戴检测通过！';
+            logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
+            
+            _setDialogState?.call(() {});
+            timeoutTimer?.cancel();
+            subscription?.cancel();
+            
+            Future.delayed(const Duration(seconds: 1), () {
+              if (mounted) Navigator.of(context, rootNavigator: true).pop();
+              if (!completer.isCompleted) completer.complete(true);
+            });
+          }
+        }
+      } catch (e) {
+        logState.warning('⚠️ 解析推送数据出错: $e');
+      }
+    });
+    
     // 发送佩戴检测命令: 0x07 + 0x00(左Touch) + 0x04(佩戴检测)
     final command = ProductionTestCommands.createTouchCommand(
       TouchTestConfig.touchLeft, TouchTestConfig.leftActionWearDetect,
@@ -4818,21 +4875,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     if (response == null || response.containsKey('error')) {
       logState.error('❌ 佩戴检测命令发送失败');
+      subscription?.cancel();
       return false;
     }
     
     logState.info('✅ 命令已发送，开始监听佩戴检测推送...');
     logState.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...');
     
-    if (!mounted) return false;
-    
-    final completer = Completer<bool>();
-    StreamSubscription<Uint8List>? subscription;
-    bool testPassed = false;
-    String statusInfo = '请佩戴设备...';
-    
-    // 用于从外部更新 dialog UI 的回调
-    void Function(void Function())? _setDialogState;
+    // 如果在发送命令期间已经收到推送并通过，直接返回
+    if (testPassed) {
+      return true;
+    }
     
     showDialog(
       context: context,
@@ -4875,6 +4928,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                   TextButton(
                     onPressed: () {
                       subscription?.cancel();
+                      timeoutTimer?.cancel();
                       Navigator.of(dialogContext).pop();
                       if (!completer.isCompleted) completer.complete(false);
                     },
@@ -4891,7 +4945,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100));
     
     // 设置超时
-    final timeoutTimer = Timer(const Duration(seconds: 15), () {
+    timeoutTimer = Timer(const Duration(seconds: 15), () {
       if (!completer.isCompleted) {
         logState.error('❌ 佩戴检测超时（15秒）');
         subscription?.cancel();
@@ -4901,36 +4955,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           if (mounted) Navigator.of(context, rootNavigator: true).pop();
           if (!completer.isCompleted) completer.complete(false);
         });
-      }
-    });
-    
-    // 监听已解析的 payload 流（pushPayloadStream），不需要再解析 GTP
-    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
-      try {
-        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
-        
-        // 检查佩戴检测推送: 0x07 + 0x00 + 0x04
-        if (payload.length >= 3 && 
-            payload[0] == ProductionTestCommands.cmdTouch && 
-            payload[1] == TouchTestConfig.touchLeft && 
-            payload[2] == TouchTestConfig.leftActionWearDetect) {
-          if (!testPassed) {
-            testPassed = true;
-            statusInfo = '✅ 佩戴检测通过！';
-            logState.info('✅ 佩戴检测通过！收到 0x07 0x00 0x04');
-            
-            _setDialogState?.call(() {});
-            timeoutTimer.cancel();
-            subscription?.cancel();
-            
-            Future.delayed(const Duration(seconds: 1), () {
-              if (mounted) Navigator.of(context, rootNavigator: true).pop();
-              if (!completer.isCompleted) completer.complete(true);
-            });
-          }
-        }
-      } catch (e) {
-        logState.warning('⚠️ 解析推送数据出错: $e');
       }
     });
     
