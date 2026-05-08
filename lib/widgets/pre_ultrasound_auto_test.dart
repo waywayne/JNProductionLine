@@ -51,6 +51,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService1 = BydMesService();
   bool _cancelRestartCommand1 = false; // 取消重启命令标志
+  final NetworkScpiPowerSupplyService _networkPowerSupply1 = NetworkScpiPowerSupplyService();
 
   // 工位4状态
   bool _isAutoTesting4 = false;
@@ -654,6 +655,141 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
     
+    // 连接并初始化网络程控电源
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    final powerSupplyIp = _config.networkPowerSupplyIp;
+    final powerSupplyPort = _config.networkPowerSupplyPort;
+    
+    if (powerSupplyIp.isEmpty) {
+      logState.error('❌ 未配置网络程控电源IP地址');
+      if (!mounted) return;
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.error, color: Colors.red),
+              SizedBox(width: 8),
+              Text('配置缺失'),
+            ],
+          ),
+          content: const Text(
+            '未配置网络程控电源IP地址。\n\n'
+            '请在「产测通用配置」中配置程控电源IP和端口。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    
+    // 连接网络程控电源
+    logState.info('📡 正在连接网络程控电源...');
+    final connected = await _networkPowerSupply1.connect(
+      powerSupplyIp,
+      port: powerSupplyPort,
+      timeout: const Duration(seconds: 5),
+    );
+    
+    if (!connected) {
+      logState.error('❌ 网络程控电源连接失败');
+      
+      if (!mounted) return;
+      final retry = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.error, color: Colors.red),
+              SizedBox(width: 8),
+              Text('网络程控电源连接失败'),
+            ],
+          ),
+          content: Text(
+            '网络程控电源连接失败。\n\n'
+            '请检查：\n'
+            '1. 程控电源是否已开机\n'
+            '2. 程控电源IP地址是否正确: $powerSupplyIp\n'
+            '3. 网络连接是否正常\n'
+            '4. 台式机静态IP是否配置 (192.168.1.100/24)\n'
+            '5. lxi-tools 是否已安装\n\n'
+            '是否重试？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消测试'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('重试连接'),
+            ),
+          ],
+        ),
+      );
+      
+      if (retry == true) {
+        return _startAutoTest1(state);
+      } else {
+        logState.warning('用户取消测试');
+        return;
+      }
+    }
+    
+    logState.success('✅ 网络程控电源连接成功，设备已就绪');
+    
+    // 初始化网络程控电源参数
+    final initialized = await _initializeNetworkPowerSupply(_networkPowerSupply1, logState);
+    if (!initialized) {
+      logState.error('❌ 网络程控电源初始化失败');
+      
+      if (!mounted) return;
+      final retry = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.error, color: Colors.red),
+              SizedBox(width: 8),
+              Text('程控电源初始化失败'),
+            ],
+          ),
+          content: const Text(
+            '网络程控电源初始化失败。\n\n'
+            '请检查：\n'
+            '1. 程控电源是否正常工作\n'
+            '2. 网络连接是否稳定\n'
+            '3. lxi 命令是否正常执行\n\n'
+            '是否重试？',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消测试'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+      
+      if (retry == true) {
+        return _startAutoTest1(state);
+      } else {
+        logState.warning('用户取消测试');
+        return;
+      }
+    }
+    
     // 取消之前可能还在运行的重启命令重试
     _cancelRestartCommand1 = true;
     await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
@@ -1136,6 +1272,47 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
   }
 
+  // ========== 网络程控电源初始化 ==========
+  /// 初始化网络程控电源参数（使用 lxi 命令）
+  /// 参考 AutomationTestConfig: defaultVoltage=5.0V, currentLimit=1.0A
+  Future<bool> _initializeNetworkPowerSupply(NetworkScpiPowerSupplyService powerSupply, LogState logState) async {
+    logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    logState.info('⚙️  正在初始化网络程控电源参数...');
+    
+    try {
+      // 1. 设置输出电压 (5.0V)
+      final voltageSet = await powerSupply.setVoltage(5.0);
+      if (!voltageSet) {
+        logState.error('❌ 设置电压失败');
+        return false;
+      }
+      logState.info('   ✓ 设置电压: 5.0V');
+      
+      // 2. 设置电流限制 (1.0A)
+      final currentSet = await powerSupply.setCurrentLimit(1.0);
+      if (!currentSet) {
+        logState.error('❌ 设置电流限制失败');
+        return false;
+      }
+      logState.info('   ✓ 设置电流限制: 1.0A');
+      
+      // 3. 开启输出
+      final outputOn = await powerSupply.setOutput(true);
+      if (!outputOn) {
+        logState.error('❌ 开启输出失败');
+        return false;
+      }
+      logState.info('   ✓ 输出已开启');
+      
+      logState.success('✅ 网络程控电源参数初始化完成: 5.0V, 1.0A');
+      logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      return true;
+    } catch (e) {
+      logState.error('❌ 初始化网络程控电源异常: $e');
+      return false;
+    }
+  }
+
   // ========== 工位3: 停止测试 ==========
   void _stopAutoTest3() {
     setState(() {
@@ -1300,7 +1477,52 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
       
       logState.success('✅ 网络程控电源连接成功，设备已就绪');
-      logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      
+      // 初始化网络程控电源参数
+      final initialized = await _initializeNetworkPowerSupply(_networkPowerSupply3, logState);
+      if (!initialized) {
+        logState.error('❌ 网络程控电源初始化失败');
+        
+        if (!mounted) return;
+        final retry = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.error, color: Colors.red),
+                SizedBox(width: 8),
+                Text('程控电源初始化失败'),
+              ],
+            ),
+            content: const Text(
+              '网络程控电源初始化失败。\n\n'
+              '请检查：\n'
+              '1. 程控电源是否正常工作\n'
+              '2. 网络连接是否稳定\n'
+              '3. lxi 命令是否正常执行\n\n'
+              '是否重试？',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消测试'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('重试'),
+              ),
+            ],
+          ),
+        );
+        
+        if (retry == true) {
+          return _startAutoTest3(state);
+        } else {
+          logState.warning('用户取消测试');
+          return;
+        }
+      }
     }
     
     // 取消之前可能还在运行的重启命令重试
