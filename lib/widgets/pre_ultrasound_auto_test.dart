@@ -1297,7 +1297,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('   ✓ 设置电流限制: 1.0A');
       
       // 3. 开启输出
-      final outputOn = await powerSupply.setOutput(true);
+      final outputOn = await powerSupply.enableOutput();
       if (!outputOn) {
         logState.error('❌ 开启输出失败');
         return false;
