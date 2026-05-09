@@ -860,8 +860,8 @@ class TestState extends ChangeNotifier {
       // {'name': '32. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
       // {'name': '33. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
       // {'name': '34. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      // {'name': '35. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '32. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '32. 蓝牙名称设置与校验', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '33. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
   }  
 
@@ -6454,8 +6454,8 @@ class TestState extends ChangeNotifier {
       // {'name': '32. 左MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(0), 'skippable': false},
       // {'name': '33. 右MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(1), 'skippable': false},
       // {'name': '34. TALK MIC测试', 'type': 'MIC', 'executor': () => _autoTestMICRecord(2), 'skippable': false},
-      // {'name': '35. 蓝牙功能测试', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
-      {'name': '32. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
+      {'name': '32. 蓝牙名称设置与校验', 'type': '蓝牙', 'executor': _autoTestBluetooth, 'skippable': false},
+      {'name': '33. 结束产测', 'type': '电源', 'executor': _autoTestPowerOff, 'skippable': false},
     ];
 
     for (var i = 0; i < testSequence.length; i++) {
@@ -10343,6 +10343,14 @@ class TestState extends ChangeNotifier {
       if (!await saveDir.exists()) {
         await saveDir.create(recursive: true);
       }
+      
+      // 🔧 关键：下载前删除旧文件，确保不使用缓存
+      final oldFile = File(savePath);
+      if (await oldFile.exists()) {
+        await oldFile.delete();
+        _logState?.info('   已删除旧文件，确保无缓存', type: LogType.debug);
+      }
+      _sensorImagePath = null;  // 清空旧路径
       
       // 使用curl下载（带重试机制）
       ProcessResult? result;

@@ -48,6 +48,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   ProductSNInfo? _productInfo1;
   String? _deviceIP1;
   String? _scannedSN1;
+  String? _bluetoothNameToSet1; // 蓝牙名称（用于设置和校验）
   BluetoothTestMethod _selectedMethod1 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService1 = BydMesService();
   bool _cancelRestartCommand1 = false; // 取消重启命令标志
@@ -122,7 +123,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       TestStepResult(stepNumber: 5, name: '光敏传感器测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 6, name: 'IMU传感器测试', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 7, name: '摄像头棋盘格测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: '蓝牙名称设置', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: '蓝牙名称读取校验', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -883,8 +886,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             success = await _testCameraChessboard(state, logState);
             message = success ? '摄像头测试通过' : '摄像头测试失败';
             break;
-          case 7: // 产测结束
-            logState.info('步骤8: 产测结束');
+          case 7: // 蓝牙名称设置
+            logState.info('步骤8: 蓝牙名称设置');
+            success = await _testBluetoothNameSet1(state, logState);
+            message = success ? '蓝牙名称设置成功' : '蓝牙名称设置失败';
+            break;
+          case 8: // 蓝牙名称读取校验
+            logState.info('步骤9: 蓝牙名称读取校验');
+            success = await _testBluetoothNameVerify1(state, logState);
+            message = success ? '蓝牙名称校验通过' : '蓝牙名称校验失败';
+            break;
+          case 9: // 产测结束
+            logState.info('步骤10: 产测结束');
             success = await _testProductionEnd(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -3058,7 +3071,160 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
   }
 
-  /// 步骤7: 产测结束
+  /// 步骤8: 蓝牙名称设置
+  /// 使用蓝牙MAC地址后四位生成蓝牙名称并设置
+  Future<bool> _testBluetoothNameSet1(TestState state, LogState logState) async {
+    try {
+      logState.info('📱 开始蓝牙名称设置...');
+      
+      // 获取蓝牙MAC地址
+      if (_productInfo1 == null || _productInfo1!.bluetoothAddress.isEmpty) {
+        logState.error('❌ 蓝牙名称设置失败：未找到蓝牙MAC地址');
+        return false;
+      }
+      
+      final bluetoothMac = _productInfo1!.bluetoothAddress;
+      // 移除分隔符并取后四位
+      // 例如: "48:08:EB:60:00:50" -> "4808EB600050" -> "0050"
+      final macClean = bluetoothMac.replaceAll(':', '').replaceAll('-', '');
+      final last4Digits = macClean.length >= 4 ? macClean.substring(macClean.length - 4) : macClean;
+      _bluetoothNameToSet1 = 'Kanaan-$last4Digits';
+      
+      logState.info('   蓝牙MAC: $bluetoothMac');
+      logState.info('   蓝牙名称: $_bluetoothNameToSet1 (使用MAC后四位)');
+      
+      // 设置蓝牙名称（带重试）
+      const maxRetries = 3;
+      
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        if (attempt > 1) {
+          logState.warning('🔄 蓝牙名称设置重试 $attempt/$maxRetries');
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+        
+        final setNameCmd = ProductionTestCommands.createSetBluetoothNameCommand(_bluetoothNameToSet1!);
+        final cmdHex = setNameCmd.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        logState.info('📤 发送设置蓝牙名称命令: [$cmdHex]');
+        
+        final setResponse = await state.sendCommandViaLinuxBluetooth(
+          setNameCmd,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+        
+        if (setResponse == null || setResponse.containsKey('error')) {
+          logState.warning('⚠️ 设置蓝牙名称失败 (尝试 $attempt/$maxRetries): ${setResponse?['error'] ?? '无响应'}');
+          if (attempt == maxRetries) {
+            logState.error('❌ 设置蓝牙名称失败，已重试 $maxRetries 次');
+            return false;
+          }
+          continue;
+        }
+        
+        logState.success('✅ 蓝牙名称设置成功: $_bluetoothNameToSet1');
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      logState.error('蓝牙名称设置异常: $e');
+      return false;
+    }
+  }
+
+  /// 步骤9: 蓝牙名称读取校验
+  /// 读取设备蓝牙名称并与设置的名称进行比对
+  Future<bool> _testBluetoothNameVerify1(TestState state, LogState logState) async {
+    try {
+      logState.info('🔍 开始蓝牙名称读取校验...');
+      
+      if (_bluetoothNameToSet1 == null || _bluetoothNameToSet1!.isEmpty) {
+        logState.error('❌ 蓝牙名称校验失败：未设置蓝牙名称');
+        return false;
+      }
+      
+      // 获取蓝牙名称进行验证（带重试）
+      const maxRetries = 3;
+      
+      for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        if (attempt > 1) {
+          logState.warning('🔄 蓝牙名称验证重试 $attempt/$maxRetries');
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+        
+        final getNameCmd = ProductionTestCommands.createGetBluetoothNameCommand();
+        logState.info('📤 发送获取蓝牙名称命令');
+        
+        final getResponse = await state.sendCommandViaLinuxBluetooth(
+          getNameCmd,
+          timeout: const Duration(seconds: 5),
+          moduleId: ProductionTestCommands.moduleId,
+          messageId: ProductionTestCommands.messageId,
+        );
+        
+        if (getResponse == null || getResponse.containsKey('error')) {
+          logState.warning('⚠️ 获取蓝牙名称失败 (尝试 $attempt/$maxRetries): ${getResponse?['error'] ?? '无响应'}');
+          if (attempt == maxRetries) {
+            logState.error('❌ 获取蓝牙名称失败，已重试 $maxRetries 次');
+            return false;
+          }
+          continue;
+        }
+        
+        final payload = getResponse['payload'] as Uint8List?;
+        if (payload == null) {
+          logState.warning('⚠️ 获取蓝牙名称失败：响应无payload (尝试 $attempt/$maxRetries)');
+          if (attempt == maxRetries) {
+            logState.error('❌ 获取蓝牙名称失败：响应无payload，已重试 $maxRetries 次');
+            return false;
+          }
+          continue;
+        }
+        
+        // 记录原始payload用于调试
+        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        logState.info('📦 收到payload: [$payloadHex]');
+        
+        final receivedName = ProductionTestCommands.parseBluetoothNameResponse(payload);
+        if (receivedName == null) {
+          logState.warning('⚠️ 无法解析蓝牙名称响应 (尝试 $attempt/$maxRetries)');
+          if (attempt == maxRetries) {
+            logState.error('❌ 获取蓝牙名称失败：无法解析响应，已重试 $maxRetries 次');
+            return false;
+          }
+          continue;
+        }
+        
+        logState.info('📥 设备返回蓝牙名称: $receivedName');
+        
+        // 对比设置的名称和获取的名称
+        if (receivedName != _bluetoothNameToSet1) {
+          logState.warning('⚠️ 蓝牙名称不一致 (尝试 $attempt/$maxRetries)');
+          logState.warning('   设置: $_bluetoothNameToSet1');
+          logState.warning('   返回: $receivedName');
+          if (attempt == maxRetries) {
+            logState.error('❌ 蓝牙名称验证失败：名称不一致，已重试 $maxRetries 次');
+            logState.error('   设置: $_bluetoothNameToSet1');
+            logState.error('   返回: $receivedName');
+            return false;
+          }
+          continue;
+        }
+        
+        logState.success('✅ 蓝牙名称验证成功！');
+        logState.info('   名称: $_bluetoothNameToSet1');
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      logState.error('蓝牙名称校验异常: $e');
+      return false;
+    }
+  }
+
+  /// 步骤10: 产测结束
   Future<bool> _testProductionEnd(TestState state, LogState logState) async {
     try {
       logState.info('🏁 发送产测结束命令...');
