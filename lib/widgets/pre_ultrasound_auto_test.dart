@@ -2484,9 +2484,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100));
     
     // 设置超时
-    timeoutTimer = Timer(const Duration(seconds: 15), () {
+    timeoutTimer = Timer(const Duration(seconds: 60), () {
       if (!completer.isCompleted) {
-        logState.error('❌ 佩戴检测超时（15秒）');
+        logState.error('❌ 佩戴检测超时（60秒）');
         subscription?.cancel();
         statusInfo = '❌ 超时';
         _setDialogState?.call(() {});
@@ -2633,9 +2633,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100));
     
     // 设置超时
-    timeoutTimer = Timer(const Duration(seconds: 15), () {
+    timeoutTimer = Timer(const Duration(seconds: 60), () {
       if (!completer.isCompleted) {
-        logState.error('❌ 左触控事件检测超时（15秒）');
+        logState.error('❌ 左触控事件检测超时（60秒）');
         subscription?.cancel();
         statusInfo = '❌ 超时';
         _setDialogState?.call(() {});
