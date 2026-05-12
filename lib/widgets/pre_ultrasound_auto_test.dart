@@ -4220,6 +4220,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       return false;
     }
 
+    // 发送 WiFi 拉距测试命令 (cmd 0x04 opt 0x06) 启动设备端 iperf3 服务
+    logState.info('📤 发送WiFi拉距测试命令 (0x04 0x06)...');
+    final iperfStartCmd = ProductionTestCommands.createControlWifiCommand(0x06);
+    final iperfStartResp = await state.sendCommandViaLinuxBluetooth(
+      iperfStartCmd,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (iperfStartResp == null || iperfStartResp.containsKey('error')) {
+      logState.error('❌ WiFi拉距测试命令发送失败');
+      return false;
+    }
+    logState.info('✅ 设备端 iperf3 服务启动中，等待 3 秒...');
+    await Future.delayed(const Duration(seconds: 3));
+
     logState.info('🚀 第一轮测试: iperf3 → $_deviceIP4 ...');
     final result1 = await _runIperf(_deviceIP4!, logState);
     
@@ -4281,6 +4298,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.warning('⚠️ 用户取消第二轮测试');
       return false;
     }
+
+    // 发送 WiFi 拉距测试命令 (cmd 0x04 opt 0x06) 启动设备端 iperf3 服务
+    logState.info('📤 发送WiFi拉距测试命令 (0x04 0x06)...');
+    final iperfStartCmd2 = ProductionTestCommands.createControlWifiCommand(0x06);
+    final iperfStartResp2 = await state.sendCommandViaLinuxBluetooth(
+      iperfStartCmd2,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+    
+    if (iperfStartResp2 == null || iperfStartResp2.containsKey('error')) {
+      logState.error('❌ WiFi拉距测试命令发送失败');
+      return false;
+    }
+    logState.info('✅ 设备端 iperf3 服务启动中，等待 3 秒...');
+    await Future.delayed(const Duration(seconds: 3));
 
     logState.info('🚀 第二轮测试（设备已拉远）: iperf3 → $_deviceIP4 ...');
     final result2 = await _runIperf(_deviceIP4!, logState);
