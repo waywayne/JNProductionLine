@@ -4085,7 +4085,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   Future<String?> _testWiFiConnection4(TestState state, LogState logState) async {
     try {
-      logState.info('📶 开始连接WiFi热点...');
+      logState.info('📶 开始连接WiFi热点并启动iperf3服务...');
       
       final String ssid = WiFiConfig.defaultSSID;
       final String password = WiFiConfig.defaultPassword;
@@ -4097,25 +4097,26 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       logState.info('   SSID: $ssid');
 
+      // 使用新指令 cmd 0x04 opt 0x06 + ssid\0 + pwd\0
       final ssidBytes = ssid.codeUnits + [0x00];
       final pwdBytes = password.codeUnits + [0x00];
       final payload = [...ssidBytes, ...pwdBytes];
-      final command = ProductionTestCommands.createControlWifiCommand(0x05, data: payload);
+      final command = ProductionTestCommands.createControlWifiCommand(0x06, data: payload);
 
-      // 重试机制：最多尝试3次，每次超时10秒
+      // 重试机制：最多尝试3次，每次超时15秒
       for (int retry = 0; retry < 3; retry++) {
         if (retry > 0) {
           logState.info('   重试 ($retry/3)...');
           await Future.delayed(const Duration(seconds: 2));
         }
 
-        logState.info('📤 发送WiFi连接命令 (0x05)...');
+        logState.info('📤 发送WiFi连接+iperf3命令 (0x04 0x06 + SSID\\0 + PWD\\0)...');
 
         try {
-          // 使用 Linux 蓝牙发送命令并等待响应（10秒超时）
+          // 使用 Linux 蓝牙发送命令并等待响应（15秒超时）
           final response = await state.sendCommandViaLinuxBluetooth(
             command,
-            timeout: const Duration(seconds: 10),
+            timeout: const Duration(seconds: 15),
             moduleId: ProductionTestCommands.moduleId,
             messageId: ProductionTestCommands.messageId,
           );
@@ -4129,20 +4130,48 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                   .join(' ');
               logState.info('📥 响应: [$payloadHex] (${responsePayload.length} bytes)');
               
-              // 解析WiFi响应，传入opt 0x05
-              final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x05);
-
-              if (wifiResult != null && wifiResult['success'] == true) {
-                if (wifiResult.containsKey('ip')) {
-                  final deviceIP = wifiResult['ip'];
+              // 检查响应格式: 0x04 0x05 + IP地址
+              // 响应可能是 [0x04, 0x05, IP字节...] 或 [0x05, IP字节...]
+              int ipOffset = 0;
+              if (responsePayload.length >= 2 && responsePayload[0] == 0x04 && responsePayload[1] == 0x05) {
+                ipOffset = 2;
+                logState.info('✅ 收到 0x04 0x05 响应');
+              } else if (responsePayload.length >= 1 && responsePayload[0] == 0x05) {
+                ipOffset = 1;
+                logState.info('✅ 收到 0x05 响应');
+              } else {
+                logState.warning('⚠️ 响应格式不匹配，期望 0x04 0x05 或 0x05');
+                continue;
+              }
+              
+              // 解析IP地址
+              if (responsePayload.length > ipOffset) {
+                final ipBytes = responsePayload.sublist(ipOffset);
+                // IP可能是ASCII字符串或4字节数值
+                String? deviceIP;
+                
+                // 尝试作为ASCII字符串解析
+                try {
+                  final ipStr = String.fromCharCodes(ipBytes.where((b) => b != 0));
+                  if (ipStr.contains('.') && ipStr.split('.').length == 4) {
+                    deviceIP = ipStr;
+                  }
+                } catch (_) {}
+                
+                // 尝试作为4字节数值解析
+                if (deviceIP == null && ipBytes.length >= 4) {
+                  deviceIP = '${ipBytes[0]}.${ipBytes[1]}.${ipBytes[2]}.${ipBytes[3]}';
+                }
+                
+                if (deviceIP != null && deviceIP.isNotEmpty) {
                   logState.success('✅ 获取到设备IP: $deviceIP');
-                  logState.info('✅ WiFi连接成功');
+                  logState.info('✅ WiFi连接成功，iperf3服务已启动');
                   return deviceIP;
                 } else {
-                  logState.warning('⚠️ 响应成功但未包含IP地址');
+                  logState.warning('⚠️ 无法解析IP地址');
                 }
               } else {
-                logState.warning('⚠️ WiFi响应解析失败或返回失败');
+                logState.warning('⚠️ 响应中未包含IP地址数据');
               }
             } else {
               logState.warning('⚠️ 响应中无payload数据');
@@ -4179,22 +4208,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     // ========== 第一轮测试 ==========
-    // 先发送 WiFi 拉距测试命令 (cmd 0x04 opt 0x06) 启动设备端 iperf3 服务
-    logState.info('📤 发送WiFi拉距测试命令 (0x04 0x06)...');
-    final iperfStartCmd = ProductionTestCommands.createControlWifiCommand(0x06);
-    final iperfStartResp = await state.sendCommandViaLinuxBluetooth(
-      iperfStartCmd,
-      timeout: const Duration(seconds: 5),
-      moduleId: ProductionTestCommands.moduleId,
-      messageId: ProductionTestCommands.messageId,
-    );
-    
-    if (iperfStartResp == null || iperfStartResp.containsKey('error')) {
-      logState.error('❌ WiFi拉距测试命令发送失败');
-      return false;
-    }
-    logState.info('✅ 设备端 iperf3 服务已启动');
-
+    // iperf3 服务已在 _testWiFiConnection4 中通过 0x04 0x06 命令启动
     // 弹窗确认
     if (!mounted) return false;
     final round1Confirm = await showDialog<bool>(
@@ -4216,7 +4230,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             const SizedBox(height: 8),
             Text('速率阈值: ≥${threshold}Mbps', style: const TextStyle(fontSize: 14)),
             const SizedBox(height: 16),
-            const Text('设备端 iperf3 服务已就绪，点击确定开始测试'),
+            const Text('点击确定开始iperf3测试'),
           ],
         ),
         actions: [
@@ -4258,22 +4272,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     // ========== 第二轮测试 ==========
     await Future.delayed(const Duration(seconds: 1));
     
-    // 先发送 WiFi 拉距测试命令 (cmd 0x04 opt 0x06) 启动设备端 iperf3 服务
-    logState.info('📤 发送WiFi拉距测试命令 (0x04 0x06)...');
-    final iperfStartCmd2 = ProductionTestCommands.createControlWifiCommand(0x06);
-    final iperfStartResp2 = await state.sendCommandViaLinuxBluetooth(
-      iperfStartCmd2,
-      timeout: const Duration(seconds: 5),
-      moduleId: ProductionTestCommands.moduleId,
-      messageId: ProductionTestCommands.messageId,
-    );
-    
-    if (iperfStartResp2 == null || iperfStartResp2.containsKey('error')) {
-      logState.error('❌ WiFi拉距测试命令发送失败');
-      return false;
-    }
-    logState.info('✅ 设备端 iperf3 服务已启动');
-
     // 弹窗确认
     if (!mounted) return false;
     final round2Confirm = await showDialog<bool>(
@@ -4294,7 +4292,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             Text('第一轮速率: ${speed1.toStringAsFixed(2)} Mbps ✅', 
                 style: const TextStyle(fontSize: 14, color: Colors.green)),
             const SizedBox(height: 16),
-            const Text('设备端 iperf3 服务已就绪，点击确定开始测试', 
+            const Text('请将设备拉远，点击确定开始第二轮测试', 
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
           ],
         ),
