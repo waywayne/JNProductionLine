@@ -13,9 +13,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
     
-    env:
-      CMAKE_GENERATOR: "Visual Studio 17 2022"
-    
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -23,26 +20,37 @@ jobs:
     - name: Setup Visual Studio environment
       uses: microsoft/setup-msbuild@v2
     
-    - name: Verify Visual Studio installation
+    - name: Setup build environment
+      id: setup-env
       shell: pwsh
       run: |
-        Write-Host "Checking Visual Studio installations..."
+        Write-Host "Setting up build environment..."
+        
+        # Find Visual Studio installation
         $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        if (Test-Path $vsWhere) {
-          & $vsWhere -latest -property installationPath
-          & $vsWhere -latest -property catalog_productDisplayVersion
-        } else {
-          Write-Host "vswhere.exe not found"
+        if (!(Test-Path $vsWhere)) {
+          Write-Host "ERROR: vswhere.exe not found!"
+          exit 1
         }
         
-        Write-Host "`nChecking for Visual Studio 2022..."
-        $vs2022Path = "${env:ProgramFiles}\Microsoft Visual Studio\2022"
-        if (Test-Path $vs2022Path) {
-          Write-Host "✓ Visual Studio 2022 found at: $vs2022Path"
-          Get-ChildItem $vs2022Path
-        } else {
-          Write-Host "✗ Visual Studio 2022 not found at expected location"
+        $vsPath = & $vsWhere -latest -property installationPath
+        $vsVersion = & $vsWhere -latest -property installationVersion
+        $vsDisplayName = & $vsWhere -latest -property displayName
+        
+        Write-Host "Found: $vsDisplayName"
+        Write-Host "Path: $vsPath"
+        Write-Host "Version: $vsVersion"
+        
+        # Setup Visual Studio environment variables
+        $vcvarsPath = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+        if (!(Test-Path $vcvarsPath)) {
+          Write-Host "ERROR: vcvars64.bat not found at $vcvarsPath"
+          exit 1
         }
+        
+        Write-Host "✓ Visual Studio environment ready"
+        echo "VS_PATH=$vsPath" >> $env:GITHUB_OUTPUT
+        echo "VCVARS_PATH=$vcvarsPath" >> $env:GITHUB_OUTPUT
     
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
@@ -94,36 +102,14 @@ jobs:
         
         Write-Host "Cache cleaning finished!"
     
-    - name: Verify CMake Generator
-      shell: pwsh
+    - name: Build Windows application with manual CMake
+      shell: cmd
       run: |
-        Write-Host "CMAKE_GENERATOR is set to: $env:CMAKE_GENERATOR"
-        if ([string]::IsNullOrEmpty($env:CMAKE_GENERATOR)) {
-          Write-Host "ERROR: CMAKE_GENERATOR is not set!"
-          exit 1
-        }
-    
-    - name: Pre-configure CMake with Visual Studio 17 2022
-      shell: pwsh
-      run: |
-        Write-Host "Manually configuring CMake with Visual Studio 17 2022..."
-        $buildDir = "build\windows\x64"
-        if (!(Test-Path $buildDir)) {
-          New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
-        }
+        echo Setting up Visual Studio environment...
+        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
         
-        cmake -S windows -B $buildDir -G "Visual Studio 17 2022" -A x64 -DFLUTTER_TARGET_PLATFORM=windows-x64
-        
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "ERROR: CMake configuration failed!"
-          exit 1
-        }
-        Write-Host "✓ CMake configuration successful"
-    
-    - name: Build Windows application
-      shell: pwsh
-      run: |
-        Write-Host "Building with CMake Generator: $env:CMAKE_GENERATOR"
+        echo.
+        echo Running Flutter build...
         flutter build windows --release --verbose
     
     - name: Get version from pubspec
