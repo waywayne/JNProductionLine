@@ -46,13 +46,20 @@ jobs:
     - name: Clean CMake cache
       shell: pwsh
       run: |
-        if (Test-Path "build/windows") {
-          Remove-Item -Path "build/windows" -Recurse -Force
-          Write-Host "Cleaned CMake cache"
+        if (Test-Path "build") {
+          Remove-Item -Path "build" -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "Cleaned build directory"
         }
+        flutter clean
+        Write-Host "Flutter clean completed"
     
     - name: Build Windows application
-      run: flutter build windows --release
+      shell: pwsh
+      env:
+        CMAKE_GENERATOR: "Visual Studio 17 2022"
+      run: |
+        Write-Host "Building with Visual Studio 17 2022"
+        flutter build windows --release
     
     - name: Get version from pubspec
       id: version
