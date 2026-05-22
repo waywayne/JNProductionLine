@@ -103,7 +103,9 @@ jobs:
         Write-Host "Cache cleaning finished!"
     
     - name: Generate Flutter build files
-      run: flutter assemble -dTargetPlatform=windows-x64 --output=build release_bundle_windows-x64_assets
+      run: |
+        flutter assemble --define=BuildMode=release --define=TargetPlatform=windows-x64 -dTargetFile=lib/main.dart release_bundle_windows-x64_assets
+        flutter assemble --define=BuildMode=release --define=TargetPlatform=windows-x64 unpack_windows
     
     - name: Build Windows application manually
       shell: cmd
