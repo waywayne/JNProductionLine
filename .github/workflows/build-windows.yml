@@ -75,39 +75,7 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
     
-    - name: Clean all build artifacts and CMake cache
-      shell: pwsh
-      run: |
-        Write-Host "Cleaning all build artifacts..."
-        
-        # 删除整个 build 目录
-        if (Test-Path "build") {
-          Remove-Item -Path "build" -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host "✓ Removed build directory"
-        }
-        
-        # 删除 windows 目录下的 CMake 缓存
-        if (Test-Path "windows/build") {
-          Remove-Item -Path "windows/build" -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host "✓ Removed windows/build directory"
-        }
-        
-        # 删除 CMakeCache.txt 和 CMakeFiles
-        Get-ChildItem -Path "windows" -Recurse -Include "CMakeCache.txt","CMakeFiles" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "✓ Removed CMake cache files"
-        
-        # Flutter clean
-        flutter clean
-        Write-Host "✓ Flutter clean completed"
-        
-        Write-Host "Cache cleaning finished!"
-    
-    - name: Generate Flutter build files
-      run: |
-        flutter assemble --output=build --define=BuildMode=release --define=TargetPlatform=windows-x64 -dTargetFile=lib/main.dart release_bundle_windows-x64_assets
-        flutter assemble --output=build --define=BuildMode=release --define=TargetPlatform=windows-x64 unpack_windows
-    
-    - name: Build Windows application manually
+    - name: Pre-configure CMake with Ninja before Flutter build
       shell: cmd
       run: |
         echo ========================================
@@ -117,7 +85,7 @@ jobs:
         
         echo.
         echo ========================================
-        echo Step 1: Configure CMake with Ninja
+        echo Pre-configuring CMake with Ninja
         echo ========================================
         if not exist "build\windows\x64" mkdir "build\windows\x64"
         
@@ -127,26 +95,25 @@ jobs:
           -DFLUTTER_TARGET_PLATFORM=windows-x64
         
         if %ERRORLEVEL% NEQ 0 (
-          echo ERROR: CMake configuration failed!
+          echo ERROR: CMake pre-configuration failed!
           exit /b 1
         )
         
+        echo ✓ CMake pre-configured with Ninja
+    
+    - name: Build Windows application
+      shell: cmd
+      run: |
+        echo ========================================
+        echo Setting up Visual Studio environment
+        echo ========================================
+        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
+        
         echo.
         echo ========================================
-        echo Step 2: Build with Ninja
+        echo Building with Flutter (using pre-configured CMake)
         echo ========================================
-        cmake --build build\windows\x64 --config Release --target INSTALL
-        
-        if %ERRORLEVEL% NEQ 0 (
-          echo ERROR: Build failed!
-          exit /b 1
-        )
-        
-        echo.
-        echo ========================================
-        echo Build completed successfully!
-        echo ========================================
-        dir build\windows\x64\runner\Release
+        flutter build windows --release
     
     - name: Get version from pubspec
       id: version
