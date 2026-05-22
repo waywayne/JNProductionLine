@@ -75,7 +75,34 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
     
-    - name: Pre-configure CMake with Ninja before Flutter build
+    - name: Generate Flutter ephemeral files
+      shell: pwsh
+      run: |
+        Write-Host "Generating Flutter ephemeral files..."
+        
+        # Start flutter build to generate ephemeral files, but kill it after generation
+        $process = Start-Process -FilePath "flutter" -ArgumentList "build","windows","--release" -PassThru -NoNewWindow
+        
+        # Wait for generated_config.cmake to be created
+        $timeout = 60
+        $elapsed = 0
+        while ($elapsed -lt $timeout) {
+          if (Test-Path "windows\flutter\ephemeral\generated_config.cmake") {
+            Write-Host "✓ Flutter ephemeral files generated"
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+            break
+          }
+          Start-Sleep -Seconds 1
+          $elapsed++
+        }
+        
+        if (!(Test-Path "windows\flutter\ephemeral\generated_config.cmake")) {
+          Write-Host "ERROR: Failed to generate ephemeral files"
+          exit 1
+        }
+    
+    - name: Reconfigure CMake with Ninja
       shell: cmd
       run: |
         echo ========================================
@@ -85,23 +112,28 @@ jobs:
         
         echo.
         echo ========================================
-        echo Pre-configuring CMake with Ninja
+        echo Cleaning old CMake cache
         echo ========================================
-        if not exist "build\windows\x64" mkdir "build\windows\x64"
+        if exist "build\windows\x64\CMakeCache.txt" del /F /Q "build\windows\x64\CMakeCache.txt"
+        if exist "build\windows\x64\CMakeFiles" rd /S /Q "build\windows\x64\CMakeFiles"
         
+        echo.
+        echo ========================================
+        echo Reconfiguring CMake with Ninja
+        echo ========================================
         cmake -S windows -B build\windows\x64 ^
           -G Ninja ^
           -DCMAKE_BUILD_TYPE=Release ^
           -DFLUTTER_TARGET_PLATFORM=windows-x64
         
         if %ERRORLEVEL% NEQ 0 (
-          echo ERROR: CMake pre-configuration failed!
+          echo ERROR: CMake reconfiguration failed!
           exit /b 1
         )
         
-        echo ✓ CMake pre-configured with Ninja
+        echo ✓ CMake reconfigured with Ninja
     
-    - name: Build Windows application
+    - name: Build with Ninja
       shell: cmd
       run: |
         echo ========================================
@@ -111,9 +143,17 @@ jobs:
         
         echo.
         echo ========================================
-        echo Building with Flutter (using pre-configured CMake)
+        echo Building with Ninja
         echo ========================================
-        flutter build windows --release
+        cmake --build build\windows\x64 --config Release
+        
+        if %ERRORLEVEL% NEQ 0 (
+          echo ERROR: Build failed!
+          exit /b 1
+        )
+        
+        echo.
+        echo ✓ Build completed successfully!
     
     - name: Get version from pubspec
       id: version
