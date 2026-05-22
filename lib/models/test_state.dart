@@ -6499,7 +6499,7 @@ class TestState extends ChangeNotifier {
           status: TestReportStatus.pass,
           startTime: DateTime.now(),
           endTime: DateTime.now(),
-          message: '已跳过（默认通过）',
+          testData: {'note': '已跳过（默认通过）'},
         );
         _testReportItems.add(skippedItem);
         notifyListeners();
