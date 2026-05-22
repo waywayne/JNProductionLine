@@ -1,5 +1,11 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+
+# Force x64 architecture for Visual Studio generators
+if(NOT DEFINED CMAKE_GENERATOR_PLATFORM)
+  set(CMAKE_GENERATOR_PLATFORM "x64" CACHE STRING "Generator platform" FORCE)
+endif()
+
 project(jn_production_line LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change

@@ -13,9 +13,10 @@ CMake Error at CMakeLists.txt:3 (project):
 
 ## 根本原因
 
-1. **CMake 缓存问题**：之前的构建可能在 CMake 缓存中保留了 Visual Studio 16 2019 的配置
-2. **生成器未指定**：Flutter 构建时 CMake 自动检测生成器，可能选择了错误的版本
-3. **windows-latest 使用 VS 2022**：GitHub 的 `windows-latest` runner 现在默认安装 Visual Studio 2022，而不是 2019
+1. **Flutter 工具硬编码 VS 2019**：Flutter 的 `build_windows.dart` 内部硬编码查找 Visual Studio 16 2019
+2. **GitHub Runner 只有 VS 2022**：`windows-latest` runner 安装的是 Visual Studio 18 Enterprise 2026（基于 VS 2022）
+3. **环境变量无效**：设置 `CMAKE_GENERATOR` 环境变量无法覆盖 Flutter 工具的内部行为
+4. **CMake 缓存问题**：之前的构建可能在 CMake 缓存中保留了错误的配置
 
 ## 解决方案
 
@@ -42,22 +43,45 @@ CMake Error at CMakeLists.txt:3 (project):
 - ✅ 添加 `flutter clean` 确保彻底清理
 - ✅ 使用 `-ErrorAction SilentlyContinue` 避免目录不存在时报错
 
-#### 2. 显式指定 CMake 生成器
+#### 2. 手动预配置 CMake（关键步骤）
 
 ```yaml
-- name: Build Windows application
+- name: Pre-configure CMake with Visual Studio 17 2022
   shell: pwsh
-  env:
-    CMAKE_GENERATOR: "Visual Studio 17 2022"
   run: |
-    Write-Host "Building with Visual Studio 17 2022"
-    flutter build windows --release
+    Write-Host "Manually configuring CMake with Visual Studio 17 2022..."
+    $buildDir = "build\windows\x64"
+    if (!(Test-Path $buildDir)) {
+      New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+    }
+    
+    cmake -S windows -B $buildDir -G "Visual Studio 17 2022" -A x64 -DFLUTTER_TARGET_PLATFORM=windows-x64
+    
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "ERROR: CMake configuration failed!"
+      exit 1
+    }
+    Write-Host "✓ CMake configuration successful"
 ```
 
 **关键点**：
-- ✅ 设置环境变量 `CMAKE_GENERATOR="Visual Studio 17 2022"`
-- ✅ 强制 CMake 使用 Visual Studio 2022
-- ✅ 避免自动检测导致的版本错误
+- ✅ 在 Flutter 构建前手动运行 CMake 配置
+- ✅ 显式指定 `-G "Visual Studio 17 2022"` 生成器
+- ✅ 指定 `-A x64` 架构
+- ✅ 生成的配置文件会被 Flutter 重用，避免重新检测
+
+#### 3. 修改 windows/CMakeLists.txt
+
+```cmake
+# Force x64 architecture for Visual Studio generators
+if(NOT DEFINED CMAKE_GENERATOR_PLATFORM)
+  set(CMAKE_GENERATOR_PLATFORM "x64" CACHE STRING "Generator platform" FORCE)
+endif()
+```
+
+**作用**：
+- ✅ 确保 CMake 使用 x64 架构
+- ✅ 与手动配置步骤配合使用
 
 ## 为什么这样可以解决问题
 
