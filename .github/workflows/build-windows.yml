@@ -75,34 +75,9 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
     
-    - name: Generate Flutter ephemeral files
-      shell: pwsh
-      run: |
-        Write-Host "Generating Flutter ephemeral files..."
-        
-        # Start flutter build to generate ephemeral files, but kill it after generation
-        $process = Start-Process -FilePath "flutter" -ArgumentList "build","windows","--release" -PassThru -NoNewWindow
-        
-        # Wait for generated_config.cmake to be created
-        $timeout = 60
-        $elapsed = 0
-        while ($elapsed -lt $timeout) {
-          if (Test-Path "windows\flutter\ephemeral\generated_config.cmake") {
-            Write-Host "✓ Flutter ephemeral files generated"
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-            break
-          }
-          Start-Sleep -Seconds 1
-          $elapsed++
-        }
-        
-        if (!(Test-Path "windows\flutter\ephemeral\generated_config.cmake")) {
-          Write-Host "ERROR: Failed to generate ephemeral files"
-          exit 1
-        }
-    
-    - name: Reconfigure CMake with Ninja
+    - name: Build Windows application
+      continue-on-error: true
+      id: flutter-build
       shell: cmd
       run: |
         echo ========================================
@@ -112,14 +87,47 @@ jobs:
         
         echo.
         echo ========================================
-        echo Cleaning old CMake cache
+        echo Attempting Flutter build (expected to fail)
+        echo ========================================
+        flutter build windows --release
+    
+    - name: Check if CMake configuration failed
+      shell: pwsh
+      run: |
+        if ("${{ steps.flutter-build.outcome }}" -eq "failure") {
+          Write-Host "Flutter build failed as expected (VS 2019 not found)"
+          
+          # Check if ephemeral files were generated
+          if (!(Test-Path "windows\flutter\ephemeral\generated_config.cmake")) {
+            Write-Host "ERROR: Ephemeral files were not generated"
+            exit 1
+          }
+          
+          Write-Host "✓ Ephemeral files generated, proceeding with Ninja rebuild"
+        } else {
+          Write-Host "✓ Flutter build succeeded (unexpected but good!)"
+          exit 0
+        }
+    
+    - name: Rebuild with Ninja
+      if: steps.flutter-build.outcome == 'failure'
+      shell: cmd
+      run: |
+        echo ========================================
+        echo Setting up Visual Studio environment
+        echo ========================================
+        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
+        
+        echo.
+        echo ========================================
+        echo Cleaning CMake cache
         echo ========================================
         if exist "build\windows\x64\CMakeCache.txt" del /F /Q "build\windows\x64\CMakeCache.txt"
         if exist "build\windows\x64\CMakeFiles" rd /S /Q "build\windows\x64\CMakeFiles"
         
         echo.
         echo ========================================
-        echo Reconfiguring CMake with Ninja
+        echo Reconfiguring with Ninja
         echo ========================================
         cmake -S windows -B build\windows\x64 ^
           -G Ninja ^
@@ -130,16 +138,6 @@ jobs:
           echo ERROR: CMake reconfiguration failed!
           exit /b 1
         )
-        
-        echo ✓ CMake reconfigured with Ninja
-    
-    - name: Build with Ninja
-      shell: cmd
-      run: |
-        echo ========================================
-        echo Setting up Visual Studio environment
-        echo ========================================
-        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
         
         echo.
         echo ========================================
