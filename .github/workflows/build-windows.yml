@@ -102,41 +102,49 @@ jobs:
         
         Write-Host "Cache cleaning finished!"
     
-    - name: Patch Flutter SDK for VS 2026 compatibility
-      shell: pwsh
-      run: |
-        Write-Host "Patching Flutter SDK to support any Visual Studio version..."
-        
-        $buildWindowsPath = "$env:FLUTTER_ROOT\packages\flutter_tools\lib\src\windows\build_windows.dart"
-        
-        if (!(Test-Path $buildWindowsPath)) {
-          Write-Host "ERROR: build_windows.dart not found at $buildWindowsPath"
-          exit 1
-        }
-        
-        Write-Host "Reading build_windows.dart..."
-        $content = Get-Content $buildWindowsPath -Raw
-        
-        # Replace version constraint "-version 16" with no version constraint
-        $content = $content -replace '-version\s+16\s+', ''
-        
-        # Replace hardcoded "Visual Studio 16 2019" with "Visual Studio 17 2022"
-        $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
-        
-        Write-Host "Writing patched build_windows.dart..."
-        Set-Content -Path $buildWindowsPath -Value $content -NoNewline
-        
-        Write-Host "✓ Flutter SDK patched successfully"
+    - name: Generate Flutter build files
+      run: flutter assemble -dTargetPlatform=windows-x64 --output=build release_bundle_windows-x64_assets
     
-    - name: Build Windows application
+    - name: Build Windows application manually
       shell: cmd
       run: |
-        echo Setting up Visual Studio environment...
+        echo ========================================
+        echo Setting up Visual Studio environment
+        echo ========================================
         call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
         
         echo.
-        echo Building with Flutter...
-        flutter build windows --release --verbose
+        echo ========================================
+        echo Step 1: Configure CMake with Ninja
+        echo ========================================
+        if not exist "build\windows\x64" mkdir "build\windows\x64"
+        
+        cmake -S windows -B build\windows\x64 ^
+          -G Ninja ^
+          -DCMAKE_BUILD_TYPE=Release ^
+          -DFLUTTER_TARGET_PLATFORM=windows-x64
+        
+        if %ERRORLEVEL% NEQ 0 (
+          echo ERROR: CMake configuration failed!
+          exit /b 1
+        )
+        
+        echo.
+        echo ========================================
+        echo Step 2: Build with Ninja
+        echo ========================================
+        cmake --build build\windows\x64 --config Release --target INSTALL
+        
+        if %ERRORLEVEL% NEQ 0 (
+          echo ERROR: Build failed!
+          exit /b 1
+        )
+        
+        echo.
+        echo ========================================
+        echo Build completed successfully!
+        echo ========================================
+        dir build\windows\x64\runner\Release
     
     - name: Get version from pubspec
       id: version
