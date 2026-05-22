@@ -35,7 +35,16 @@ Flutter 的 `build_windows.dart` 内部硬编码查找特定版本的 Visual Stu
 ## 最终解决方案
 
 ### 核心策略
-在 Flutter 构建前，通过 Visual Studio Developer Command Prompt 设置完整的编译环境，让 CMake 能够正确检测和使用已安装的 Visual Studio。
+**运行时修补 Flutter SDK**，移除硬编码的 Visual Studio 版本约束，使其能够使用任何已安装的 Visual Studio 版本。
+
+### 为什么需要修补 SDK
+Flutter 3.24.0 的 `build_windows.dart` 硬编码了：
+```dart
+vswhere.exe -version 16  // 只查找 VS 2019
+cmake -G "Visual Studio 16 2019"  // 只使用 VS 2019 生成器
+```
+
+但 GitHub Runner 安装的是 VS 18 Enterprise 2026，导致构建失败。
 
 ### 实施步骤
 

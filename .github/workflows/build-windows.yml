@@ -102,14 +102,40 @@ jobs:
         
         Write-Host "Cache cleaning finished!"
     
-    - name: Build Windows application with manual CMake
+    - name: Patch Flutter SDK for VS 2026 compatibility
+      shell: pwsh
+      run: |
+        Write-Host "Patching Flutter SDK to support any Visual Studio version..."
+        
+        $buildWindowsPath = "$env:FLUTTER_ROOT\packages\flutter_tools\lib\src\windows\build_windows.dart"
+        
+        if (!(Test-Path $buildWindowsPath)) {
+          Write-Host "ERROR: build_windows.dart not found at $buildWindowsPath"
+          exit 1
+        }
+        
+        Write-Host "Reading build_windows.dart..."
+        $content = Get-Content $buildWindowsPath -Raw
+        
+        # Replace version constraint "-version 16" with no version constraint
+        $content = $content -replace '-version\s+16\s+', ''
+        
+        # Replace hardcoded "Visual Studio 16 2019" with "Visual Studio 17 2022"
+        $content = $content -replace 'Visual Studio 16 2019', 'Visual Studio 17 2022'
+        
+        Write-Host "Writing patched build_windows.dart..."
+        Set-Content -Path $buildWindowsPath -Value $content -NoNewline
+        
+        Write-Host "✓ Flutter SDK patched successfully"
+    
+    - name: Build Windows application
       shell: cmd
       run: |
         echo Setting up Visual Studio environment...
         call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
         
         echo.
-        echo Running Flutter build...
+        echo Building with Flutter...
         flutter build windows --release --verbose
     
     - name: Get version from pubspec
