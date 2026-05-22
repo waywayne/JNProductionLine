@@ -189,6 +189,9 @@ class TestState extends ChangeNotifier {
   // Touch测试弹窗状态
   bool _showTouchDialog = false;
   bool _isLeftTouchDialog = false;
+  
+  // 跳过选项（单板测试）
+  bool _skipRightTouchTest = false;
 
   // Sensor测试状态
   bool _isSensorTesting = false;
@@ -314,6 +317,13 @@ class TestState extends ChangeNotifier {
   // 获取Touch测试弹窗状态
   bool get showTouchDialog => _showTouchDialog;
   bool get isLeftTouchDialog => _isLeftTouchDialog;
+  
+  // 获取/设置跳过选项
+  bool get skipRightTouchTest => _skipRightTouchTest;
+  void setSkipRightTouchTest(bool value) {
+    _skipRightTouchTest = value;
+    notifyListeners();
+  }
 
   // 获取Sensor测试状态
   bool get isSensorTesting => _isSensorTesting;
@@ -850,7 +860,7 @@ class TestState extends ChangeNotifier {
       {'name': '23. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
       {'name': '24. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
       {'name': '25. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '26. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '26. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': true},
       {'name': '27. 左佩戴检测', 'type': 'Touch', 'executor': _autoTestLeftWearDetect, 'skippable': false},
       // {'name': '28. 左触控事件测试', 'type': 'Touch', 'executor': _autoTestLeftTouchEvent, 'skippable': false},
       {'name': '28. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
@@ -6444,7 +6454,7 @@ class TestState extends ChangeNotifier {
       {'name': '23. RTC获取时间测试', 'type': 'RTC', 'executor': _autoTestRTCGet, 'skippable': false},
       {'name': '24. 光敏传感器测试', 'type': '光敏', 'executor': _autoTestLightSensor, 'skippable': false},
       {'name': '25. IMU传感器测试', 'type': 'IMU', 'executor': _autoTestIMU, 'skippable': false},
-      {'name': '26. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': false},
+      {'name': '26. 右触控测试', 'type': 'Touch', 'executor': _autoTestRightTouch, 'skippable': true},
       {'name': '27. 左佩戴检测', 'type': 'Touch', 'executor': _autoTestLeftWearDetect, 'skippable': false},
       // {'name': '28. 左触控事件测试', 'type': 'Touch', 'executor': _autoTestLeftTouchEvent, 'skippable': false},
       {'name': '28. LED灯(外侧)测试', 'type': 'LED', 'executor': () => _autoTestLEDWithDialog('外侧'), 'skippable': false},
@@ -6479,6 +6489,22 @@ class TestState extends ChangeNotifier {
       
       _logState?.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: LogType.debug);
       _logState?.info('📋 测试项 ${i + 1}/${testSequence.length}: ${test['name']}${isSkippable ? ' (可跳过)' : ''}', type: LogType.debug);
+      
+      // 检查是否跳过右Touch测试
+      if (test['name'] == '26. 右触控测试' && _skipRightTouchTest) {
+        _logState?.warning('⚠️ 已跳过右触控测试，默认标记为通过', type: LogType.debug);
+        final skippedItem = TestReportItem(
+          testName: test['name'] as String,
+          testType: test['type'] as String,
+          status: TestReportStatus.pass,
+          startTime: DateTime.now(),
+          endTime: DateTime.now(),
+          message: '已跳过（默认通过）',
+        );
+        _testReportItems.add(skippedItem);
+        notifyListeners();
+        continue;
+      }
       
       final item = TestReportItem(
         testName: test['name'] as String,

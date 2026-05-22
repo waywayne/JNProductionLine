@@ -17,6 +17,9 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
+    - name: Setup Visual Studio environment
+      uses: microsoft/setup-msbuild@v2
+    
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
@@ -39,6 +42,14 @@ jobs:
     
     - name: Get Flutter dependencies
       run: flutter pub get
+    
+    - name: Clean CMake cache
+      shell: pwsh
+      run: |
+        if (Test-Path "build/windows") {
+          Remove-Item -Path "build/windows" -Recurse -Force
+          Write-Host "Cleaned CMake cache"
+        }
     
     - name: Build Windows application
       run: flutter build windows --release

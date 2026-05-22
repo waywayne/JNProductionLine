@@ -41,6 +41,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   // 工位3：跳过充电电流测试（使用GPIB采集）
   bool _skipChargingCurrentTest3 = false;
   
+  // 工位6：跳过右Touch测试（TK1/TK2/TK3）
+  bool _skipRightTouchTest6 = false;
+  
   // 工位1状态
   bool _isAutoTesting1 = false;
   int _currentStep1 = 0;
@@ -3810,6 +3813,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   SN: ${_scannedSN6 ?? "MAC直连"}');
     logState.info('   蓝牙: ${_productInfo6!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod6)}');
+    if (_skipRightTouchTest6) {
+      logState.info('   右Touch测试: 已跳过');
+    }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
@@ -3901,33 +3907,69 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 10:
             logState.info('步骤11: 右Touch-TK1校准');
-            success = await _testTouchCalibration6(state, logState, touchType: 'TK1');
-            message = success ? 'TK1校准通过' : 'TK1校准失败';
+            if (_skipRightTouchTest6) {
+              logState.warning('⚠️ 已跳过右Touch-TK1校准，默认标记为通过');
+              success = true;
+              message = '已跳过TK1校准（默认通过）';
+            } else {
+              success = await _testTouchCalibration6(state, logState, touchType: 'TK1');
+              message = success ? 'TK1校准通过' : 'TK1校准失败';
+            }
             break;
           case 11:
             logState.info('步骤12: 右Touch-TK2校准');
-            success = await _testTouchCalibration6(state, logState, touchType: 'TK2');
-            message = success ? 'TK2校准通过' : 'TK2校准失败';
+            if (_skipRightTouchTest6) {
+              logState.warning('⚠️ 已跳过右Touch-TK2校准，默认标记为通过');
+              success = true;
+              message = '已跳过TK2校准（默认通过）';
+            } else {
+              success = await _testTouchCalibration6(state, logState, touchType: 'TK2');
+              message = success ? 'TK2校准通过' : 'TK2校准失败';
+            }
             break;
           case 12:
             logState.info('步骤13: 右Touch-TK3校准');
-            success = await _testTouchCalibration6(state, logState, touchType: 'TK3');
-            message = success ? 'TK3校准通过' : 'TK3校准失败';
+            if (_skipRightTouchTest6) {
+              logState.warning('⚠️ 已跳过右Touch-TK3校准，默认标记为通过');
+              success = true;
+              message = '已跳过TK3校准（默认通过）';
+            } else {
+              success = await _testTouchCalibration6(state, logState, touchType: 'TK3');
+              message = success ? 'TK3校准通过' : 'TK3校准失败';
+            }
             break;
           case 13:
             logState.info('步骤14: 右Touch-TK1(>500)');
-            success = await _testTouch6(state, logState, touchType: 'TK1');
-            message = success ? 'TK1测试通过' : 'TK1测试失败';
+            if (_skipRightTouchTest6) {
+              logState.warning('⚠️ 已跳过右Touch-TK1测试，默认标记为通过');
+              success = true;
+              message = '已跳过TK1测试（默认通过）';
+            } else {
+              success = await _testTouch6(state, logState, touchType: 'TK1');
+              message = success ? 'TK1测试通过' : 'TK1测试失败';
+            }
             break;
           case 14:
             logState.info('步骤15: 右Touch-TK2(>500)');
-            success = await _testTouch6(state, logState, touchType: 'TK2');
-            message = success ? 'TK2测试通过' : 'TK2测试失败';
+            if (_skipRightTouchTest6) {
+              logState.warning('⚠️ 已跳过右Touch-TK2测试，默认标记为通过');
+              success = true;
+              message = '已跳过TK2测试（默认通过）';
+            } else {
+              success = await _testTouch6(state, logState, touchType: 'TK2');
+              message = success ? 'TK2测试通过' : 'TK2测试失败';
+            }
             break;
           case 15:
             logState.info('步骤16: 右Touch-TK3(>500)');
-            success = await _testTouch6(state, logState, touchType: 'TK3');
-            message = success ? 'TK3测试通过' : 'TK3测试失败';
+            if (_skipRightTouchTest6) {
+              logState.warning('⚠️ 已跳过右Touch-TK3测试，默认标记为通过');
+              success = true;
+              message = '已跳过TK3测试（默认通过）';
+            } else {
+              success = await _testTouch6(state, logState, touchType: 'TK3');
+              message = success ? 'TK3测试通过' : 'TK3测试失败';
+            }
             break;
           case 16:
             logState.info('步骤17: 佩戴检测');
@@ -5794,6 +5836,27 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           ),
 
           const SizedBox(height: 16),
+
+          // 跳过右Touch测试选项
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.touch_app, color: _skipRightTouchTest6 ? Colors.orange : Colors.grey, size: 20),
+                  const SizedBox(width: 4),
+                  Text('跳过右Touch测试(TK1/TK2/TK3)', style: TextStyle(fontSize: 12, color: _skipRightTouchTest6 ? Colors.orange : Colors.grey)),
+                  Switch(
+                    value: _skipRightTouchTest6,
+                    onChanged: _isAutoTesting6 ? null : (value) => setState(() => _skipRightTouchTest6 = value),
+                    activeColor: Colors.orange,
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
 
           Row(
             children: [
