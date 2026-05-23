@@ -109,6 +109,35 @@ jobs:
           exit 0
         }
     
+    - name: Copy Flutter engine files
+      if: steps.flutter-build.outcome == 'failure'
+      shell: pwsh
+      run: |
+        Write-Host "Copying Flutter engine files to ephemeral directory..."
+        
+        $flutterRoot = $env:FLUTTER_ROOT
+        $enginePath = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release"
+        $ephemeralPath = "windows\flutter\ephemeral"
+        
+        # Ensure ephemeral directory exists
+        if (!(Test-Path $ephemeralPath)) {
+          New-Item -ItemType Directory -Path $ephemeralPath -Force | Out-Null
+        }
+        
+        # Copy engine files
+        Write-Host "Copying from: $enginePath"
+        Write-Host "Copying to: $ephemeralPath"
+        
+        Copy-Item -Path "$enginePath\flutter_windows.dll" -Destination $ephemeralPath -Force
+        Copy-Item -Path "$enginePath\flutter_windows.dll.lib" -Destination $ephemeralPath -Force
+        Copy-Item -Path "$enginePath\flutter_export.h" -Destination $ephemeralPath -Force
+        Copy-Item -Path "$enginePath\flutter_windows.h" -Destination $ephemeralPath -Force
+        Copy-Item -Path "$enginePath\flutter_messenger.h" -Destination $ephemeralPath -Force
+        Copy-Item -Path "$enginePath\flutter_plugin_registrar.h" -Destination $ephemeralPath -Force
+        Copy-Item -Path "$enginePath\flutter_texture_registrar.h" -Destination $ephemeralPath -Force
+        
+        Write-Host "✓ Flutter engine files copied"
+    
     - name: Rebuild with Ninja
       if: steps.flutter-build.outcome == 'failure'
       shell: cmd
