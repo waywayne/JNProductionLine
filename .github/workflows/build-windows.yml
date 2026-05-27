@@ -255,6 +255,38 @@ jobs:
         echo "VERSION=$version" >> $env:GITHUB_OUTPUT
         echo "Version: $version"
     
+    - name: Inspect build output
+      shell: pwsh
+      run: |
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "Build Directory Structure" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        if (Test-Path "build/windows") {
+          Write-Host "`nDirectory tree:" -ForegroundColor Yellow
+          Get-ChildItem -Path "build/windows" -Recurse | ForEach-Object {
+            $indent = "  " * ($_.FullName.Split('\').Count - "build/windows".Split('\').Count - 1)
+            if ($_.PSIsContainer) {
+              Write-Host "$indent[DIR]  $($_.Name)" -ForegroundColor Cyan
+            } else {
+              $size = if ($_.Length -gt 1MB) { "$([math]::Round($_.Length/1MB, 2)) MB" } else { "$([math]::Round($_.Length/1KB, 2)) KB" }
+              Write-Host "$indent[FILE] $($_.Name) ($size)" -ForegroundColor Gray
+            }
+          }
+          
+          Write-Host "`nExecutable files:" -ForegroundColor Yellow
+          Get-ChildItem -Path "build/windows" -Recurse -File -Filter "*.exe" | ForEach-Object {
+            Write-Host "  ✓ $($_.FullName)" -ForegroundColor Green
+          }
+          
+          Write-Host "`nDLL files:" -ForegroundColor Yellow
+          Get-ChildItem -Path "build/windows" -Recurse -File -Filter "*.dll" | ForEach-Object {
+            Write-Host "  ✓ $($_.FullName)" -ForegroundColor Green
+          }
+        } else {
+          Write-Host "ERROR: build/windows directory not found!" -ForegroundColor Red
+        }
+    
     - name: Package application
       shell: pwsh
       run: |
@@ -262,20 +294,69 @@ jobs:
         $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
         $zipName = "jn_production_line_windows_v${version}_${timestamp}.zip"
         
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "Locating build output..." -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        # 查找实际的构建输出目录
+        $possiblePaths = @(
+          "build/windows/x64/runner/Release",
+          "build/windows/x64/runner",
+          "build/windows/runner/Release",
+          "build/windows/runner"
+        )
+        
+        $buildPath = $null
+        foreach ($path in $possiblePaths) {
+          if (Test-Path $path) {
+            $exePath = Join-Path $path "jn_production_line.exe"
+            if (Test-Path $exePath) {
+              $buildPath = $path
+              Write-Host "✓ Found build output at: $buildPath" -ForegroundColor Green
+              break
+            }
+          }
+        }
+        
+        if (-not $buildPath) {
+          Write-Host "ERROR: Could not find build output!" -ForegroundColor Red
+          Write-Host "Searched paths:" -ForegroundColor Yellow
+          foreach ($path in $possiblePaths) {
+            Write-Host "  - $path" -ForegroundColor Yellow
+          }
+          Write-Host "`nBuild directory structure:" -ForegroundColor Yellow
+          if (Test-Path "build/windows") {
+            Get-ChildItem -Path "build/windows" -Recurse -File -Filter "*.exe" | ForEach-Object {
+              Write-Host "  Found EXE: $($_.FullName)" -ForegroundColor Yellow
+            }
+          }
+          exit 1
+        }
+        
         # 创建打包目录
-        New-Item -ItemType Directory -Force -Path package
+        New-Item -ItemType Directory -Force -Path package | Out-Null
         
         # 复制必要文件
-        Copy-Item -Path "build/windows/x64/runner/Release/*" -Destination "package/" -Recurse
+        Write-Host "`nCopying files from: $buildPath" -ForegroundColor Cyan
+        Copy-Item -Path "$buildPath/*" -Destination "package/" -Recurse -Force
         Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
         
+        # 验证打包内容
+        Write-Host "`nPackage contents:" -ForegroundColor Cyan
+        Get-ChildItem -Path "package" -Recurse | ForEach-Object {
+          Write-Host "  $($_.FullName)" -ForegroundColor Gray
+        }
+        
         # 创建 ZIP
-        Compress-Archive -Path "package/*" -DestinationPath $zipName
+        Write-Host "`nCreating archive: $zipName" -ForegroundColor Cyan
+        Compress-Archive -Path "package/*" -DestinationPath $zipName -Force
+        
+        $zipSize = (Get-Item $zipName).Length / 1MB
+        Write-Host "✓ Created: $zipName ($([math]::Round($zipSize, 2)) MB)" -ForegroundColor Green
         
         echo "ZIP_NAME=$zipName" >> $env:GITHUB_OUTPUT
-        echo "Created: $zipName"
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
