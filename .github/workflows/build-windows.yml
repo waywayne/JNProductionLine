@@ -75,48 +75,6 @@ jobs:
     - name: Get Flutter dependencies
       run: flutter pub get
     
-    - name: Fix plugin CMakeLists.txt files
-      shell: pwsh
-      run: |
-        Write-Host "Fixing quoted warning flags in plugin CMakeLists.txt files..."
-        
-        # Find all CMakeLists.txt files in .dart_tool/flutter_build
-        $cmakeFiles = Get-ChildItem -Path ".dart_tool" -Filter "CMakeLists.txt" -Recurse -ErrorAction SilentlyContinue
-        
-        foreach ($file in $cmakeFiles) {
-          $content = Get-Content $file.FullName -Raw
-          $originalContent = $content
-          
-          # Fix quoted warning flags: /wd"4100" -> /wd4100
-          $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
-          $content = $content -replace '/wd"(\d+)"', '/wd$1'
-          
-          if ($content -ne $originalContent) {
-            Set-Content -Path $file.FullName -Value $content -NoNewline
-            Write-Host "✓ Fixed: $($file.FullName)"
-          }
-        }
-        
-        # Also check windows/flutter/ephemeral after flutter pub get
-        if (Test-Path "windows/flutter/ephemeral") {
-          $ephemeralCmake = Get-ChildItem -Path "windows/flutter/ephemeral" -Filter "CMakeLists.txt" -Recurse -ErrorAction SilentlyContinue
-          
-          foreach ($file in $ephemeralCmake) {
-            $content = Get-Content $file.FullName -Raw
-            $originalContent = $content
-            
-            $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
-            $content = $content -replace '/wd"(\d+)"', '/wd$1'
-            
-            if ($content -ne $originalContent) {
-              Set-Content -Path $file.FullName -Value $content -NoNewline
-              Write-Host "✓ Fixed: $($file.FullName)"
-            }
-          }
-        }
-        
-        Write-Host "✓ Plugin CMakeLists.txt files checked and fixed"
-    
     - name: Build Windows application
       continue-on-error: true
       id: flutter-build
@@ -180,56 +138,7 @@ jobs:
         
         Write-Host "✓ Flutter engine files copied"
     
-    - name: Fix plugin CMakeLists.txt before Ninja build
-      if: steps.flutter-build.outcome == 'failure'
-      shell: pwsh
-      run: |
-        Write-Host "Fixing quoted warning flags in all CMakeLists.txt files..."
-        
-        # Fix in windows/flutter/ephemeral (plugin symlinks)
-        if (Test-Path "windows/flutter/ephemeral/.plugin_symlinks") {
-          $pluginFiles = Get-ChildItem -Path "windows/flutter/ephemeral/.plugin_symlinks" -Filter "CMakeLists.txt" -Recurse -ErrorAction SilentlyContinue
-          
-          foreach ($file in $pluginFiles) {
-            $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
-            if ($content) {
-              $originalContent = $content
-              
-              # Fix quoted warning flags
-              $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
-              $content = $content -replace '/wd"(\d+)"', '/wd$1'
-              
-              if ($content -ne $originalContent) {
-                Set-Content -Path $file.FullName -Value $content -NoNewline
-                Write-Host "✓ Fixed: $($file.FullName)"
-              }
-            }
-          }
-        }
-        
-        # Fix in build directory
-        if (Test-Path "build/windows") {
-          $buildFiles = Get-ChildItem -Path "build/windows" -Filter "CMakeLists.txt" -Recurse -ErrorAction SilentlyContinue
-          
-          foreach ($file in $buildFiles) {
-            $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
-            if ($content) {
-              $originalContent = $content
-              
-              $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
-              $content = $content -replace '/wd"(\d+)"', '/wd$1'
-              
-              if ($content -ne $originalContent) {
-                Set-Content -Path $file.FullName -Value $content -NoNewline
-                Write-Host "✓ Fixed: $($file.FullName)"
-              }
-            }
-          }
-        }
-        
-        Write-Host "✓ All CMakeLists.txt files checked and fixed"
-    
-    - name: Rebuild with Ninja
+    - name: CMake Configure
       if: steps.flutter-build.outcome == 'failure'
       shell: cmd
       run: |
@@ -258,6 +167,71 @@ jobs:
           echo ERROR: CMake reconfiguration failed!
           exit /b 1
         )
+        
+        echo ✓ CMake configuration completed
+    
+    - name: Fix generated build files
+      if: steps.flutter-build.outcome == 'failure'
+      shell: pwsh
+      run: |
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "Fixing quoted warning flags in generated build files" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        $fixedCount = 0
+        
+        # Fix all build.ninja files (这是关键！)
+        $ninjaFiles = Get-ChildItem -Path "build/windows/x64" -Filter "build.ninja" -Recurse -ErrorAction SilentlyContinue
+        
+        foreach ($file in $ninjaFiles) {
+          $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
+          if ($content) {
+            $originalContent = $content
+            
+            # Fix escaped quotes in build.ninja: /wd\"4100\" -> /wd4100
+            $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
+            # Also fix non-escaped quotes: /wd"4100" -> /wd4100
+            $content = $content -replace '/wd"(\d+)"', '/wd$1'
+            
+            if ($content -ne $originalContent) {
+              Set-Content -Path $file.FullName -Value $content -NoNewline
+              Write-Host "✓ Fixed: $($file.FullName)" -ForegroundColor Green
+              $fixedCount++
+            }
+          }
+        }
+        
+        # Also fix CMakeLists.txt in build directory
+        $cmakeFiles = Get-ChildItem -Path "build/windows/x64" -Filter "CMakeLists.txt" -Recurse -ErrorAction SilentlyContinue
+        
+        foreach ($file in $cmakeFiles) {
+          $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
+          if ($content) {
+            $originalContent = $content
+            
+            $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
+            $content = $content -replace '/wd"(\d+)"', '/wd$1'
+            
+            if ($content -ne $originalContent) {
+              Set-Content -Path $file.FullName -Value $content -NoNewline
+              Write-Host "✓ Fixed: $($file.FullName)" -ForegroundColor Green
+              $fixedCount++
+            }
+          }
+        }
+        
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "Fixed $fixedCount file(s)" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Cyan
+    
+    - name: Build with Ninja
+      if: steps.flutter-build.outcome == 'failure'
+      shell: cmd
+      run: |
+        echo ========================================
+        echo Setting up Visual Studio environment
+        echo ========================================
+        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
         
         echo.
         echo ========================================
