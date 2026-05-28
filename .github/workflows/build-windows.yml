@@ -12,6 +12,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     
     steps:
     - name: Checkout repository
@@ -59,18 +60,61 @@ jobs:
         channel: 'stable'
         cache: true
     
+    - name: Verify Flutter setup
+      shell: pwsh
+      run: |
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "Verifying Flutter installation" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        Write-Host "`nFlutter location:" -ForegroundColor Yellow
+        Get-Command flutter | Select-Object -ExpandProperty Source
+        
+        Write-Host "`nFlutter version:" -ForegroundColor Yellow
+        flutter --version
+        
+        Write-Host "`nFLUTTER_ROOT:" -ForegroundColor Yellow
+        Write-Host $env:FLUTTER_ROOT
+        
+        Write-Host "`nDart location:" -ForegroundColor Yellow
+        Get-Command dart | Select-Object -ExpandProperty Source
+        
+        Write-Host "`n✓ Flutter setup verified" -ForegroundColor Green
+    
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+      continue-on-error: false
+    
+    - name: Verify Python installation
+      shell: pwsh
+      run: |
+        Write-Host "Python version:" -ForegroundColor Cyan
+        python --version
+        Write-Host "Pip version:" -ForegroundColor Cyan
+        pip --version
     
     - name: Install Python dependencies
+      shell: pwsh
       run: |
+        Write-Host "Upgrading pip..." -ForegroundColor Cyan
         python -m pip install --upgrade pip
+        
+        Write-Host "Installing dependencies..." -ForegroundColor Cyan
         pip install pyvisa pyvisa-py pandas openpyxl
+        
+        Write-Host "Verifying installations..." -ForegroundColor Cyan
+        pip list | Select-String -Pattern "pyvisa|pandas|openpyxl"
     
     - name: Flutter doctor
-      run: flutter doctor -v
+      shell: pwsh
+      run: |
+        Write-Host "Running Flutter doctor..." -ForegroundColor Cyan
+        flutter doctor -v
+        
+        Write-Host "`nFlutter version:" -ForegroundColor Cyan
+        flutter --version
     
     - name: Get Flutter dependencies
       run: flutter pub get
