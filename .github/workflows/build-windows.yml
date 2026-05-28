@@ -467,9 +467,17 @@ jobs:
         }
         
         # 复制文档文件
+        Copy-Item -Path "START_HERE.txt" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
+        
+        # 复制安装和诊断工具
         Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "install_vc_redist.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "diagnose_windows.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "start_with_console.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        
+        Write-Host "✓ Copied documentation and tools" -ForegroundColor Green
         
         # 验证打包内容
         Write-Host "`n========================================" -ForegroundColor Cyan
