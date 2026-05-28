@@ -1,0 +1,69 @@
+========================================
+  JN Production Line - 快速开始
+========================================
+
+📌 首次使用？请按以下步骤操作：
+
+1️⃣  运行诊断工具（推荐）
+   双击 → diagnose_windows.bat
+   
+   这会自动检查：
+   ✓ 必要文件是否完整
+   ✓ Visual C++ 运行时库
+   ✓ 系统环境
+   
+2️⃣  如果提示缺少运行时库
+   双击 → install_vc_redist.bat
+   
+   这会自动下载并安装 Visual C++ Redistributable
+   
+3️⃣  启动程序
+   双击 → jn_production_line.exe
+
+========================================
+
+❌ 程序无法启动？
+
+最常见原因：缺少 Visual C++ 运行时库
+
+快速解决：
+  双击 → install_vc_redist.bat
+
+或手动下载：
+  https://aka.ms/vs/17/release/vc_redist.x64.exe
+
+========================================
+
+🔧 其他工具
+
+• start_with_console.bat
+  在控制台模式启动，可以看到错误信息
+  
+• install_gpib_dependencies.bat
+  安装 GPIB 功能所需的 Python 依赖
+
+========================================
+
+📖 详细文档
+
+• README_WINDOWS.md - Windows 使用说明
+• GPIB_TROUBLESHOOTING.md - GPIB 故障排除
+
+========================================
+
+💡 提示
+
+1. 首次运行可能需要几秒钟初始化
+2. 某些功能需要管理员权限
+3. 如遇到 Windows Defender 提示，
+   点击"更多信息" → "仍要运行"
+
+========================================
+
+需要帮助？
+
+1. 运行 diagnose_windows.bat 查看详细信息
+2. 运行 start_with_console.bat 查看错误日志
+3. 查看 README_WINDOWS.md 了解常见问题
+
+========================================
