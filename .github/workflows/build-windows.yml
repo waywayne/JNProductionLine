@@ -546,14 +546,42 @@ jobs:
         $totalSize = (Get-ChildItem -Path "package" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
         Write-Host "`nTotal package size: $([math]::Round($totalSize, 2)) MB" -ForegroundColor Green
         
-        # 创建 ZIP
+        # 创建 ZIP（直接压缩 package 目录内容，不包含 package 文件夹本身）
         Write-Host "`n========================================" -ForegroundColor Cyan
         Write-Host "Creating archive: $zipName" -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
-        Compress-Archive -Path "package/*" -DestinationPath $zipName -Force
+        
+        # 进入 package 目录，压缩所有内容到上级目录
+        Push-Location package
+        try {
+          $zipPath = Join-Path ".." $zipName
+          
+          # 获取所有文件和目录
+          $items = Get-ChildItem -Path "." -Force
+          
+          # 压缩（不包含 package 目录本身）
+          Compress-Archive -Path $items.FullName -DestinationPath $zipPath -Force
+          
+          Write-Host "✓ Compressed $($items.Count) items" -ForegroundColor Green
+        } finally {
+          Pop-Location
+        }
         
         $zipSize = (Get-Item $zipName).Length / 1MB
         Write-Host "✓ Archive created: $zipName ($([math]::Round($zipSize, 2)) MB)" -ForegroundColor Green
+        
+        # 验证 ZIP 内容
+        Write-Host "`nVerifying ZIP contents..." -ForegroundColor Cyan
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipName))
+        Write-Host "ZIP contains $($zip.Entries.Count) entries:" -ForegroundColor Yellow
+        $zip.Entries | Select-Object -First 20 | ForEach-Object {
+          Write-Host "  $($_.FullName)" -ForegroundColor Gray
+        }
+        if ($zip.Entries.Count -gt 20) {
+          Write-Host "  ... and $($zip.Entries.Count - 20) more files" -ForegroundColor Gray
+        }
+        $zip.Dispose()
         
         echo "ZIP_NAME=$zipName" >> $env:GITHUB_OUTPUT
     
