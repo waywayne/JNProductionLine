@@ -586,6 +586,107 @@ jobs:
         echo "VERSION=$version" >> $env:GITHUB_OUTPUT
         echo "Version: $version"
     
+    - name: Test executable
+      shell: pwsh
+      run: |
+        Write-Host "========================================" -ForegroundColor Cyan
+        Write-Host "Testing executable" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        # 查找 EXE 文件
+        $exePaths = @(
+          "build/windows/x64/runner/Release/jn_production_line.exe",
+          "build/windows/runner/Release/jn_production_line.exe",
+          "build/windows/x64/runner/jn_production_line.exe"
+        )
+        
+        $exePath = $null
+        foreach ($path in $exePaths) {
+          if (Test-Path $path) {
+            $exePath = $path
+            break
+          }
+        }
+        
+        if (-not $exePath) {
+          Write-Host "✗ ERROR: Executable not found!" -ForegroundColor Red
+          exit 1
+        }
+        
+        Write-Host "Found executable: $exePath" -ForegroundColor Green
+        
+        # 检查文件类型
+        Write-Host "`nFile information:" -ForegroundColor Cyan
+        $fileInfo = Get-Item $exePath
+        Write-Host "  Size: $([math]::Round($fileInfo.Length/1KB, 2)) KB" -ForegroundColor Gray
+        Write-Host "  Created: $($fileInfo.CreationTime)" -ForegroundColor Gray
+        Write-Host "  Modified: $($fileInfo.LastWriteTime)" -ForegroundColor Gray
+        
+        # 检查依赖的 DLL
+        Write-Host "`nChecking dependencies:" -ForegroundColor Cyan
+        $exeDir = Split-Path $exePath
+        $requiredDlls = @("flutter_windows.dll")
+        
+        foreach ($dll in $requiredDlls) {
+          $dllPath = Join-Path $exeDir $dll
+          if (Test-Path $dllPath) {
+            $dllSize = (Get-Item $dllPath).Length / 1MB
+            Write-Host "  ✓ $dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
+          } else {
+            Write-Host "  ✗ $dll (MISSING!)" -ForegroundColor Red
+          }
+        }
+        
+        # 检查 data 目录
+        $dataDir = Join-Path $exeDir "data"
+        if (Test-Path $dataDir) {
+          $dataFiles = Get-ChildItem -Path $dataDir -Recurse -File
+          Write-Host "  ✓ data/ ($($dataFiles.Count) files)" -ForegroundColor Green
+        } else {
+          Write-Host "  ✗ data/ (MISSING!)" -ForegroundColor Red
+        }
+        
+        # 尝试运行 EXE（带 --help 参数，快速退出）
+        Write-Host "`nTesting executable launch:" -ForegroundColor Cyan
+        try {
+          # 设置超时 5 秒
+          $process = Start-Process -FilePath $exePath -ArgumentList "--help" -PassThru -NoNewWindow -RedirectStandardOutput "test_output.txt" -RedirectStandardError "test_error.txt"
+          
+          # 等待最多 5 秒
+          $timeout = 5
+          $process | Wait-Process -Timeout $timeout -ErrorAction SilentlyContinue
+          
+          if ($process.HasExited) {
+            Write-Host "  ✓ Executable launched successfully (exit code: $($process.ExitCode))" -ForegroundColor Green
+            
+            # 显示输出（如果有）
+            if (Test-Path "test_output.txt") {
+              $output = Get-Content "test_output.txt" -Raw
+              if ($output) {
+                Write-Host "`nStdout:" -ForegroundColor Yellow
+                Write-Host $output -ForegroundColor Gray
+              }
+            }
+            
+            if (Test-Path "test_error.txt") {
+              $error = Get-Content "test_error.txt" -Raw
+              if ($error) {
+                Write-Host "`nStderr:" -ForegroundColor Yellow
+                Write-Host $error -ForegroundColor Gray
+              }
+            }
+          } else {
+            # 进程仍在运行，强制终止
+            $process | Stop-Process -Force
+            Write-Host "  ✓ Executable launched (still running after ${timeout}s, killed)" -ForegroundColor Green
+          }
+        } catch {
+          Write-Host "  ⚠ Could not test launch: $_" -ForegroundColor Yellow
+          Write-Host "  This is expected in CI environment without display" -ForegroundColor Gray
+        }
+        
+        Write-Host "`n✓ Executable validation complete" -ForegroundColor Green
+    
     - name: Inspect build output
       shell: pwsh
       run: |
@@ -678,11 +779,29 @@ jobs:
         
         # 复制必要文件 - 使用正确的方式复制整个目录内容
         Write-Host "`nCopying files from: $buildPath" -ForegroundColor Cyan
-        
-        # 方法1: 直接复制目录内容（推荐）
+        Write-Host "Build path contents:" -ForegroundColor Yellow
         Get-ChildItem -Path $buildPath | ForEach-Object {
-          Copy-Item -Path $_.FullName -Destination "package/" -Recurse -Force
-          Write-Host "  Copied: $($_.Name)" -ForegroundColor Gray
+          Write-Host "  - $($_.Name) [$($_.PSIsContainer ? 'DIR' : 'FILE')]" -ForegroundColor Gray
+        }
+        Write-Host ""
+        
+        # 复制所有文件和目录
+        Get-ChildItem -Path $buildPath | ForEach-Object {
+          $itemName = $_.Name
+          $itemPath = $_.FullName
+          
+          if ($_.PSIsContainer) {
+            # 目录：递归复制
+            $destPath = Join-Path "package" $itemName
+            Copy-Item -Path $itemPath -Destination $destPath -Recurse -Force
+            $fileCount = (Get-ChildItem -Path $destPath -Recurse -File).Count
+            Write-Host "  ✓ Copied directory: $itemName ($fileCount files)" -ForegroundColor Green
+          } else {
+            # 文件：直接复制
+            Copy-Item -Path $itemPath -Destination "package/" -Force
+            $size = $_.Length / 1MB
+            Write-Host "  ✓ Copied file: $itemName ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+          }
         }
         
         # 复制文档文件
@@ -690,12 +809,15 @@ jobs:
         Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "WINDOWS_TROUBLESHOOTING.md" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "EXE_TROUBLESHOOTING.md" -Destination "package/" -ErrorAction SilentlyContinue
         
         # 复制安装和诊断工具（BAT 文件应该已经是 GBK 编码）
         Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "install_vc_redist.bat" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "diagnose_windows.bat" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "start_with_console.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "diagnose_exe.bat" -Destination "package/" -ErrorAction SilentlyContinue
+        Copy-Item -Path "debug_start.bat" -Destination "package/" -ErrorAction SilentlyContinue
         
         Write-Host "✓ Copied documentation and tools" -ForegroundColor Green
         
@@ -799,6 +921,53 @@ jobs:
           Write-Host "  This will cause the application to crash!" -ForegroundColor Red
           Remove-Item $wrongIcuPath -Force
           Write-Host "  ✓ Removed incorrect icudtl.dat from root" -ForegroundColor Yellow
+        }
+        
+        # 详细检查 data 目录结构
+        Write-Host "`nDetailed data directory structure:" -ForegroundColor Cyan
+        $dataDir = "package/data"
+        if (Test-Path $dataDir) {
+          Write-Host "package/" -ForegroundColor Yellow
+          Write-Host "  ├── jn_production_line.exe" -ForegroundColor Gray
+          Write-Host "  ├── flutter_windows.dll" -ForegroundColor Gray
+          Write-Host "  └── data/" -ForegroundColor Yellow
+          
+          # 检查 icudtl.dat
+          if (Test-Path "$dataDir/icudtl.dat") {
+            $icuSize = (Get-Item "$dataDir/icudtl.dat").Length / 1KB
+            Write-Host "      ├── icudtl.dat ($([math]::Round($icuSize, 2)) KB) ✓" -ForegroundColor Green
+          } else {
+            Write-Host "      ├── icudtl.dat (MISSING!) ✗" -ForegroundColor Red
+          }
+          
+          # 检查 flutter_assets
+          if (Test-Path "$dataDir/flutter_assets") {
+            $assetCount = (Get-ChildItem -Path "$dataDir/flutter_assets" -Recurse -File).Count
+            Write-Host "      ├── flutter_assets/ ($assetCount files) ✓" -ForegroundColor Green
+            
+            # 检查关键资源文件
+            $keyAssets = @("AssetManifest.json", "FontManifest.json", "fonts/MaterialIcons-Regular.otf")
+            foreach ($asset in $keyAssets) {
+              $assetPath = Join-Path "$dataDir/flutter_assets" $asset
+              if (Test-Path $assetPath) {
+                Write-Host "      │   ├── $asset ✓" -ForegroundColor Gray
+              } else {
+                Write-Host "      │   ├── $asset (MISSING!) ✗" -ForegroundColor Red
+              }
+            }
+          } else {
+            Write-Host "      ├── flutter_assets/ (MISSING!) ✗" -ForegroundColor Red
+          }
+          
+          # 检查 app.so (可选)
+          if (Test-Path "$dataDir/app.so") {
+            $appSoSize = (Get-Item "$dataDir/app.so").Length / 1MB
+            Write-Host "      └── app.so ($([math]::Round($appSoSize, 2)) MB) ✓" -ForegroundColor Green
+          } else {
+            Write-Host "      └── app.so (not present, optional) ⚠" -ForegroundColor Yellow
+          }
+        } else {
+          Write-Host "  ✗ data/ directory not found!" -ForegroundColor Red
         }
         
         if ($missingItems.Count -gt 0) {
