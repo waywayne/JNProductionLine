@@ -103,6 +103,36 @@ jobs:
             exit 1
           }
           
+          # 重要：保存 icudtl.dat（如果 Flutter 已经下载了）
+          Write-Host "`nSearching for icudtl.dat to preserve..." -ForegroundColor Cyan
+          $flutterRoot = $env:FLUTTER_ROOT
+          
+          # 搜索所有可能的位置
+          $icuSearchLocations = @(
+            "build\windows\runner\Release\data\icudtl.dat",
+            "build\windows\x64\runner\Release\data\icudtl.dat",
+            "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat"
+          )
+          
+          $icuFound = $null
+          foreach ($loc in $icuSearchLocations) {
+            if (Test-Path $loc) {
+              $icuFound = $loc
+              Write-Host "Found icudtl.dat at: $icuFound" -ForegroundColor Green
+              
+              # 保存到临时位置
+              $tempIcuPath = "icudtl.dat.backup"
+              Copy-Item -Path $icuFound -Destination $tempIcuPath -Force
+              $size = (Get-Item $tempIcuPath).Length / 1MB
+              Write-Host "✓ Saved icudtl.dat backup ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+              break
+            }
+          }
+          
+          if (-not $icuFound) {
+            Write-Host "⚠ icudtl.dat not found - will search entire Flutter cache later" -ForegroundColor Yellow
+          }
+          
           Write-Host "✓ Ephemeral files generated, proceeding with Ninja rebuild"
         } else {
           Write-Host "✓ Flutter build succeeded (unexpected but good!)"
@@ -355,19 +385,66 @@ jobs:
         New-Item -ItemType Directory -Force -Path "$bundleDir/data" | Out-Null
         
         # 4. 复制 ICU 数据文件（必须在 data 目录，不是根目录！）
-        $icuData = "$engineDir\icudtl.dat"
-        if (Test-Path $icuData) {
-          Copy-Item -Path $icuData -Destination "$bundleDir/data/" -Force
-          $icuSize = (Get-Item "$bundleDir/data/icudtl.dat").Length / 1MB
-          Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
-        } else {
-          Write-Host "✗ ERROR: icudtl.dat not found at $icuData" -ForegroundColor Red
-          Write-Host "Engine directory contents:" -ForegroundColor Yellow
-          Get-ChildItem $engineDir | ForEach-Object {
-            Write-Host "  - $($_.Name)" -ForegroundColor Gray
+        # Flutter 3.24+ 可能改变了 icudtl.dat 的位置，需要全局搜索
+        Write-Host "`nSearching for icudtl.dat..." -ForegroundColor Cyan
+        
+        $icuSearchPaths = @(
+          # 最优先：之前保存的备份
+          "icudtl.dat.backup",
+          # 优先从已构建的 bundle 中查找（flutter build 会自动复制）
+          "build\windows\x64\runner\Release\data\icudtl.dat",
+          "build\windows\runner\Release\data\icudtl.dat",
+          "build\windows\x64\runner\data\icudtl.dat",
+          "build\windows\runner\data\icudtl.dat",
+          # 然后尝试引擎目录
+          "$engineDir\icudtl.dat",
+          "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat",
+          "$flutterRoot\bin\cache\artifacts\engine\common\icudtl.dat",
+          # Flutter 3.24+ 可能在这些位置
+          "$flutterRoot\bin\cache\artifacts\material_fonts\icudtl.dat",
+          "$flutterRoot\bin\cache\pkg\sky_engine\icudtl.dat",
+          "$flutterRoot\bin\icudtl.dat"
+        )
+        
+        $icuData = $null
+        foreach ($path in $icuSearchPaths) {
+          if (Test-Path $path) {
+            $icuData = $path
+            Write-Host "Found icudtl.dat at: $icuData" -ForegroundColor Green
+            break
           }
+        }
+        
+        if (-not $icuData) {
+          Write-Host "✗ ERROR: icudtl.dat not found in any expected location!" -ForegroundColor Red
+          Write-Host "`nSearched paths:" -ForegroundColor Yellow
+          $icuSearchPaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Gray }
+          
+          Write-Host "`nSearching entire Flutter cache for icudtl.dat..." -ForegroundColor Cyan
+          if (Test-Path "$flutterRoot\bin\cache") {
+            $found = Get-ChildItem -Path "$flutterRoot\bin\cache" -Filter "icudtl.dat" -Recurse -ErrorAction SilentlyContinue
+            if ($found) {
+              Write-Host "Found icudtl.dat at:" -ForegroundColor Yellow
+              $found | ForEach-Object { Write-Host "  - $($_.FullName)" -ForegroundColor Yellow }
+            } else {
+              Write-Host "icudtl.dat not found anywhere in Flutter cache!" -ForegroundColor Red
+            }
+          }
+          
+          Write-Host "`nEngine directory structure:" -ForegroundColor Cyan
+          if (Test-Path "$flutterRoot\bin\cache\artifacts\engine") {
+            Get-ChildItem "$flutterRoot\bin\cache\artifacts\engine" -Recurse -Depth 2 | Where-Object { $_.PSIsContainer } | ForEach-Object {
+              Write-Host "  [DIR] $($_.FullName)" -ForegroundColor Gray
+            }
+          }
+          
           exit 1
         }
+        
+        # 复制 icudtl.dat 到 data 目录
+        Copy-Item -Path $icuData -Destination "$bundleDir/data/" -Force
+        $icuSize = (Get-Item "$bundleDir/data/icudtl.dat").Length / 1MB
+        Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
         
         # 5. 复制 flutter_assets（必须在 data 目录）
         $flutterAssetsSource = "build/flutter_assets"
