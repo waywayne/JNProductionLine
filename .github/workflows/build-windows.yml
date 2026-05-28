@@ -305,47 +305,88 @@ jobs:
           exit 1
         }
         
-        # 2. 复制 Flutter 引擎 DLL
+        # 2. 复制 Flutter 引擎 DLL（必须在根目录）
         $flutterRoot = $env:FLUTTER_ROOT
         $engineDll = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\flutter_windows.dll"
         if (Test-Path $engineDll) {
           Copy-Item -Path $engineDll -Destination $bundleDir -Force
-          Write-Host "✓ Copied flutter_windows.dll" -ForegroundColor Green
+          $dllSize = (Get-Item "$bundleDir\flutter_windows.dll").Length / 1MB
+          Write-Host "✓ Copied flutter_windows.dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
         } else {
           Write-Host "✗ ERROR: flutter_windows.dll not found at $engineDll" -ForegroundColor Red
           exit 1
         }
         
-        # 3. 复制 ICU 数据文件
+        # 3. 创建 data 目录
+        New-Item -ItemType Directory -Force -Path "$bundleDir/data" | Out-Null
+        
+        # 4. 复制 ICU 数据文件（必须在 data 目录，不是根目录！）
         $icuData = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat"
         if (Test-Path $icuData) {
-          Copy-Item -Path $icuData -Destination $bundleDir -Force
-          Write-Host "✓ Copied icudtl.dat" -ForegroundColor Green
+          Copy-Item -Path $icuData -Destination "$bundleDir/data/" -Force
+          $icuSize = (Get-Item "$bundleDir/data/icudtl.dat").Length / 1MB
+          Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
+        } else {
+          Write-Host "✗ ERROR: icudtl.dat not found at $icuData" -ForegroundColor Red
+          exit 1
         }
         
-        # 4. 复制 data 目录（包含 flutter_assets）
-        $dataSource = "build/flutter_assets"
-        $dataTarget = "$bundleDir/data/flutter_assets"
-        if (Test-Path $dataSource) {
-          New-Item -ItemType Directory -Force -Path "$bundleDir/data" | Out-Null
-          Copy-Item -Path $dataSource -Destination "$bundleDir/data" -Recurse -Force
+        # 5. 复制 flutter_assets（必须在 data 目录）
+        $flutterAssetsSource = "build/flutter_assets"
+        if (Test-Path $flutterAssetsSource) {
+          Copy-Item -Path $flutterAssetsSource -Destination "$bundleDir/data/" -Recurse -Force
           Write-Host "✓ Copied data/flutter_assets" -ForegroundColor Green
         } else {
-          Write-Host "⚠ Warning: flutter_assets not found at $dataSource" -ForegroundColor Yellow
+          Write-Host "✗ ERROR: flutter_assets not found at $flutterAssetsSource" -ForegroundColor Red
+          exit 1
         }
         
-        # 5. 复制 ICU 数据到 data 目录
-        if (Test-Path $icuData) {
-          Copy-Item -Path $icuData -Destination "$bundleDir/data/" -Force
-        }
+        # 6. 复制 app.so（Release 模式的 AOT 编译代码，必须在 data 目录）
+        $appSoPaths = @(
+          "build/windows/x64/runner/Release/data/app.so",
+          "build/windows/runner/Release/data/app.so",
+          "build/windows/x64/runner/data/app.so",
+          "build/windows/runner/data/app.so"
+        )
         
-        # 6. 复制插件 DLL（如果有）
-        $pluginsDir = "build/windows/x64/plugins"
-        if (Test-Path $pluginsDir) {
-          Get-ChildItem -Path $pluginsDir -Filter "*.dll" -Recurse | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $bundleDir -Force
-            Write-Host "✓ Copied plugin: $($_.Name)" -ForegroundColor Green
+        $appSoFound = $false
+        foreach ($appSoPath in $appSoPaths) {
+          if (Test-Path $appSoPath) {
+            Copy-Item -Path $appSoPath -Destination "$bundleDir/data/" -Force
+            $appSoSize = (Get-Item "$bundleDir/data/app.so").Length / 1MB
+            Write-Host "✓ Copied data/app.so ($([math]::Round($appSoSize, 2)) MB) from $appSoPath" -ForegroundColor Green
+            $appSoFound = $true
+            break
           }
+        }
+        
+        if (-not $appSoFound) {
+          Write-Host "⚠ WARNING: app.so not found - Release build may not work!" -ForegroundColor Yellow
+          Write-Host "Searched paths:" -ForegroundColor Yellow
+          $appSoPaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+        }
+        
+        # 7. 复制插件 DLL（必须在根目录）
+        $pluginDirs = @(
+          "build/windows/x64/plugins",
+          "build/windows/plugins"
+        )
+        
+        $pluginCount = 0
+        foreach ($pluginsDir in $pluginDirs) {
+          if (Test-Path $pluginsDir) {
+            Get-ChildItem -Path $pluginsDir -Filter "*.dll" -Recurse | ForEach-Object {
+              Copy-Item -Path $_.FullName -Destination $bundleDir -Force
+              Write-Host "✓ Copied plugin: $($_.Name)" -ForegroundColor Green
+              $pluginCount++
+            }
+          }
+        }
+        
+        if ($pluginCount -eq 0) {
+          Write-Host "⚠ WARNING: No plugin DLLs found" -ForegroundColor Yellow
+        } else {
+          Write-Host "✓ Copied $pluginCount plugin DLL(s)" -ForegroundColor Green
         }
         
         Write-Host "`n========================================" -ForegroundColor Cyan
@@ -498,10 +539,17 @@ jobs:
         Write-Host "Verifying package contents..." -ForegroundColor Cyan
         Write-Host "========================================" -ForegroundColor Cyan
         
-        # 检查关键文件
+        # 检查关键文件（根目录）
         $requiredFiles = @(
           "jn_production_line.exe",
           "flutter_windows.dll"
+        )
+        
+        # 检查关键目录和文件（data 目录）
+        $requiredDataFiles = @(
+          "data/icudtl.dat",
+          "data/app.so",
+          "data/flutter_assets"
         )
         
         $requiredDirs = @(
@@ -530,6 +578,33 @@ jobs:
             Write-Host "  ✗ $dir/ (MISSING!)" -ForegroundColor Red
             $missingItems += "$dir/"
           }
+        }
+        
+        # 检查 data 目录中的关键文件
+        Write-Host "`nVerifying data directory structure:" -ForegroundColor Cyan
+        foreach ($dataFile in $requiredDataFiles) {
+          $dataFilePath = Join-Path "package" $dataFile
+          if (Test-Path $dataFilePath) {
+            if (Test-Path $dataFilePath -PathType Container) {
+              $itemCount = (Get-ChildItem -Path $dataFilePath -Recurse -File).Count
+              Write-Host "  ✓ $dataFile/ ($itemCount files)" -ForegroundColor Green
+            } else {
+              $size = (Get-Item $dataFilePath).Length / 1MB
+              Write-Host "  ✓ $dataFile ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+            }
+          } else {
+            Write-Host "  ✗ $dataFile (MISSING!)" -ForegroundColor Red
+            $missingItems += $dataFile
+          }
+        }
+        
+        # 检查 icudtl.dat 不应该在根目录
+        $wrongIcuPath = "package/icudtl.dat"
+        if (Test-Path $wrongIcuPath) {
+          Write-Host "`n  ⚠ WARNING: icudtl.dat found in root directory (should only be in data/)!" -ForegroundColor Red
+          Write-Host "  This will cause the application to crash!" -ForegroundColor Red
+          Remove-Item $wrongIcuPath -Force
+          Write-Host "  ✓ Removed incorrect icudtl.dat from root" -ForegroundColor Yellow
         }
         
         if ($missingItems.Count -gt 0) {
