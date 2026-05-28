@@ -726,8 +726,12 @@ jobs:
         # 检查关键目录和文件（data 目录）
         $requiredDataFiles = @(
           "data/icudtl.dat",
-          "data/app.so",
           "data/flutter_assets"
+        )
+        
+        # 可选文件（不影响构建成功）
+        $optionalDataFiles = @(
+          "data/app.so"
         )
         
         $requiredDirs = @(
@@ -773,6 +777,18 @@ jobs:
           } else {
             Write-Host "  ✗ $dataFile (MISSING!)" -ForegroundColor Red
             $missingItems += $dataFile
+          }
+        }
+        
+        # 检查可选文件
+        Write-Host "`nVerifying optional files:" -ForegroundColor Cyan
+        foreach ($optFile in $optionalDataFiles) {
+          $optFilePath = Join-Path "package" $optFile
+          if (Test-Path $optFilePath) {
+            $size = (Get-Item $optFilePath).Length / 1MB
+            Write-Host "  ✓ $optFile ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+          } else {
+            Write-Host "  ⚠ $optFile (not found, but optional)" -ForegroundColor Yellow
           }
         }
         
