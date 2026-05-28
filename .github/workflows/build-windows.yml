@@ -306,28 +306,66 @@ jobs:
         }
         
         # 2. 复制 Flutter 引擎 DLL（必须在根目录）
+        # 规范化 Flutter 路径（处理混合的 / 和 \ 分隔符）
         $flutterRoot = $env:FLUTTER_ROOT
-        $engineDll = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\flutter_windows.dll"
-        if (Test-Path $engineDll) {
-          Copy-Item -Path $engineDll -Destination $bundleDir -Force
-          $dllSize = (Get-Item "$bundleDir\flutter_windows.dll").Length / 1MB
-          Write-Host "✓ Copied flutter_windows.dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
-        } else {
-          Write-Host "✗ ERROR: flutter_windows.dll not found at $engineDll" -ForegroundColor Red
+        if ($flutterRoot) {
+          $flutterRoot = $flutterRoot -replace '/', '\'
+        }
+        
+        Write-Host "Flutter root: $flutterRoot" -ForegroundColor Cyan
+        
+        # 查找 flutter_windows.dll（尝试多个可能的路径）
+        $enginePaths = @(
+          "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release",
+          "$flutterRoot\bin\cache\artifacts\engine\windows-release",
+          "$(Split-Path $flutterRoot)\flutter\bin\cache\artifacts\engine\windows-x64-release"
+        )
+        
+        $engineDir = $null
+        foreach ($path in $enginePaths) {
+          if (Test-Path "$path\flutter_windows.dll") {
+            $engineDir = $path
+            Write-Host "Found engine at: $engineDir" -ForegroundColor Green
+            break
+          }
+        }
+        
+        if (-not $engineDir) {
+          Write-Host "✗ ERROR: Flutter engine not found!" -ForegroundColor Red
+          Write-Host "Searched paths:" -ForegroundColor Yellow
+          $enginePaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+          
+          # 尝试列出实际存在的路径
+          Write-Host "`nActual Flutter cache structure:" -ForegroundColor Cyan
+          if (Test-Path "$flutterRoot\bin\cache\artifacts\engine") {
+            Get-ChildItem "$flutterRoot\bin\cache\artifacts\engine" | ForEach-Object {
+              Write-Host "  - $($_.Name)" -ForegroundColor Gray
+            }
+          }
           exit 1
         }
+        
+        # 复制 flutter_windows.dll
+        $engineDll = "$engineDir\flutter_windows.dll"
+        Copy-Item -Path $engineDll -Destination $bundleDir -Force
+        $dllSize = (Get-Item "$bundleDir\flutter_windows.dll").Length / 1MB
+        Write-Host "✓ Copied flutter_windows.dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
         
         # 3. 创建 data 目录
         New-Item -ItemType Directory -Force -Path "$bundleDir/data" | Out-Null
         
         # 4. 复制 ICU 数据文件（必须在 data 目录，不是根目录！）
-        $icuData = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat"
+        $icuData = "$engineDir\icudtl.dat"
         if (Test-Path $icuData) {
           Copy-Item -Path $icuData -Destination "$bundleDir/data/" -Force
           $icuSize = (Get-Item "$bundleDir/data/icudtl.dat").Length / 1MB
           Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
         } else {
           Write-Host "✗ ERROR: icudtl.dat not found at $icuData" -ForegroundColor Red
+          Write-Host "Engine directory contents:" -ForegroundColor Yellow
+          Get-ChildItem $engineDir | ForEach-Object {
+            Write-Host "  - $($_.Name)" -ForegroundColor Gray
+          }
           exit 1
         }
         
