@@ -155,6 +155,7 @@ jobs:
           $icuSearchLocations = @(
             "build\windows\runner\Release\data\icudtl.dat",
             "build\windows\x64\runner\Release\data\icudtl.dat",
+            "$flutterRoot\bin\cache\artifacts\engine\windows-x64\icudtl.dat",
             "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat"
           )
           
@@ -442,9 +443,11 @@ jobs:
           "build\windows\runner\data\icudtl.dat",
           # 然后尝试引擎目录
           "$engineDir\icudtl.dat",
+          # Flutter 3.24+ 的实际位置（windows-x64 而不是 windows-x64-release）
+          "$flutterRoot\bin\cache\artifacts\engine\windows-x64\icudtl.dat",
           "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat",
           "$flutterRoot\bin\cache\artifacts\engine\common\icudtl.dat",
-          # Flutter 3.24+ 可能在这些位置
+          # 其他可能的位置
           "$flutterRoot\bin\cache\artifacts\material_fonts\icudtl.dat",
           "$flutterRoot\bin\cache\pkg\sky_engine\icudtl.dat",
           "$flutterRoot\bin\icudtl.dat"
