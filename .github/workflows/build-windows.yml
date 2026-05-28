@@ -336,25 +336,95 @@ jobs:
         # 创建打包目录
         New-Item -ItemType Directory -Force -Path package | Out-Null
         
-        # 复制必要文件
+        # 复制必要文件 - 使用正确的方式复制整个目录内容
         Write-Host "`nCopying files from: $buildPath" -ForegroundColor Cyan
-        Copy-Item -Path "$buildPath/*" -Destination "package/" -Recurse -Force
+        
+        # 方法1: 直接复制目录内容（推荐）
+        Get-ChildItem -Path $buildPath | ForEach-Object {
+          Copy-Item -Path $_.FullName -Destination "package/" -Recurse -Force
+          Write-Host "  Copied: $($_.Name)" -ForegroundColor Gray
+        }
+        
+        # 复制文档文件
         Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
         Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
         
         # 验证打包内容
-        Write-Host "`nPackage contents:" -ForegroundColor Cyan
-        Get-ChildItem -Path "package" -Recurse | ForEach-Object {
-          Write-Host "  $($_.FullName)" -ForegroundColor Gray
+        Write-Host "`n========================================" -ForegroundColor Cyan
+        Write-Host "Verifying package contents..." -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
+        
+        # 检查关键文件
+        $requiredFiles = @(
+          "jn_production_line.exe",
+          "flutter_windows.dll"
+        )
+        
+        $requiredDirs = @(
+          "data"
+        )
+        
+        $missingItems = @()
+        
+        foreach ($file in $requiredFiles) {
+          $filePath = Join-Path "package" $file
+          if (Test-Path $filePath) {
+            $size = (Get-Item $filePath).Length / 1MB
+            Write-Host "  ✓ $file ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+          } else {
+            Write-Host "  ✗ $file (MISSING!)" -ForegroundColor Red
+            $missingItems += $file
+          }
         }
         
+        foreach ($dir in $requiredDirs) {
+          $dirPath = Join-Path "package" $dir
+          if (Test-Path $dirPath) {
+            $itemCount = (Get-ChildItem -Path $dirPath -Recurse -File).Count
+            Write-Host "  ✓ $dir/ ($itemCount files)" -ForegroundColor Green
+          } else {
+            Write-Host "  ✗ $dir/ (MISSING!)" -ForegroundColor Red
+            $missingItems += "$dir/"
+          }
+        }
+        
+        if ($missingItems.Count -gt 0) {
+          Write-Host "`nERROR: Missing required files/directories!" -ForegroundColor Red
+          Write-Host "Missing items:" -ForegroundColor Yellow
+          $missingItems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+          
+          Write-Host "`nActual package contents:" -ForegroundColor Yellow
+          Get-ChildItem -Path "package" -Recurse | ForEach-Object {
+            Write-Host "  $($_.FullName)" -ForegroundColor Gray
+          }
+          exit 1
+        }
+        
+        # 显示完整打包内容
+        Write-Host "`nComplete package structure:" -ForegroundColor Cyan
+        Get-ChildItem -Path "package" -Recurse | ForEach-Object {
+          $indent = "  " * ($_.FullName.Split('\').Count - "package".Split('\').Count)
+          if ($_.PSIsContainer) {
+            Write-Host "$indent[DIR]  $($_.Name)" -ForegroundColor Cyan
+          } else {
+            $size = if ($_.Length -gt 1MB) { "$([math]::Round($_.Length/1MB, 2)) MB" } else { "$([math]::Round($_.Length/1KB, 2)) KB" }
+            Write-Host "$indent[FILE] $($_.Name) ($size)" -ForegroundColor Gray
+          }
+        }
+        
+        # 计算总大小
+        $totalSize = (Get-ChildItem -Path "package" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+        Write-Host "`nTotal package size: $([math]::Round($totalSize, 2)) MB" -ForegroundColor Green
+        
         # 创建 ZIP
-        Write-Host "`nCreating archive: $zipName" -ForegroundColor Cyan
+        Write-Host "`n========================================" -ForegroundColor Cyan
+        Write-Host "Creating archive: $zipName" -ForegroundColor Cyan
+        Write-Host "========================================" -ForegroundColor Cyan
         Compress-Archive -Path "package/*" -DestinationPath $zipName -Force
         
         $zipSize = (Get-Item $zipName).Length / 1MB
-        Write-Host "✓ Created: $zipName ($([math]::Round($zipSize, 2)) MB)" -ForegroundColor Green
+        Write-Host "✓ Archive created: $zipName ($([math]::Round($zipSize, 2)) MB)" -ForegroundColor Green
         
         echo "ZIP_NAME=$zipName" >> $env:GITHUB_OUTPUT
     
