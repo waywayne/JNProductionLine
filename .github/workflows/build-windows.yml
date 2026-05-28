@@ -427,7 +427,9 @@ jobs:
         Write-Host "✓ Copied flutter_windows.dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
         
         # 3. 创建 data 目录
-        New-Item -ItemType Directory -Force -Path "$bundleDir/data" | Out-Null
+        $dataDir = Join-Path $bundleDir "data"
+        New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+        Write-Host "✓ Created data directory: $dataDir" -ForegroundColor Green
         
         # 4. 复制 ICU 数据文件（必须在 data 目录，不是根目录！）
         # Flutter 3.24+ 可能改变了 icudtl.dat 的位置，需要全局搜索
@@ -489,14 +491,27 @@ jobs:
         }
         
         # 复制 icudtl.dat 到 data 目录
-        Copy-Item -Path $icuData -Destination "$bundleDir/data/" -Force
-        $icuSize = (Get-Item "$bundleDir/data/icudtl.dat").Length / 1MB
-        Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
+        $icuDest = Join-Path $dataDir "icudtl.dat"
+        
+        Write-Host "Copying icudtl.dat..." -ForegroundColor Cyan
+        Write-Host "  From: $icuData" -ForegroundColor Gray
+        Write-Host "  To: $icuDest" -ForegroundColor Gray
+        
+        Copy-Item -Path $icuData -Destination $icuDest -Force
+        
+        if (Test-Path $icuDest) {
+          $icuSize = (Get-Item $icuDest).Length / 1MB
+          Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
+        } else {
+          Write-Host "✗ ERROR: Failed to copy icudtl.dat!" -ForegroundColor Red
+          exit 1
+        }
         
         # 5. 复制 flutter_assets（必须在 data 目录）
         $flutterAssetsSource = "build/flutter_assets"
         if (Test-Path $flutterAssetsSource) {
-          Copy-Item -Path $flutterAssetsSource -Destination "$bundleDir/data/" -Recurse -Force
+          $flutterAssetsDest = Join-Path $dataDir "flutter_assets"
+          Copy-Item -Path $flutterAssetsSource -Destination $flutterAssetsDest -Recurse -Force
           Write-Host "✓ Copied data/flutter_assets" -ForegroundColor Green
         } else {
           Write-Host "✗ ERROR: flutter_assets not found at $flutterAssetsSource" -ForegroundColor Red
@@ -514,8 +529,9 @@ jobs:
         $appSoFound = $false
         foreach ($appSoPath in $appSoPaths) {
           if (Test-Path $appSoPath) {
-            Copy-Item -Path $appSoPath -Destination "$bundleDir/data/" -Force
-            $appSoSize = (Get-Item "$bundleDir/data/app.so").Length / 1MB
+            $appSoDest = Join-Path $dataDir "app.so"
+            Copy-Item -Path $appSoPath -Destination $appSoDest -Force
+            $appSoSize = (Get-Item $appSoDest).Length / 1MB
             Write-Host "✓ Copied data/app.so ($([math]::Round($appSoSize, 2)) MB) from $appSoPath" -ForegroundColor Green
             $appSoFound = $true
             break
