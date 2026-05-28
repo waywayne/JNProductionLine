@@ -131,15 +131,23 @@ jobs:
         
         echo.
         echo ========================================
-        echo Attempting Flutter build (expected to fail)
+        echo Building with Flutter (using available VS version)
         echo ========================================
+        echo Note: This may use VS 2022 instead of VS 2019
+        echo.
         flutter build windows --release
     
     - name: Check if CMake configuration failed
       shell: pwsh
       run: |
+        if ("${{ steps.flutter-build.outcome }}" -eq "success") {
+          Write-Host "✓ Flutter build succeeded!" -ForegroundColor Green
+          Write-Host "Skipping Ninja rebuild (not needed)" -ForegroundColor Cyan
+          exit 0
+        }
+        
         if ("${{ steps.flutter-build.outcome }}" -eq "failure") {
-          Write-Host "Flutter build failed as expected (VS 2019 not found)"
+          Write-Host "Flutter build failed - will try Ninja rebuild" -ForegroundColor Yellow
           
           # Check if ephemeral files were generated
           if (!(Test-Path "windows\flutter\ephemeral\generated_config.cmake")) {
@@ -339,9 +347,16 @@ jobs:
         foreach ($path in $checkPaths) {
           if ((Test-Path "$path/jn_production_line.exe") -and 
               (Test-Path "$path/flutter_windows.dll") -and 
-              (Test-Path "$path/data")) {
+              (Test-Path "$path/data/icudtl.dat") -and
+              (Test-Path "$path/data/flutter_assets") -and
+              (Test-Path "$path/data/app.so")) {
             $existingBundle = $path
             Write-Host "✓ Found existing complete bundle at: $existingBundle" -ForegroundColor Green
+            Write-Host "  - jn_production_line.exe ✓" -ForegroundColor Gray
+            Write-Host "  - flutter_windows.dll ✓" -ForegroundColor Gray
+            Write-Host "  - data/icudtl.dat ✓" -ForegroundColor Gray
+            Write-Host "  - data/flutter_assets/ ✓" -ForegroundColor Gray
+            Write-Host "  - data/app.so ✓" -ForegroundColor Gray
             break
           }
         }
@@ -848,12 +863,8 @@ jobs:
         # 检查关键目录和文件（data 目录）
         $requiredDataFiles = @(
           "data/icudtl.dat",
+          "data/app.so",
           "data/flutter_assets"
-        )
-        
-        # 可选文件（不影响构建成功）
-        $optionalDataFiles = @(
-          "data/app.so"
         )
         
         $requiredDirs = @(
@@ -902,18 +913,6 @@ jobs:
           }
         }
         
-        # 检查可选文件
-        Write-Host "`nVerifying optional files:" -ForegroundColor Cyan
-        foreach ($optFile in $optionalDataFiles) {
-          $optFilePath = Join-Path "package" $optFile
-          if (Test-Path $optFilePath) {
-            $size = (Get-Item $optFilePath).Length / 1MB
-            Write-Host "  ✓ $optFile ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-          } else {
-            Write-Host "  ⚠ $optFile (not found, but optional)" -ForegroundColor Yellow
-          }
-        }
-        
         # 检查 icudtl.dat 不应该在根目录
         $wrongIcuPath = "package/icudtl.dat"
         if (Test-Path $wrongIcuPath) {
@@ -959,12 +958,12 @@ jobs:
             Write-Host "      ├── flutter_assets/ (MISSING!) ✗" -ForegroundColor Red
           }
           
-          # 检查 app.so (可选)
+          # 检查 app.so (必需)
           if (Test-Path "$dataDir/app.so") {
             $appSoSize = (Get-Item "$dataDir/app.so").Length / 1MB
             Write-Host "      └── app.so ($([math]::Round($appSoSize, 2)) MB) ✓" -ForegroundColor Green
           } else {
-            Write-Host "      └── app.so (not present, optional) ⚠" -ForegroundColor Yellow
+            Write-Host "      └── app.so (MISSING!) ✗" -ForegroundColor Red
           }
         } else {
           Write-Host "  ✗ data/ directory not found!" -ForegroundColor Red
