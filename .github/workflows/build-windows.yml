@@ -44,14 +44,17 @@ jobs:
       run: flutter pub get
 
     - name: Build Windows application
-      shell: pwsh
-      env:
-        # Force Ninja generator — windows-latest ships VS 2022; Flutter 3.24
-        # defaults to "Visual Studio 16 2019" which is not present and causes:
-        # "CMake Error: Generator 'Visual Studio 16 2019' could not find any
-        #  instance of Visual Studio."
-        CMAKE_GENERATOR: Ninja
-      run: flutter build windows --release
+      # windows-latest ships VS 2022; Flutter 3.24 defaults to
+      # "Visual Studio 16 2019" which is absent → CMake error.
+      # Fix: initialise the VS 2022 developer environment so Ninja + MSVC
+      # are both on PATH, then force CMake to use the Ninja generator.
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" 2>nul || ^
+        call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" 2>nul || ^
+        call "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
+        set CMAKE_GENERATOR=Ninja
+        flutter build windows --release
 
     - name: Verify build output
       shell: pwsh
