@@ -28,8 +28,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
-        cache: 'pip' # ⚡ 优化：开启 pip 依赖缓存，加速后续构建
+        python-version: '3.11' # 已移除 cache 选项，避免检测 requirements.txt 报错
 
     - name: Install Python dependencies
       shell: pwsh
@@ -44,8 +43,6 @@ jobs:
     - name: Get Flutter dependencies
       shell: pwsh
       run: flutter pub get
-
-    # 💡 优化：移除了无意义的 flutter clean，新环境不需要 clean
 
     - name: Build Windows application
       shell: pwsh
@@ -81,7 +78,7 @@ jobs:
         Write-Host "Release directory: $releaseDir" -ForegroundColor Green
         Get-ChildItem -Path $releaseDir | Select-Object Name, Length
 
-        # ⚡ 优化：动态查找产物中的 .exe 文件，避免因改名导致 CI 报错
+        # 动态查找产物中的 .exe 文件，避免因改名导致 CI 报错
         $exeFile = Get-ChildItem -Path $releaseDir -Filter "*.exe" | Select-Object -First 1
         if (-not $exeFile) {
           Write-Host "✗ MISSING: No executable (.exe) found in release directory!" -ForegroundColor Red
@@ -134,7 +131,7 @@ jobs:
       shell: pwsh
       run: |
         $tag = "${{ github.ref_name }}"
-        # ⚡ 优化：压缩包命名跟随项目实际生成的 exe 名字，更具识别度
+        # 压缩包命名自动跟随实际生成的 exe 名字
         $exeName = (Get-ChildItem -Path "release-package" -Filter "*.exe" | Select-Object -First 1).BaseName
         $zipName = "${exeName}-windows-${tag}.zip"
         
