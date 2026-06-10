@@ -29,6 +29,7 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
+        cache: 'pip' # ⚡ 优化：开启 pip 依赖缓存，加速后续构建
 
     - name: Install Python dependencies
       shell: pwsh
@@ -41,11 +42,10 @@ jobs:
       run: flutter doctor -v
 
     - name: Get Flutter dependencies
+      shell: pwsh
       run: flutter pub get
 
-    - name: Clean Flutter build cache
-      shell: pwsh
-      run: flutter clean
+    # 💡 优化：移除了无意义的 flutter clean，新环境不需要 clean
 
     - name: Build Windows application
       shell: pwsh
@@ -79,11 +79,16 @@ jobs:
         }
 
         Write-Host "Release directory: $releaseDir" -ForegroundColor Green
-        Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName
+        Get-ChildItem -Path $releaseDir | Select-Object Name, Length
 
-        # Verify critical files (no app.so check — on Windows the AOT code is
-        # linked into the exe; app.so is a Linux/Android artefact)
-        $exe = Join-Path $releaseDir "jn_production_line.exe"
+        # ⚡ 优化：动态查找产物中的 .exe 文件，避免因改名导致 CI 报错
+        $exeFile = Get-ChildItem -Path $releaseDir -Filter "*.exe" | Select-Object -First 1
+        if (-not $exeFile) {
+          Write-Host "✗ MISSING: No executable (.exe) found in release directory!" -ForegroundColor Red
+          exit 1
+        }
+
+        $exe = $exeFile.FullName
         $dll = Join-Path $releaseDir "flutter_windows.dll"
         $icu = Join-Path $releaseDir "data\icudtl.dat"
 
@@ -100,6 +105,7 @@ jobs:
 
         if (-not $allOk) { exit 1 }
 
+        # 将检测到的实际路径写入环境变量
         echo "RELEASE_DIR=$releaseDir" >> $env:GITHUB_ENV
 
     - name: Package release
@@ -112,7 +118,7 @@ jobs:
         Copy-Item -Path "$releaseDir\*" -Destination "release-package\" -Recurse -Force
 
         Write-Host "Package contents:" -ForegroundColor Cyan
-        Get-ChildItem -Path "release-package" -Recurse | Select-Object FullName
+        Get-ChildItem -Path "release-package" | Select-Object Name
         Write-Host "✓ Package ready" -ForegroundColor Green
 
     - name: Upload build artifacts
@@ -128,7 +134,10 @@ jobs:
       shell: pwsh
       run: |
         $tag = "${{ github.ref_name }}"
-        $zipName = "jn_production_line-windows-$tag.zip"
+        # ⚡ 优化：压缩包命名跟随项目实际生成的 exe 名字，更具识别度
+        $exeName = (Get-ChildItem -Path "release-package" -Filter "*.exe" | Select-Object -First 1).BaseName
+        $zipName = "${exeName}-windows-${tag}.zip"
+        
         Compress-Archive -Path "release-package\*" -DestinationPath $zipName -Force
         $size = (Get-Item $zipName).Length / 1MB
         Write-Host "✓ Created $zipName ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
