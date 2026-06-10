@@ -45,6 +45,12 @@ jobs:
 
     - name: Build Windows application
       shell: pwsh
+      env:
+        # Force Ninja generator — windows-latest ships VS 2022; Flutter 3.24
+        # defaults to "Visual Studio 16 2019" which is not present and causes:
+        # "CMake Error: Generator 'Visual Studio 16 2019' could not find any
+        #  instance of Visual Studio."
+        CMAKE_GENERATOR: Ninja
       run: flutter build windows --release
 
     - name: Verify build output
@@ -77,7 +83,8 @@ jobs:
         Write-Host "Release directory: $releaseDir" -ForegroundColor Green
         Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName
 
-        # Verify critical files
+        # Verify critical files (no app.so check — on Windows the AOT code is
+        # linked into the exe; app.so is a Linux/Android artefact)
         $exe = Join-Path $releaseDir "jn_production_line.exe"
         $dll = Join-Path $releaseDir "flutter_windows.dll"
         $icu = Join-Path $releaseDir "data\icudtl.dat"
@@ -93,11 +100,8 @@ jobs:
           }
         }
 
-        if (-not $allOk) {
-          exit 1
-        }
+        if (-not $allOk) { exit 1 }
 
-        # Save release dir path for later steps
         echo "RELEASE_DIR=$releaseDir" >> $env:GITHUB_ENV
 
     - name: Package release
@@ -106,15 +110,11 @@ jobs:
         $releaseDir = $env:RELEASE_DIR
         Write-Host "Packaging from: $releaseDir" -ForegroundColor Cyan
 
-        # Create output package directory
         New-Item -ItemType Directory -Force -Path "release-package" | Out-Null
-
-        # Copy entire release directory contents
         Copy-Item -Path "$releaseDir\*" -Destination "release-package\" -Recurse -Force
 
         Write-Host "Package contents:" -ForegroundColor Cyan
         Get-ChildItem -Path "release-package" -Recurse | Select-Object FullName
-
         Write-Host "✓ Package ready" -ForegroundColor Green
 
     - name: Upload build artifacts
@@ -131,12 +131,9 @@ jobs:
       run: |
         $tag = "${{ github.ref_name }}"
         $zipName = "jn_production_line-windows-$tag.zip"
-
         Compress-Archive -Path "release-package\*" -DestinationPath $zipName -Force
-
         $size = (Get-Item $zipName).Length / 1MB
         Write-Host "✓ Created $zipName ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-
         echo "RELEASE_ZIP=$zipName" >> $env:GITHUB_ENV
 
     - name: Upload to GitHub Release
