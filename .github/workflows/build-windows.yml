@@ -13,1131 +13,136 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 60
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
-    - name: Setup Visual Studio environment
-      uses: microsoft/setup-msbuild@v2
-    
-    - name: Setup build environment
-      id: setup-env
-      shell: pwsh
-      run: |
-        Write-Host "Setting up build environment..."
-        
-        # Find Visual Studio installation
-        $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        if (!(Test-Path $vsWhere)) {
-          Write-Host "ERROR: vswhere.exe not found!"
-          exit 1
-        }
-        
-        $vsPath = & $vsWhere -latest -property installationPath
-        $vsVersion = & $vsWhere -latest -property installationVersion
-        $vsDisplayName = & $vsWhere -latest -property displayName
-        
-        Write-Host "Found: $vsDisplayName"
-        Write-Host "Path: $vsPath"
-        Write-Host "Version: $vsVersion"
-        
-        # Setup Visual Studio environment variables
-        $vcvarsPath = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
-        if (!(Test-Path $vcvarsPath)) {
-          Write-Host "ERROR: vcvars64.bat not found at $vcvarsPath"
-          exit 1
-        }
-        
-        Write-Host "✓ Visual Studio environment ready"
-        echo "VS_PATH=$vsPath" >> $env:GITHUB_OUTPUT
-        echo "VCVARS_PATH=$vcvarsPath" >> $env:GITHUB_OUTPUT
-    
+
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
         flutter-version: '3.24.0'
         channel: 'stable'
         cache: true
-    
-    - name: Verify Flutter setup
-      shell: pwsh
-      run: |
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Verifying Flutter installation" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        Write-Host "`nFlutter location:" -ForegroundColor Yellow
-        Get-Command flutter | Select-Object -ExpandProperty Source
-        
-        Write-Host "`nFlutter version:" -ForegroundColor Yellow
-        flutter --version
-        
-        Write-Host "`nFLUTTER_ROOT:" -ForegroundColor Yellow
-        Write-Host $env:FLUTTER_ROOT
-        
-        Write-Host "`nDart location:" -ForegroundColor Yellow
-        Get-Command dart | Select-Object -ExpandProperty Source
-        
-        Write-Host "`n✓ Flutter setup verified" -ForegroundColor Green
-    
+
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-      continue-on-error: false
-    
-    - name: Verify Python installation
-      shell: pwsh
-      run: |
-        Write-Host "Python version:" -ForegroundColor Cyan
-        python --version
-        Write-Host "Pip version:" -ForegroundColor Cyan
-        pip --version
-    
+
     - name: Install Python dependencies
       shell: pwsh
       run: |
-        Write-Host "Upgrading pip..." -ForegroundColor Cyan
         python -m pip install --upgrade pip
-        
-        Write-Host "Installing dependencies..." -ForegroundColor Cyan
         pip install pyvisa pyvisa-py pandas openpyxl
-        
-        Write-Host "Verifying installations..." -ForegroundColor Cyan
-        pip list | Select-String -Pattern "pyvisa|pandas|openpyxl"
-    
+
     - name: Flutter doctor
       shell: pwsh
-      run: |
-        Write-Host "Running Flutter doctor..." -ForegroundColor Cyan
-        flutter doctor -v
-        
-        Write-Host "`nFlutter version:" -ForegroundColor Cyan
-        flutter --version
-    
+      run: flutter doctor -v
+
     - name: Get Flutter dependencies
       run: flutter pub get
-    
+
     - name: Build Windows application
-      continue-on-error: true
-      id: flutter-build
-      shell: cmd
-      run: |
-        echo ========================================
-        echo Setting up Visual Studio environment
-        echo ========================================
-        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
-        
-        echo.
-        echo ========================================
-        echo Building with Flutter (using available VS version)
-        echo ========================================
-        echo Note: This may use VS 2022 instead of VS 2019
-        echo.
-        
-        REM 清理之前的构建
-        if exist build\windows rmdir /s /q build\windows
-        
-        REM 使用 --release 模式构建（应该生成 app.so）
-        flutter build windows --release --verbose
-    
-    - name: Check if CMake configuration failed
+      shell: pwsh
+      run: flutter build windows --release
+
+    - name: Verify build output
       shell: pwsh
       run: |
-        if ("${{ steps.flutter-build.outcome }}" -eq "success") {
-          Write-Host "✓ Flutter build succeeded!" -ForegroundColor Green
-          Write-Host "Skipping Ninja rebuild (not needed)" -ForegroundColor Cyan
-          exit 0
-        }
-        
-        if ("${{ steps.flutter-build.outcome }}" -eq "failure") {
-          Write-Host "Flutter build failed - will try Ninja rebuild" -ForegroundColor Yellow
-          
-          # Check if ephemeral files were generated
-          if (!(Test-Path "windows\flutter\ephemeral\generated_config.cmake")) {
-            Write-Host "ERROR: Ephemeral files were not generated"
-            exit 1
-          }
-          
-          # 重要：保存 icudtl.dat（如果 Flutter 已经下载了）
-          Write-Host "`nSearching for icudtl.dat to preserve..." -ForegroundColor Cyan
-          $flutterRoot = $env:FLUTTER_ROOT
-          
-          # 搜索所有可能的位置
-          $icuSearchLocations = @(
-            "build\windows\runner\Release\data\icudtl.dat",
-            "build\windows\x64\runner\Release\data\icudtl.dat",
-            "$flutterRoot\bin\cache\artifacts\engine\windows-x64\icudtl.dat",
-            "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat"
-          )
-          
-          $icuFound = $null
-          foreach ($loc in $icuSearchLocations) {
-            if (Test-Path $loc) {
-              $icuFound = $loc
-              Write-Host "Found icudtl.dat at: $icuFound" -ForegroundColor Green
-              
-              # 保存到临时位置
-              $tempIcuPath = "icudtl.dat.backup"
-              Copy-Item -Path $icuFound -Destination $tempIcuPath -Force
-              $size = (Get-Item $tempIcuPath).Length / 1MB
-              Write-Host "✓ Saved icudtl.dat backup ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-              break
-            }
-          }
-          
-          if (-not $icuFound) {
-            Write-Host "⚠ icudtl.dat not found - will search entire Flutter cache later" -ForegroundColor Yellow
-          }
-          
-          Write-Host "✓ Ephemeral files generated, proceeding with Ninja rebuild"
-        } else {
-          Write-Host "✓ Flutter build succeeded (unexpected but good!)"
-          exit 0
-        }
-    
-    - name: Copy Flutter engine files
-      if: steps.flutter-build.outcome == 'failure'
-      shell: pwsh
-      run: |
-        Write-Host "Copying Flutter engine files to ephemeral directory..."
-        
-        $flutterRoot = $env:FLUTTER_ROOT
-        $enginePath = "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release"
-        $ephemeralPath = "windows\flutter\ephemeral"
-        
-        # Ensure ephemeral directory exists
-        if (!(Test-Path $ephemeralPath)) {
-          New-Item -ItemType Directory -Path $ephemeralPath -Force | Out-Null
-        }
-        
-        # Copy engine files
-        Write-Host "Copying from: $enginePath"
-        Write-Host "Copying to: $ephemeralPath"
-        
-        Copy-Item -Path "$enginePath\flutter_windows.dll" -Destination $ephemeralPath -Force
-        Copy-Item -Path "$enginePath\flutter_windows.dll.lib" -Destination $ephemeralPath -Force
-        Copy-Item -Path "$enginePath\flutter_export.h" -Destination $ephemeralPath -Force
-        Copy-Item -Path "$enginePath\flutter_windows.h" -Destination $ephemeralPath -Force
-        Copy-Item -Path "$enginePath\flutter_messenger.h" -Destination $ephemeralPath -Force
-        Copy-Item -Path "$enginePath\flutter_plugin_registrar.h" -Destination $ephemeralPath -Force
-        Copy-Item -Path "$enginePath\flutter_texture_registrar.h" -Destination $ephemeralPath -Force
-        
-        Write-Host "✓ Flutter engine files copied"
-    
-    - name: CMake Configure
-      if: steps.flutter-build.outcome == 'failure'
-      shell: cmd
-      run: |
-        echo ========================================
-        echo Setting up Visual Studio environment
-        echo ========================================
-        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
-        
-        echo.
-        echo ========================================
-        echo Cleaning CMake cache
-        echo ========================================
-        if exist "build\windows\x64\CMakeCache.txt" del /F /Q "build\windows\x64\CMakeCache.txt"
-        if exist "build\windows\x64\CMakeFiles" rd /S /Q "build\windows\x64\CMakeFiles"
-        
-        echo.
-        echo ========================================
-        echo Reconfiguring with Ninja
-        echo ========================================
-        cmake -S windows -B build\windows\x64 ^
-          -G Ninja ^
-          -DCMAKE_BUILD_TYPE=Release ^
-          -DFLUTTER_TARGET_PLATFORM=windows-x64
-        
-        if %ERRORLEVEL% NEQ 0 (
-          echo ERROR: CMake reconfiguration failed!
-          exit /b 1
+        Write-Host "Build output contents:" -ForegroundColor Cyan
+
+        $releasePaths = @(
+          "build\windows\x64\runner\Release",
+          "build\windows\runner\Release"
         )
-        
-        echo ✓ CMake configuration completed
-    
-    - name: Fix generated build files
-      if: steps.flutter-build.outcome == 'failure'
-      shell: pwsh
-      run: |
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Fixing quoted warning flags in generated build files" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        $fixedCount = 0
-        
-        # Fix all build.ninja files (这是关键！)
-        $ninjaFiles = Get-ChildItem -Path "build/windows/x64" -Filter "build.ninja" -Recurse -ErrorAction SilentlyContinue
-        
-        foreach ($file in $ninjaFiles) {
-          $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
-          if ($content) {
-            $originalContent = $content
-            
-            # Fix escaped quotes in build.ninja: /wd\"4100\" -> /wd4100
-            $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
-            # Also fix non-escaped quotes: /wd"4100" -> /wd4100
-            $content = $content -replace '/wd"(\d+)"', '/wd$1'
-            
-            if ($content -ne $originalContent) {
-              Set-Content -Path $file.FullName -Value $content -NoNewline
-              Write-Host "✓ Fixed: $($file.FullName)" -ForegroundColor Green
-              $fixedCount++
-            }
-          }
-        }
-        
-        # Also fix CMakeLists.txt in build directory
-        $cmakeFiles = Get-ChildItem -Path "build/windows/x64" -Filter "CMakeLists.txt" -Recurse -ErrorAction SilentlyContinue
-        
-        foreach ($file in $cmakeFiles) {
-          $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
-          if ($content) {
-            $originalContent = $content
-            
-            $content = $content -replace '/wd\\"(\d+)\\"', '/wd$1'
-            $content = $content -replace '/wd"(\d+)"', '/wd$1'
-            
-            if ($content -ne $originalContent) {
-              Set-Content -Path $file.FullName -Value $content -NoNewline
-              Write-Host "✓ Fixed: $($file.FullName)" -ForegroundColor Green
-              $fixedCount++
-            }
-          }
-        }
-        
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Fixed $fixedCount file(s)" -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Cyan
-    
-    - name: Build with Ninja
-      if: steps.flutter-build.outcome == 'failure'
-      shell: cmd
-      run: |
-        echo ========================================
-        echo Setting up Visual Studio environment
-        echo ========================================
-        call "${{ steps.setup-env.outputs.VCVARS_PATH }}"
-        
-        echo.
-        echo ========================================
-        echo Building with Ninja
-        echo ========================================
-        cmake --build build\windows\x64 --config Release
-        
-        if %ERRORLEVEL% NEQ 0 (
-          echo ERROR: Build failed!
-          exit /b 1
-        )
-        
-        echo.
-        echo ✓ Build completed successfully!
-    
-    - name: Assemble release bundle
-      shell: pwsh
-      run: |
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Assembling release bundle..." -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 检查是否已经有完整的 bundle（flutter build 成功的情况）
-        $existingBundle = $null
-        $checkPaths = @(
-          "build/windows/runner/Release",
-          "build/windows/x64/runner/Release"
-        )
-        
-        foreach ($path in $checkPaths) {
-          if ((Test-Path "$path/jn_production_line.exe") -and 
-              (Test-Path "$path/flutter_windows.dll") -and 
-              (Test-Path "$path/data/icudtl.dat") -and
-              (Test-Path "$path/data/flutter_assets") -and
-              (Test-Path "$path/data/app.so")) {
-            $existingBundle = $path
-            Write-Host "✓ Found existing complete bundle at: $existingBundle" -ForegroundColor Green
-            Write-Host "  - jn_production_line.exe ✓" -ForegroundColor Gray
-            Write-Host "  - flutter_windows.dll ✓" -ForegroundColor Gray
-            Write-Host "  - data/icudtl.dat ✓" -ForegroundColor Gray
-            Write-Host "  - data/flutter_assets/ ✓" -ForegroundColor Gray
-            Write-Host "  - data/app.so ✓" -ForegroundColor Gray
-            break
-          }
-        }
-        
-        if ($existingBundle) {
-          Write-Host "Skipping bundle assembly (already complete)" -ForegroundColor Cyan
-          exit 0
-        }
-        
-        # 创建 Release bundle 目录
-        $bundleDir = "build/windows/x64/runner/Release"
-        New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
-        Write-Host "Creating bundle at: $bundleDir" -ForegroundColor Cyan
-        
-        # 1. 查找并复制编译好的 EXE
-        $exePaths = @(
-          "build/windows/x64/runner/jn_production_line.exe",
-          "build/windows/runner/jn_production_line.exe"
-        )
-        
-        $exeSource = $null
-        foreach ($path in $exePaths) {
+
+        $releaseDir = $null
+        foreach ($path in $releasePaths) {
           if (Test-Path $path) {
-            $exeSource = $path
+            $releaseDir = $path
             break
           }
         }
-        
-        if ($exeSource) {
-          Copy-Item -Path $exeSource -Destination $bundleDir -Force
-          Write-Host "✓ Copied jn_production_line.exe from $exeSource" -ForegroundColor Green
-        } else {
-          Write-Host "✗ ERROR: jn_production_line.exe not found" -ForegroundColor Red
-          Write-Host "Searched paths:" -ForegroundColor Yellow
-          $exePaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-          exit 1
-        }
-        
-        # 2. 复制 Flutter 引擎 DLL（必须在根目录）
-        # 规范化 Flutter 路径（处理混合的 / 和 \ 分隔符）
-        $flutterRoot = $env:FLUTTER_ROOT
-        if ($flutterRoot) {
-          $flutterRoot = $flutterRoot -replace '/', '\'
-        }
-        
-        Write-Host "Flutter root: $flutterRoot" -ForegroundColor Cyan
-        
-        # 查找 flutter_windows.dll（尝试多个可能的路径）
-        $enginePaths = @(
-          "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release",
-          "$flutterRoot\bin\cache\artifacts\engine\windows-release",
-          "$(Split-Path $flutterRoot)\flutter\bin\cache\artifacts\engine\windows-x64-release"
-        )
-        
-        $engineDir = $null
-        foreach ($path in $enginePaths) {
-          if (Test-Path "$path\flutter_windows.dll") {
-            $engineDir = $path
-            Write-Host "Found engine at: $engineDir" -ForegroundColor Green
-            break
-          }
-        }
-        
-        if (-not $engineDir) {
-          Write-Host "✗ ERROR: Flutter engine not found!" -ForegroundColor Red
-          Write-Host "Searched paths:" -ForegroundColor Yellow
-          $enginePaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-          
-          # 尝试列出实际存在的路径
-          Write-Host "`nActual Flutter cache structure:" -ForegroundColor Cyan
-          if (Test-Path "$flutterRoot\bin\cache\artifacts\engine") {
-            Get-ChildItem "$flutterRoot\bin\cache\artifacts\engine" | ForEach-Object {
-              Write-Host "  - $($_.Name)" -ForegroundColor Gray
-            }
+
+        if (-not $releaseDir) {
+          Write-Host "ERROR: No release directory found!" -ForegroundColor Red
+          Write-Host "Contents of build\windows:" -ForegroundColor Yellow
+          if (Test-Path "build\windows") {
+            Get-ChildItem -Path "build\windows" -Recurse -Depth 4 | Select-Object FullName
           }
           exit 1
         }
-        
-        # 复制 flutter_windows.dll
-        $engineDll = "$engineDir\flutter_windows.dll"
-        Copy-Item -Path $engineDll -Destination $bundleDir -Force
-        $dllSize = (Get-Item "$bundleDir\flutter_windows.dll").Length / 1MB
-        Write-Host "✓ Copied flutter_windows.dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
-        
-        # 3. 创建 data 目录
-        $dataDir = Join-Path $bundleDir "data"
-        New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-        Write-Host "✓ Created data directory: $dataDir" -ForegroundColor Green
-        
-        # 4. 复制 ICU 数据文件（必须在 data 目录，不是根目录！）
-        # Flutter 3.24+ 可能改变了 icudtl.dat 的位置，需要全局搜索
-        Write-Host "`nSearching for icudtl.dat..." -ForegroundColor Cyan
-        
-        $icuSearchPaths = @(
-          # 最优先：之前保存的备份
-          "icudtl.dat.backup",
-          # 优先从已构建的 bundle 中查找（flutter build 会自动复制）
-          "build\windows\x64\runner\Release\data\icudtl.dat",
-          "build\windows\runner\Release\data\icudtl.dat",
-          "build\windows\x64\runner\data\icudtl.dat",
-          "build\windows\runner\data\icudtl.dat",
-          # 然后尝试引擎目录
-          "$engineDir\icudtl.dat",
-          # Flutter 3.24+ 的实际位置（windows-x64 而不是 windows-x64-release）
-          "$flutterRoot\bin\cache\artifacts\engine\windows-x64\icudtl.dat",
-          "$flutterRoot\bin\cache\artifacts\engine\windows-x64-release\icudtl.dat",
-          "$flutterRoot\bin\cache\artifacts\engine\common\icudtl.dat",
-          # 其他可能的位置
-          "$flutterRoot\bin\cache\artifacts\material_fonts\icudtl.dat",
-          "$flutterRoot\bin\cache\pkg\sky_engine\icudtl.dat",
-          "$flutterRoot\bin\icudtl.dat"
-        )
-        
-        $icuData = $null
-        foreach ($path in $icuSearchPaths) {
-          if (Test-Path $path) {
-            $icuData = $path
-            Write-Host "Found icudtl.dat at: $icuData" -ForegroundColor Green
-            break
+
+        Write-Host "Release directory: $releaseDir" -ForegroundColor Green
+        Get-ChildItem -Path $releaseDir -Recurse | Select-Object FullName
+
+        # Verify critical files
+        $exe = Join-Path $releaseDir "jn_production_line.exe"
+        $dll = Join-Path $releaseDir "flutter_windows.dll"
+        $icu = Join-Path $releaseDir "data\icudtl.dat"
+
+        $allOk = $true
+        foreach ($file in @($exe, $dll, $icu)) {
+          if (Test-Path $file) {
+            $size = (Get-Item $file).Length / 1MB
+            Write-Host "✓ $file ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+          } else {
+            Write-Host "✗ MISSING: $file" -ForegroundColor Red
+            $allOk = $false
           }
         }
-        
-        if (-not $icuData) {
-          Write-Host "✗ ERROR: icudtl.dat not found in any expected location!" -ForegroundColor Red
-          Write-Host "`nSearched paths:" -ForegroundColor Yellow
-          $icuSearchPaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Gray }
-          
-          Write-Host "`nSearching entire Flutter cache for icudtl.dat..." -ForegroundColor Cyan
-          if (Test-Path "$flutterRoot\bin\cache") {
-            $found = Get-ChildItem -Path "$flutterRoot\bin\cache" -Filter "icudtl.dat" -Recurse -ErrorAction SilentlyContinue
-            if ($found) {
-              Write-Host "Found icudtl.dat at:" -ForegroundColor Yellow
-              $found | ForEach-Object { Write-Host "  - $($_.FullName)" -ForegroundColor Yellow }
-            } else {
-              Write-Host "icudtl.dat not found anywhere in Flutter cache!" -ForegroundColor Red
-            }
-          }
-          
-          Write-Host "`nEngine directory structure:" -ForegroundColor Cyan
-          if (Test-Path "$flutterRoot\bin\cache\artifacts\engine") {
-            Get-ChildItem "$flutterRoot\bin\cache\artifacts\engine" -Recurse -Depth 2 | Where-Object { $_.PSIsContainer } | ForEach-Object {
-              Write-Host "  [DIR] $($_.FullName)" -ForegroundColor Gray
-            }
-          }
-          
+
+        if (-not $allOk) {
           exit 1
         }
-        
-        # 复制 icudtl.dat 到 data 目录
-        $icuDest = Join-Path $dataDir "icudtl.dat"
-        
-        Write-Host "Copying icudtl.dat..." -ForegroundColor Cyan
-        Write-Host "  From: $icuData" -ForegroundColor Gray
-        Write-Host "  To: $icuDest" -ForegroundColor Gray
-        
-        Copy-Item -Path $icuData -Destination $icuDest -Force
-        
-        if (Test-Path $icuDest) {
-          $icuSize = (Get-Item $icuDest).Length / 1MB
-          Write-Host "✓ Copied data/icudtl.dat ($([math]::Round($icuSize, 2)) MB)" -ForegroundColor Green
-        } else {
-          Write-Host "✗ ERROR: Failed to copy icudtl.dat!" -ForegroundColor Red
-          exit 1
-        }
-        
-        # 5. 复制 flutter_assets（必须在 data 目录）
-        $flutterAssetsSource = "build/flutter_assets"
-        if (Test-Path $flutterAssetsSource) {
-          $flutterAssetsDest = Join-Path $dataDir "flutter_assets"
-          Copy-Item -Path $flutterAssetsSource -Destination $flutterAssetsDest -Recurse -Force
-          Write-Host "✓ Copied data/flutter_assets" -ForegroundColor Green
-        } else {
-          Write-Host "✗ ERROR: flutter_assets not found at $flutterAssetsSource" -ForegroundColor Red
-          exit 1
-        }
-        
-        # 6. 复制 app.so（Release 模式的 AOT 编译代码，必须在 data 目录）
-        $appSoPaths = @(
-          "build/windows/x64/runner/Release/data/app.so",
-          "build/windows/runner/Release/data/app.so",
-          "build/windows/x64/runner/data/app.so",
-          "build/windows/runner/data/app.so"
-        )
-        
-        $appSoFound = $false
-        foreach ($appSoPath in $appSoPaths) {
-          if (Test-Path $appSoPath) {
-            $appSoDest = Join-Path $dataDir "app.so"
-            Copy-Item -Path $appSoPath -Destination $appSoDest -Force
-            $appSoSize = (Get-Item $appSoDest).Length / 1MB
-            Write-Host "✓ Copied data/app.so ($([math]::Round($appSoSize, 2)) MB) from $appSoPath" -ForegroundColor Green
-            $appSoFound = $true
-            break
-          }
-        }
-        
-        if (-not $appSoFound) {
-          Write-Host "⚠ WARNING: app.so not found - Release build may not work!" -ForegroundColor Yellow
-          Write-Host "Searched paths:" -ForegroundColor Yellow
-          $appSoPaths | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-        }
-        
-        # 7. 复制插件 DLL（必须在根目录）
-        $pluginDirs = @(
-          "build/windows/x64/plugins",
-          "build/windows/plugins"
-        )
-        
-        $pluginCount = 0
-        foreach ($pluginsDir in $pluginDirs) {
-          if (Test-Path $pluginsDir) {
-            Get-ChildItem -Path $pluginsDir -Filter "*.dll" -Recurse | ForEach-Object {
-              Copy-Item -Path $_.FullName -Destination $bundleDir -Force
-              Write-Host "✓ Copied plugin: $($_.Name)" -ForegroundColor Green
-              $pluginCount++
-            }
-          }
-        }
-        
-        if ($pluginCount -eq 0) {
-          Write-Host "⚠ WARNING: No plugin DLLs found" -ForegroundColor Yellow
-        } else {
-          Write-Host "✓ Copied $pluginCount plugin DLL(s)" -ForegroundColor Green
-        }
-        
-        Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host "Bundle assembly complete!" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 显示 bundle 内容
-        Write-Host "`nBundle contents:" -ForegroundColor Yellow
-        Get-ChildItem -Path $bundleDir -Recurse | ForEach-Object {
-          $size = if ($_.PSIsContainer) { "" } else { " ($([math]::Round($_.Length/1KB, 2)) KB)" }
-          Write-Host "  $($_.FullName.Replace($bundleDir, ''))$size" -ForegroundColor Gray
-        }
-    
-    - name: Get version from pubspec
-      id: version
+
+        # Save release dir path for later steps
+        echo "RELEASE_DIR=$releaseDir" >> $env:GITHUB_ENV
+
+    - name: Package release
       shell: pwsh
       run: |
-        $version = (Get-Content pubspec.yaml | Select-String -Pattern 'version:\s*(.+)').Matches.Groups[1].Value
-        echo "VERSION=$version" >> $env:GITHUB_OUTPUT
-        echo "Version: $version"
-    
-    - name: Test executable
-      shell: pwsh
-      run: |
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Testing executable" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 查找 EXE 文件
-        $exePaths = @(
-          "build/windows/x64/runner/Release/jn_production_line.exe",
-          "build/windows/runner/Release/jn_production_line.exe",
-          "build/windows/x64/runner/jn_production_line.exe"
-        )
-        
-        $exePath = $null
-        foreach ($path in $exePaths) {
-          if (Test-Path $path) {
-            $exePath = $path
-            break
-          }
-        }
-        
-        if (-not $exePath) {
-          Write-Host "✗ ERROR: Executable not found!" -ForegroundColor Red
-          exit 1
-        }
-        
-        Write-Host "Found executable: $exePath" -ForegroundColor Green
-        
-        # 检查文件类型
-        Write-Host "`nFile information:" -ForegroundColor Cyan
-        $fileInfo = Get-Item $exePath
-        Write-Host "  Size: $([math]::Round($fileInfo.Length/1KB, 2)) KB" -ForegroundColor Gray
-        Write-Host "  Created: $($fileInfo.CreationTime)" -ForegroundColor Gray
-        Write-Host "  Modified: $($fileInfo.LastWriteTime)" -ForegroundColor Gray
-        
-        # 检查依赖的 DLL
-        Write-Host "`nChecking dependencies:" -ForegroundColor Cyan
-        $exeDir = Split-Path $exePath
-        $requiredDlls = @("flutter_windows.dll")
-        
-        foreach ($dll in $requiredDlls) {
-          $dllPath = Join-Path $exeDir $dll
-          if (Test-Path $dllPath) {
-            $dllSize = (Get-Item $dllPath).Length / 1MB
-            Write-Host "  ✓ $dll ($([math]::Round($dllSize, 2)) MB)" -ForegroundColor Green
-          } else {
-            Write-Host "  ✗ $dll (MISSING!)" -ForegroundColor Red
-          }
-        }
-        
-        # 检查 data 目录
-        $dataDir = Join-Path $exeDir "data"
-        if (Test-Path $dataDir) {
-          $dataFiles = Get-ChildItem -Path $dataDir -Recurse -File
-          Write-Host "  ✓ data/ ($($dataFiles.Count) files)" -ForegroundColor Green
-        } else {
-          Write-Host "  ✗ data/ (MISSING!)" -ForegroundColor Red
-        }
-        
-        # 尝试运行 EXE（带 --help 参数，快速退出）
-        Write-Host "`nTesting executable launch:" -ForegroundColor Cyan
-        try {
-          # 设置超时 5 秒
-          $process = Start-Process -FilePath $exePath -ArgumentList "--help" -PassThru -NoNewWindow -RedirectStandardOutput "test_output.txt" -RedirectStandardError "test_error.txt"
-          
-          # 等待最多 5 秒
-          $timeout = 5
-          $process | Wait-Process -Timeout $timeout -ErrorAction SilentlyContinue
-          
-          if ($process.HasExited) {
-            Write-Host "  ✓ Executable launched successfully (exit code: $($process.ExitCode))" -ForegroundColor Green
-            
-            # 显示输出（如果有）
-            if (Test-Path "test_output.txt") {
-              $output = Get-Content "test_output.txt" -Raw
-              if ($output) {
-                Write-Host "`nStdout:" -ForegroundColor Yellow
-                Write-Host $output -ForegroundColor Gray
-              }
-            }
-            
-            if (Test-Path "test_error.txt") {
-              $error = Get-Content "test_error.txt" -Raw
-              if ($error) {
-                Write-Host "`nStderr:" -ForegroundColor Yellow
-                Write-Host $error -ForegroundColor Gray
-              }
-            }
-          } else {
-            # 进程仍在运行，强制终止
-            $process | Stop-Process -Force
-            Write-Host "  ✓ Executable launched (still running after ${timeout}s, killed)" -ForegroundColor Green
-          }
-        } catch {
-          Write-Host "  ⚠ Could not test launch: $_" -ForegroundColor Yellow
-          Write-Host "  This is expected in CI environment without display" -ForegroundColor Gray
-        }
-        
-        Write-Host "`n✓ Executable validation complete" -ForegroundColor Green
-    
-    - name: Generate app.so if missing
-      shell: pwsh
-      run: |
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Checking for app.so" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 查找 app.so
-        $appSoFiles = Get-ChildItem -Path "build/windows" -Recurse -Filter "app.so" -ErrorAction SilentlyContinue
-        
-        if ($appSoFiles) {
-          Write-Host "✓ app.so already exists:" -ForegroundColor Green
-          $appSoFiles | ForEach-Object {
-            $size = $_.Length / 1MB
-            Write-Host "  - $($_.FullName) ($([math]::Round($size, 2)) MB)" -ForegroundColor Gray
-          }
-        } else {
-          Write-Host "✗ app.so not found - attempting to generate it manually" -ForegroundColor Yellow
-          
-          # 查找构建输出目录
-          $buildDir = $null
-          $possibleDirs = @(
-            "build/windows/x64/runner/Release",
-            "build/windows/runner/Release"
-          )
-          
-          foreach ($dir in $possibleDirs) {
-            if (Test-Path "$dir/jn_production_line.exe") {
-              $buildDir = $dir
-              break
-            }
-          }
-          
-          if ($buildDir) {
-            Write-Host "Found build directory: $buildDir" -ForegroundColor Cyan
-            
-            # 尝试手动编译 Dart AOT
-            Write-Host "`nAttempting manual AOT compilation..." -ForegroundColor Cyan
-            
-            $dataDir = Join-Path $buildDir "data"
-            New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-            
-            # 使用 flutter assemble 生成 app.so
-            try {
-              $env:FLUTTER_ROOT = $env:FLUTTER_ROOT
-              flutter assemble -dTargetPlatform=windows-x64 --output="$buildDir" release_bundle_windows_assets
-              
-              # 再次检查
-              $appSoFiles = Get-ChildItem -Path "build/windows" -Recurse -Filter "app.so" -ErrorAction SilentlyContinue
-              if ($appSoFiles) {
-                Write-Host "✓ Successfully generated app.so" -ForegroundColor Green
-              } else {
-                Write-Host "⚠ Could not generate app.so - application will run in JIT mode" -ForegroundColor Yellow
-              }
-            } catch {
-              Write-Host "⚠ Manual AOT compilation failed: $_" -ForegroundColor Yellow
-              Write-Host "  Application will run without AOT optimization" -ForegroundColor Gray
-            }
-          }
-        }
-    
-    - name: Inspect build output
-      shell: pwsh
-      run: |
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Build Directory Structure" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        if (Test-Path "build/windows") {
-          Write-Host "`nDirectory tree:" -ForegroundColor Yellow
-          Get-ChildItem -Path "build/windows" -Recurse | ForEach-Object {
-            $indent = "  " * ($_.FullName.Split('\').Count - "build/windows".Split('\').Count - 1)
-            if ($_.PSIsContainer) {
-              Write-Host "$indent[DIR]  $($_.Name)" -ForegroundColor Cyan
-            } else {
-              $size = if ($_.Length -gt 1MB) { "$([math]::Round($_.Length/1MB, 2)) MB" } else { "$([math]::Round($_.Length/1KB, 2)) KB" }
-              Write-Host "$indent[FILE] $($_.Name) ($size)" -ForegroundColor Gray
-            }
-          }
-          
-          Write-Host "`nExecutable files:" -ForegroundColor Yellow
-          Get-ChildItem -Path "build/windows" -Recurse -File -Filter "*.exe" | ForEach-Object {
-            Write-Host "  ✓ $($_.FullName)" -ForegroundColor Green
-          }
-          
-          Write-Host "`nDLL files:" -ForegroundColor Yellow
-          Get-ChildItem -Path "build/windows" -Recurse -File -Filter "*.dll" | ForEach-Object {
-            Write-Host "  ✓ $($_.FullName)" -ForegroundColor Green
-          }
-        } else {
-          Write-Host "ERROR: build/windows directory not found!" -ForegroundColor Red
-        }
-    
-    - name: Package application
-      shell: pwsh
-      run: |
-        $version = "${{ steps.version.outputs.VERSION }}"
-        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $zipName = "jn_production_line_windows_v${version}_${timestamp}.zip"
-        
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Locating build output..." -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 查找实际的构建输出目录
-        # Ninja 构建后，完整的 bundle 应该包含 flutter_windows.dll 和 data 目录
-        $possiblePaths = @(
-          "build/windows/x64/runner/Release",
-          "build/windows/x64/runner",
-          "build/windows/runner/Release",
-          "build/windows/runner",
-          "build/windows/x64/Release",
-          "build/windows/Release"
-        )
-        
-        $buildPath = $null
-        foreach ($path in $possiblePaths) {
-          if (Test-Path $path) {
-            $exePath = Join-Path $path "jn_production_line.exe"
-            $dllPath = Join-Path $path "flutter_windows.dll"
-            $dataPath = Join-Path $path "data"
-            
-            # 必须同时包含 exe、dll 和 data 目录才是有效的 bundle
-            if ((Test-Path $exePath) -and (Test-Path $dllPath) -and (Test-Path $dataPath)) {
-              $buildPath = $path
-              Write-Host "✓ Found complete build bundle at: $buildPath" -ForegroundColor Green
-              break
-            } elseif (Test-Path $exePath) {
-              Write-Host "  Found EXE at $path but missing DLL/data (incomplete bundle)" -ForegroundColor Yellow
-            }
-          }
-        }
-        
-        if (-not $buildPath) {
-          Write-Host "ERROR: Could not find build output!" -ForegroundColor Red
-          Write-Host "Searched paths:" -ForegroundColor Yellow
-          foreach ($path in $possiblePaths) {
-            Write-Host "  - $path" -ForegroundColor Yellow
-          }
-          Write-Host "`nBuild directory structure:" -ForegroundColor Yellow
-          if (Test-Path "build/windows") {
-            Get-ChildItem -Path "build/windows" -Recurse -File -Filter "*.exe" | ForEach-Object {
-              Write-Host "  Found EXE: $($_.FullName)" -ForegroundColor Yellow
-            }
-          }
-          exit 1
-        }
-        
-        # 创建打包目录
-        New-Item -ItemType Directory -Force -Path package | Out-Null
-        
-        # 复制必要文件 - 使用正确的方式复制整个目录内容
-        Write-Host "`nCopying files from: $buildPath" -ForegroundColor Cyan
-        Write-Host "Build path contents:" -ForegroundColor Yellow
-        Get-ChildItem -Path $buildPath | ForEach-Object {
-          Write-Host "  - $($_.Name) [$($_.PSIsContainer ? 'DIR' : 'FILE')]" -ForegroundColor Gray
-        }
-        Write-Host ""
-        
-        # 复制所有文件和目录
-        Get-ChildItem -Path $buildPath | ForEach-Object {
-          $itemName = $_.Name
-          $itemPath = $_.FullName
-          
-          if ($_.PSIsContainer) {
-            # 目录：递归复制
-            $destPath = Join-Path "package" $itemName
-            Copy-Item -Path $itemPath -Destination $destPath -Recurse -Force
-            $fileCount = (Get-ChildItem -Path $destPath -Recurse -File).Count
-            Write-Host "  ✓ Copied directory: $itemName ($fileCount files)" -ForegroundColor Green
-          } else {
-            # 文件：直接复制
-            Copy-Item -Path $itemPath -Destination "package/" -Force
-            $size = $_.Length / 1MB
-            Write-Host "  ✓ Copied file: $itemName ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-          }
-        }
-        
-        # 复制文档文件
-        Copy-Item -Path "START_HERE.txt" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "README*.md" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "GPIB*.md" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "WINDOWS_TROUBLESHOOTING.md" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "EXE_TROUBLESHOOTING.md" -Destination "package/" -ErrorAction SilentlyContinue
-        
-        # 复制安装和诊断工具（BAT 文件应该已经是 GBK 编码）
-        Copy-Item -Path "install_gpib_dependencies.bat" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "install_vc_redist.bat" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "diagnose_windows.bat" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "start_with_console.bat" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "diagnose_exe.bat" -Destination "package/" -ErrorAction SilentlyContinue
-        Copy-Item -Path "debug_start.bat" -Destination "package/" -ErrorAction SilentlyContinue
-        
-        Write-Host "✓ Copied documentation and tools" -ForegroundColor Green
-        
-        # 验证 BAT 文件编码（应该是 GBK/ANSI，不是 UTF-8）
-        Write-Host "`nVerifying BAT file encoding..." -ForegroundColor Cyan
-        $batFiles = Get-ChildItem -Path "package" -Filter "*.bat"
-        foreach ($bat in $batFiles) {
-          $encoding = [System.Text.Encoding]::Default
-          $content = Get-Content -Path $bat.FullName -Encoding $encoding -Raw
-          if ($content -match '[^\x00-\x7F]') {
-            Write-Host "  ⚠ $($bat.Name) contains non-ASCII characters (should be GBK encoded)" -ForegroundColor Yellow
-          } else {
-            Write-Host "  ✓ $($bat.Name)" -ForegroundColor Green
-          }
-        }
-        
-        # 验证打包内容
-        Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host "Verifying package contents..." -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 检查关键文件（根目录）
-        $requiredFiles = @(
-          "jn_production_line.exe",
-          "flutter_windows.dll"
-        )
-        
-        # 检查关键目录和文件（data 目录）
-        $requiredDataFiles = @(
-          "data/icudtl.dat",
-          "data/flutter_assets"
-        )
-        
-        # app.so 在 Flutter 3.24+ Windows 上可能不存在
-        # 如果不存在，应用会使用 JIT 模式（性能稍差但可运行）
-        $optionalDataFiles = @(
-          "data/app.so"
-        )
-        
-        $requiredDirs = @(
-          "data"
-        )
-        
-        $missingItems = @()
-        
-        foreach ($file in $requiredFiles) {
-          $filePath = Join-Path "package" $file
-          if (Test-Path $filePath) {
-            $size = (Get-Item $filePath).Length / 1MB
-            Write-Host "  ✓ $file ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-          } else {
-            Write-Host "  ✗ $file (MISSING!)" -ForegroundColor Red
-            $missingItems += $file
-          }
-        }
-        
-        foreach ($dir in $requiredDirs) {
-          $dirPath = Join-Path "package" $dir
-          if (Test-Path $dirPath) {
-            $itemCount = (Get-ChildItem -Path $dirPath -Recurse -File).Count
-            Write-Host "  ✓ $dir/ ($itemCount files)" -ForegroundColor Green
-          } else {
-            Write-Host "  ✗ $dir/ (MISSING!)" -ForegroundColor Red
-            $missingItems += "$dir/"
-          }
-        }
-        
-        # 检查 data 目录中的关键文件
-        Write-Host "`nVerifying data directory structure:" -ForegroundColor Cyan
-        foreach ($dataFile in $requiredDataFiles) {
-          $dataFilePath = Join-Path "package" $dataFile
-          if (Test-Path $dataFilePath) {
-            if (Test-Path $dataFilePath -PathType Container) {
-              $itemCount = (Get-ChildItem -Path $dataFilePath -Recurse -File).Count
-              Write-Host "  ✓ $dataFile/ ($itemCount files)" -ForegroundColor Green
-            } else {
-              $size = (Get-Item $dataFilePath).Length / 1MB
-              Write-Host "  ✓ $dataFile ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-            }
-          } else {
-            Write-Host "  ✗ $dataFile (MISSING!)" -ForegroundColor Red
-            $missingItems += $dataFile
-          }
-        }
-        
-        # 检查可选文件（带说明）
-        Write-Host "`nVerifying optional files:" -ForegroundColor Cyan
-        foreach ($optFile in $optionalDataFiles) {
-          $optFilePath = Join-Path "package" $optFile
-          if (Test-Path $optFilePath) {
-            $size = (Get-Item $optFilePath).Length / 1MB
-            Write-Host "  ✓ $optFile ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
-          } else {
-            Write-Host "  ⚠ $optFile (not found)" -ForegroundColor Yellow
-            if ($optFile -eq "data/app.so") {
-              Write-Host "    Note: app.so may not be generated in Flutter 3.24+ Windows builds" -ForegroundColor Gray
-              Write-Host "    The application will run in JIT mode (slightly slower but functional)" -ForegroundColor Gray
-            }
-          }
-        }
-        
-        # 检查 icudtl.dat 不应该在根目录
-        $wrongIcuPath = "package/icudtl.dat"
-        if (Test-Path $wrongIcuPath) {
-          Write-Host "`n  ⚠ WARNING: icudtl.dat found in root directory (should only be in data/)!" -ForegroundColor Red
-          Write-Host "  This will cause the application to crash!" -ForegroundColor Red
-          Remove-Item $wrongIcuPath -Force
-          Write-Host "  ✓ Removed incorrect icudtl.dat from root" -ForegroundColor Yellow
-        }
-        
-        # 详细检查 data 目录结构
-        Write-Host "`nDetailed data directory structure:" -ForegroundColor Cyan
-        $dataDir = "package/data"
-        if (Test-Path $dataDir) {
-          Write-Host "package/" -ForegroundColor Yellow
-          Write-Host "  ├── jn_production_line.exe" -ForegroundColor Gray
-          Write-Host "  ├── flutter_windows.dll" -ForegroundColor Gray
-          Write-Host "  └── data/" -ForegroundColor Yellow
-          
-          # 检查 icudtl.dat
-          if (Test-Path "$dataDir/icudtl.dat") {
-            $icuSize = (Get-Item "$dataDir/icudtl.dat").Length / 1KB
-            Write-Host "      ├── icudtl.dat ($([math]::Round($icuSize, 2)) KB) ✓" -ForegroundColor Green
-          } else {
-            Write-Host "      ├── icudtl.dat (MISSING!) ✗" -ForegroundColor Red
-          }
-          
-          # 检查 flutter_assets
-          if (Test-Path "$dataDir/flutter_assets") {
-            $assetCount = (Get-ChildItem -Path "$dataDir/flutter_assets" -Recurse -File).Count
-            Write-Host "      ├── flutter_assets/ ($assetCount files) ✓" -ForegroundColor Green
-            
-            # 检查关键资源文件
-            $keyAssets = @("AssetManifest.json", "FontManifest.json", "fonts/MaterialIcons-Regular.otf")
-            foreach ($asset in $keyAssets) {
-              $assetPath = Join-Path "$dataDir/flutter_assets" $asset
-              if (Test-Path $assetPath) {
-                Write-Host "      │   ├── $asset ✓" -ForegroundColor Gray
-              } else {
-                Write-Host "      │   ├── $asset (MISSING!) ✗" -ForegroundColor Red
-              }
-            }
-          } else {
-            Write-Host "      ├── flutter_assets/ (MISSING!) ✗" -ForegroundColor Red
-          }
-          
-          # 检查 app.so (可选，但推荐)
-          if (Test-Path "$dataDir/app.so") {
-            $appSoSize = (Get-Item "$dataDir/app.so").Length / 1MB
-            Write-Host "      └── app.so ($([math]::Round($appSoSize, 2)) MB) ✓" -ForegroundColor Green
-          } else {
-            Write-Host "      └── app.so (not present) ⚠" -ForegroundColor Yellow
-            Write-Host "          Note: Flutter 3.24+ may not generate app.so on Windows" -ForegroundColor Gray
-          }
-        } else {
-          Write-Host "  ✗ data/ directory not found!" -ForegroundColor Red
-        }
-        
-        if ($missingItems.Count -gt 0) {
-          Write-Host "`nERROR: Missing required files/directories!" -ForegroundColor Red
-          Write-Host "Missing items:" -ForegroundColor Yellow
-          $missingItems | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-          
-          Write-Host "`nActual package contents:" -ForegroundColor Yellow
-          Get-ChildItem -Path "package" -Recurse | ForEach-Object {
-            Write-Host "  $($_.FullName)" -ForegroundColor Gray
-          }
-          exit 1
-        }
-        
-        # 显示完整打包内容
-        Write-Host "`nComplete package structure:" -ForegroundColor Cyan
-        Get-ChildItem -Path "package" -Recurse | ForEach-Object {
-          $indent = "  " * ($_.FullName.Split('\').Count - "package".Split('\').Count)
-          if ($_.PSIsContainer) {
-            Write-Host "$indent[DIR]  $($_.Name)" -ForegroundColor Cyan
-          } else {
-            $size = if ($_.Length -gt 1MB) { "$([math]::Round($_.Length/1MB, 2)) MB" } else { "$([math]::Round($_.Length/1KB, 2)) KB" }
-            Write-Host "$indent[FILE] $($_.Name) ($size)" -ForegroundColor Gray
-          }
-        }
-        
-        # 计算总大小
-        $totalSize = (Get-ChildItem -Path "package" -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
-        Write-Host "`nTotal package size: $([math]::Round($totalSize, 2)) MB" -ForegroundColor Green
-        
-        # 创建 ZIP（直接压缩 package 目录内容，不包含 package 文件夹本身）
-        Write-Host "`n========================================" -ForegroundColor Cyan
-        Write-Host "Creating archive: $zipName" -ForegroundColor Cyan
-        Write-Host "========================================" -ForegroundColor Cyan
-        
-        # 进入 package 目录，压缩所有内容到上级目录
-        Push-Location package
-        try {
-          $zipPath = Join-Path ".." $zipName
-          
-          # 获取所有文件和目录
-          $items = Get-ChildItem -Path "." -Force
-          
-          # 压缩（不包含 package 目录本身）
-          Compress-Archive -Path $items.FullName -DestinationPath $zipPath -Force
-          
-          Write-Host "✓ Compressed $($items.Count) items" -ForegroundColor Green
-        } finally {
-          Pop-Location
-        }
-        
-        $zipSize = (Get-Item $zipName).Length / 1MB
-        Write-Host "✓ Archive created: $zipName ($([math]::Round($zipSize, 2)) MB)" -ForegroundColor Green
-        
-        # 验证 ZIP 内容
-        Write-Host "`nVerifying ZIP contents..." -ForegroundColor Cyan
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipName))
-        Write-Host "ZIP contains $($zip.Entries.Count) entries:" -ForegroundColor Yellow
-        $zip.Entries | Select-Object -First 20 | ForEach-Object {
-          Write-Host "  $($_.FullName)" -ForegroundColor Gray
-        }
-        if ($zip.Entries.Count -gt 20) {
-          Write-Host "  ... and $($zip.Entries.Count - 20) more files" -ForegroundColor Gray
-        }
-        $zip.Dispose()
-        
-        echo "ZIP_NAME=$zipName" >> $env:GITHUB_OUTPUT
-    
-    - name: Upload artifact
+        $releaseDir = $env:RELEASE_DIR
+        Write-Host "Packaging from: $releaseDir" -ForegroundColor Cyan
+
+        # Create output package directory
+        New-Item -ItemType Directory -Force -Path "release-package" | Out-Null
+
+        # Copy entire release directory contents
+        Copy-Item -Path "$releaseDir\*" -Destination "release-package\" -Recurse -Force
+
+        Write-Host "Package contents:" -ForegroundColor Cyan
+        Get-ChildItem -Path "release-package" -Recurse | Select-Object FullName
+
+        Write-Host "✓ Package ready" -ForegroundColor Green
+
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: windows-release
-        path: jn_production_line_windows_*.zip
-        retention-days: 90
-    
-    - name: Create Release
+        name: windows-release-${{ github.sha }}
+        path: release-package/
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: Create release archive
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+      shell: pwsh
+      run: |
+        $tag = "${{ github.ref_name }}"
+        $zipName = "jn_production_line-windows-$tag.zip"
+
+        Compress-Archive -Path "release-package\*" -DestinationPath $zipName -Force
+
+        $size = (Get-Item $zipName).Length / 1MB
+        Write-Host "✓ Created $zipName ($([math]::Round($size, 2)) MB)" -ForegroundColor Green
+
+        echo "RELEASE_ZIP=$zipName" >> $env:GITHUB_ENV
+
+    - name: Upload to GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
       with:
-        files: jn_production_line_windows_*.zip
+        files: ${{ env.RELEASE_ZIP }}
         draft: false
         prerelease: false
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
