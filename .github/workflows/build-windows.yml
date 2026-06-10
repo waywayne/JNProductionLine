@@ -11,8 +11,8 @@ on:
 
 jobs:
   build-windows:
-    # ⚡ 核心修复：指定使用 windows-2019 环境，以匹配你的旧版 CMakeLists 要求
-    runs-on: windows-2019
+    # ⚡ 使用 GitHub 目前官方支持的最新 Windows 环境
+    runs-on: windows-latest
     timeout-minutes: 60
 
     steps:
@@ -29,7 +29,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # 已移除 cache 选项，避免检测 requirements.txt 报错
+        python-version: '3.11'
 
     - name: Install Python dependencies
       shell: pwsh
@@ -79,7 +79,7 @@ jobs:
         Write-Host "Release directory: $releaseDir" -ForegroundColor Green
         Get-ChildItem -Path $releaseDir | Select-Object Name, Length
 
-        # 动态查找产物中的 .exe 文件，避免因改名导致 CI 报错
+        # 动态查找产物中的 .exe 文件
         $exeFile = Get-ChildItem -Path $releaseDir -Filter "*.exe" | Select-Object -First 1
         if (-not $exeFile) {
           Write-Host "✗ MISSING: No executable (.exe) found in release directory!" -ForegroundColor Red
