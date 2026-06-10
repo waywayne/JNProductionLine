@@ -11,7 +11,8 @@ on:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    # ⚡ 核心修复：指定使用 windows-2019 环境，以匹配你的旧版 CMakeLists 要求
+    runs-on: windows-2019
     timeout-minutes: 60
 
     steps:
