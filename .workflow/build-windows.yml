@@ -55,10 +55,18 @@ stages:
                 flutter pub get
           
           - step: script@1
+            displayName: CleanBuildCache
+            inputs:
+              script: |
+                set PATH=%CD%\flutter\bin;%PATH%
+                flutter clean
+
+          - step: script@1
             displayName: BuildWindowsApplication
             inputs:
               script: |
                 set PATH=%CD%\flutter\bin;%PATH%
+                set CMAKE_GENERATOR=Visual Studio 17 2022
                 flutter build windows --release
                 if not exist "build\windows\x64\runner\Release" (
                   echo "ERROR: Build failed - Release directory not found"

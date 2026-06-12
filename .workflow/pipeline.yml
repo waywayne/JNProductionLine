@@ -70,13 +70,22 @@ stages:
               script: |
                 $env:PATH = "$PWD\flutter\bin;$env:PATH"
                 flutter pub get
-          
+
+          - task: PowerShell@2
+            displayName: CleanBuildCache
+            inputs:
+              targetType: 'inline'
+              script: |
+                $env:PATH = "$PWD\flutter\bin;$env:PATH"
+                flutter clean
+
           - task: PowerShell@2
             displayName: BuildWindowsApplication
             inputs:
               targetType: 'inline'
               script: |
                 $env:PATH = "$PWD\flutter\bin;$env:PATH"
+                $env:CMAKE_GENERATOR = "Visual Studio 17 2022"
                 flutter build windows --$(BUILD_TYPE)
           
           - task: PowerShell@2

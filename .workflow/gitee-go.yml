@@ -74,10 +74,22 @@ stages:
         dependsOn: configure_flutter
       
       - step: script@1
+        name: clean_build
+        displayName: CleanBuildCache
+        script:
+          - set PATH=%CD%\flutter\bin;%PATH%
+          - flutter clean
+        notify: []
+        strategy:
+          retry: '0'
+        dependsOn: get_dependencies
+
+      - step: script@1
         name: build_windows_app
         displayName: BuildWindowsApplication
         script:
           - set PATH=%CD%\flutter\bin;%PATH%
+          - set CMAKE_GENERATOR=Visual Studio 17 2022
           - flutter build windows --release
         artifacts:
           - name: BUILD_ARTIFACT
@@ -86,7 +98,7 @@ stages:
         notify: []
         strategy:
           retry: '0'
-        dependsOn: get_dependencies
+        dependsOn: clean_build
       
       - step: script@1
         name: package_artifacts

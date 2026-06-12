@@ -13,7 +13,9 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
-    
+    env:
+      CMAKE_GENERATOR: "Visual Studio 17 2022"
+
     steps:
       - name: CheckoutCode
         uses: actions/checkout@v3
@@ -36,10 +38,13 @@ jobs:
       
       - name: GetFlutterDependencies
         run: flutter pub get
-      
+
       - name: FlutterDoctor
         run: flutter doctor -v
-      
+
+      - name: CleanBuild
+        run: flutter clean
+
       - name: BuildWindowsApp
         run: flutter build windows --release
       
