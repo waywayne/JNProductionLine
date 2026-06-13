@@ -158,20 +158,28 @@ class ProductionTestCommands {
   static const int otaSubRequest = 0x00; // OTA请求 (发送OTA路径)
   static const int otaSubStatus = 0x01;  // OTA状态通知 (设备推送)
   
-  // OTA状态枚举
-  static const int otaStatusSigmaStart = 0x04;  // sigma升级开始
-  static const int otaStatusSigmaEnd = 0x05;    // sigma升级结束
-  static const int otaStatusComplete = 0x06;    // ota升级操作完成
-  static const int otaStatusSuccess = 0x07;     // 升级成功(预留)
-  static const int otaStatusUploadFail = 0xFB;  // OTA文件上传失败
-  static const int otaStatusCheckFail = 0xFC;   // OTA文件检查失败
-  static const int otaStatusUnzipFail = 0xFD;   // OTA解压失败
-  static const int otaStatusRollback = 0xFE;    // OTA升级失败回滚
-  static const int otaStatusTimeout = 0xFF;     // OTA升级超时
+  // OTA状态枚举 (设备主动通知 0xFA 0x01 0xXX)
+  static const int otaStatusUploadSuccess = 0x00;   // OTA文件上传成功
+  static const int otaStatusUnzipSuccess = 0x01;    // OTA文件解压成功
+  static const int otaStatusWuqiTransferStart = 0x02; // 物奇升级文件传输开始
+  static const int otaStatusWuqiTransferEnd = 0x03;   // 物奇升级文件传输结束
+  static const int otaStatusSigmaStart = 0x04;        // sigma升级开始
+  static const int otaStatusSigmaEnd = 0x05;          // sigma升级结束
+  static const int otaStatusComplete = 0x06;          // ota升级操作完成
+  static const int otaStatusSuccess = 0x07;           // 升级成功(预留)
+  static const int otaStatusUploadFail = 0xFB;        // OTA文件上传失败
+  static const int otaStatusCheckFail = 0xFC;         // OTA文件检查失败
+  static const int otaStatusUnzipFail = 0xFD;         // OTA解压失败
+  static const int otaStatusRollback = 0xFE;          // OTA升级失败回滚
+  static const int otaStatusTimeout = 0xFF;           // OTA升级超时
   
   /// 获取OTA状态描述
   static String getOTAStatusName(int status) {
     switch (status) {
+      case otaStatusUploadSuccess: return 'OTA文件上传成功';
+      case otaStatusUnzipSuccess: return 'OTA文件解压成功';
+      case otaStatusWuqiTransferStart: return '物奇升级文件传输开始';
+      case otaStatusWuqiTransferEnd: return '物奇升级文件传输结束';
       case otaStatusSigmaStart: return 'Sigma升级开始';
       case otaStatusSigmaEnd: return 'Sigma升级结束';
       case otaStatusComplete: return 'OTA升级操作完成';
@@ -188,6 +196,11 @@ class ProductionTestCommands {
   /// 判断OTA状态是否为错误
   static bool isOTAError(int status) {
     return status >= 0xFB;
+  }
+
+  /// 判断是否为 OTA 完成状态（0x06 或预留 0x07）
+  static bool isOTACompleteStatus(int status) {
+    return status == otaStatusComplete || status == otaStatusSuccess;
   }
   
   /// 创建OTA请求命令: 0xFA + 路径字符串 + \0

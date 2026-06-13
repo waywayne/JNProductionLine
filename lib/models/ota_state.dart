@@ -172,8 +172,7 @@ class OTAState extends ChangeNotifier {
       _updateStep(OTAStep.upgrading, '设备升级中，请等待...');
       final otaResult = await _listenForOTAStatus();
       
-      if (otaResult == ProductionTestCommands.otaStatusComplete ||
-          otaResult == ProductionTestCommands.otaStatusSuccess) {
+      if (ProductionTestCommands.isOTACompleteStatus(otaResult)) {
         _updateStep(OTAStep.success, 'OTA升级成功！');
         _logState?.success('OTA升级成功！', type: LogType.debug);
       } else {
@@ -435,67 +434,148 @@ class OTAState extends ChangeNotifier {
   }
   
   /// 步骤5: 监听OTA状态推送
-  /// 等待 0xFA 0x01 0xXX 状态推送
+  /// 设备主动通知格式: 0xFA 0x01 0xXX
+  /// 收到 0x06 (OTA升级操作完成) 且蓝牙断开后判定升级成功
   Future<int> _listenForOTAStatus() async {
     _otaCompleter = Completer<int>();
-    
-    // 选择推送流
+    bool otaCompleteReceived = false;
+    Timer? disconnectPollTimer;
+    Timer? disconnectWaitTimer;
+
+    void cleanupListeners() {
+      disconnectPollTimer?.cancel();
+      disconnectPollTimer = null;
+      disconnectWaitTimer?.cancel();
+      disconnectWaitTimer = null;
+      _otaTimeoutTimer?.cancel();
+      _otaTimeoutTimer = null;
+      _pushSubscription?.cancel();
+      _pushSubscription = null;
+    }
+
+    void completeWith(int status) {
+      if (_otaCompleter != null && !_otaCompleter!.isCompleted) {
+        cleanupListeners();
+        _otaCompleter!.complete(status);
+      }
+    }
+
+    bool isBluetoothConnected() {
+      if (!_useLinuxBluetooth) return _serialService?.isConnected ?? false;
+      try {
+        return (_linuxBtService as dynamic).isConnected == true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    void tryCompleteAfterDisconnect() {
+      if (!otaCompleteReceived) return;
+      if (!isBluetoothConnected()) {
+        _logState?.info('✅ 设备蓝牙已断开，OTA升级成功', type: LogType.debug);
+        completeWith(ProductionTestCommands.otaStatusComplete);
+      }
+    }
+
+    void onOtaStatus(int status) {
+      _lastOTAStatus = status;
+      final statusName = ProductionTestCommands.getOTAStatusName(status);
+      _logState?.info(
+        '📦 OTA状态通知: $statusName (0x${status.toRadixString(16).padLeft(2, '0').toUpperCase()})',
+        type: LogType.debug,
+      );
+      _statusMessage = 'OTA: $statusName';
+      notifyListeners();
+
+      if (ProductionTestCommands.isOTAError(status)) {
+        completeWith(status);
+        return;
+      }
+
+      if (ProductionTestCommands.isOTACompleteStatus(status)) {
+        otaCompleteReceived = true;
+        if (_useLinuxBluetooth) {
+          _logState?.info('✅ 已收到 OTA 完成通知 (0x06)，等待设备蓝牙断开...', type: LogType.debug);
+          _statusMessage = 'OTA升级完成，等待设备重启断开蓝牙...';
+          notifyListeners();
+
+          disconnectPollTimer?.cancel();
+          disconnectPollTimer = Timer.periodic(
+            const Duration(milliseconds: 500),
+            (_) => tryCompleteAfterDisconnect(),
+          );
+
+          disconnectWaitTimer?.cancel();
+          disconnectWaitTimer = Timer(const Duration(minutes: 3), () {
+            if (otaCompleteReceived && (_otaCompleter?.isCompleted != true)) {
+              _logState?.error('❌ 等待设备蓝牙断开超时', type: LogType.debug);
+              completeWith(ProductionTestCommands.otaStatusTimeout);
+            }
+          });
+
+          tryCompleteAfterDisconnect();
+        } else {
+          completeWith(status);
+        }
+      }
+    }
+
+    void handlePayload(Uint8List payload) {
+      if (payload.isEmpty) return;
+
+      final payloadHex = payload
+          .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+          .join(' ');
+      _logState?.info('📥 OTA推送 Payload [${payload.length} 字节]: $payloadHex', type: LogType.debug);
+
+      if (payload.length >= 3 &&
+          payload[0] == ProductionTestCommands.cmdOTA &&
+          payload[1] == ProductionTestCommands.otaSubStatus) {
+        onOtaStatus(payload[2]);
+        return;
+      }
+
+      for (int i = 0; i <= payload.length - 3; i++) {
+        if (payload[i] == ProductionTestCommands.cmdOTA &&
+            payload[i + 1] == ProductionTestCommands.otaSubStatus) {
+          onOtaStatus(payload[i + 2]);
+          return;
+        }
+      }
+    }
+
+    // 使用 pushPayloadStream 监听设备主动推送（FA 01 XX）
     final Stream<Uint8List> pushStream;
     if (_useLinuxBluetooth) {
-      pushStream = (_linuxBtService as dynamic).dataStream as Stream<Uint8List>;
+      pushStream = (_linuxBtService as dynamic).pushPayloadStream as Stream<Uint8List>;
     } else {
       pushStream = _serialService!.pushPayloadStream;
     }
-    
+
     // 5分钟总超时
     _otaTimeoutTimer = Timer(const Duration(minutes: 5), () {
       if (_otaCompleter != null && !_otaCompleter!.isCompleted) {
         _logState?.error('❌ OTA升级超时（5分钟）', type: LogType.debug);
-        _otaCompleter!.complete(ProductionTestCommands.otaStatusTimeout);
+        completeWith(ProductionTestCommands.otaStatusTimeout);
       }
     });
-    
-    _pushSubscription = pushStream.listen((payload) {
-      try {
-        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
-        
-        // 检查是否为OTA状态推送: 0xFA 0x01 0xXX
-        if (payload.length >= 3 &&
-            payload[0] == ProductionTestCommands.cmdOTA &&
-            payload[1] == ProductionTestCommands.otaSubStatus) {
-          
-          final status = payload[2];
-          _lastOTAStatus = status;
-          final statusName = ProductionTestCommands.getOTAStatusName(status);
-          _logState?.info('📦 OTA状态: $statusName (0x${status.toRadixString(16).toUpperCase().padLeft(2, '0')})', type: LogType.debug);
-          
-          _statusMessage = 'OTA: $statusName';
-          notifyListeners();
-          
-          // 判断是否为终止状态
-          if (status == ProductionTestCommands.otaStatusComplete ||
-              status == ProductionTestCommands.otaStatusSuccess) {
-            // 升级成功
-            _otaTimeoutTimer?.cancel();
-            _pushSubscription?.cancel();
-            if (_otaCompleter != null && !_otaCompleter!.isCompleted) {
-              _otaCompleter!.complete(status);
-            }
-          } else if (ProductionTestCommands.isOTAError(status)) {
-            // 升级失败
-            _otaTimeoutTimer?.cancel();
-            _pushSubscription?.cancel();
-            if (_otaCompleter != null && !_otaCompleter!.isCompleted) {
-              _otaCompleter!.complete(status);
-            }
-          }
-          // 其他中间状态（0x04, 0x05）继续等待
+
+    _pushSubscription = pushStream.listen(
+      handlePayload,
+      onError: (e) {
+        _logState?.warning('⚠️ OTA推送流错误: $e', type: LogType.debug);
+        if (otaCompleteReceived) {
+          tryCompleteAfterDisconnect();
         }
-      } catch (e) {
-        _logState?.warning('⚠️ 解析OTA推送数据出错: $e', type: LogType.debug);
-      }
-    });
-    
+      },
+      onDone: () {
+        _logState?.info('ℹ️  OTA推送流结束', type: LogType.debug);
+        if (otaCompleteReceived) {
+          tryCompleteAfterDisconnect();
+        }
+      },
+    );
+
     return _otaCompleter!.future;
   }
   
