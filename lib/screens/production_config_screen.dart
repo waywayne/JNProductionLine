@@ -36,6 +36,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _bydMesStationController;
   late TextEditingController _networkPowerSupplyIpController;
   late TextEditingController _networkPowerSupplyPortController;
+  late TextEditingController _jigSerialPortController;
 
   @override
   void initState() {
@@ -65,6 +66,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _bydMesStationController = TextEditingController(text: _config.bydMesStation);
     _networkPowerSupplyIpController = TextEditingController(text: _config.networkPowerSupplyIp);
     _networkPowerSupplyPortController = TextEditingController(text: _config.networkPowerSupplyPort.toString());
+    _jigSerialPortController = TextEditingController(text: _config.jigSerialPort);
   }
 
   @override
@@ -90,6 +92,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _bydMesStationController.dispose();
     _networkPowerSupplyIpController.dispose();
     _networkPowerSupplyPortController.dispose();
+    _jigSerialPortController.dispose();
     super.dispose();
   }
 
@@ -116,6 +119,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setBydMesStation(_bydMesStationController.text);
       await _config.setNetworkPowerSupplyIp(_networkPowerSupplyIpController.text);
       await _config.setNetworkPowerSupplyPort(int.parse(_networkPowerSupplyPortController.text));
+      await _config.setJigSerialPort(_jigSerialPortController.text.trim());
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -403,6 +407,16 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
                 return null;
               },
               helperText: 'SCPI标准端口为5025',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _jigSerialPortController,
+              label: '治具串口（工位4）',
+              hint: '例如: /dev/ttyUSB0 或 COM3',
+              suffix: '',
+              icon: Icons.usb,
+              inputType: TextInputType.text,
+              helperText: '超声后射频图像测试工位治具串口名称',
             ),
             const SizedBox(height: 24),
 

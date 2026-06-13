@@ -17,6 +17,8 @@ import '../config/test_config.dart';
 import '../models/touch_test_step.dart';
 import '../services/gtp_protocol.dart';
 import '../services/network_scpi_power_supply_service.dart';
+import '../services/jig_serial_service.dart';
+import '../services/jig_commands.dart';
 import 'sn_input_dialog.dart';
 import 'bluetooth_test_options_dialog.dart';
 
@@ -67,6 +69,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   BluetoothTestMethod _selectedMethod4 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService4 = BydMesService();
   bool _cancelRestartCommand4 = false; // 取消重启命令标志
+  final JigSerialService _jigSerialService4 = JigSerialService();
+  bool _jigFixtureClosed4 = false;
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -113,6 +117,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   @override
   void dispose() {
     _tabController.dispose();
+    _jigSerialService4.dispose();
     super.dispose();
   }
 
@@ -3497,6 +3502,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     String? failItem;
     String? failValue;
 
+    if (!await _connectJigSerial4(logState)) {
+      return;
+    }
+
+    _jigFixtureClosed4 = false;
+
+    try {
     for (int i = 0; i < _stepResults4.length; i++) {
       if (!_isAutoTesting4) break;
 
@@ -3539,6 +3551,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               logState.info('   ⏭️ MAC直连模式，跳过 MES Start');
               success = true;
               message = 'MAC直连模式，跳过 MES';
+            }
+            if (success) {
+              logState.info('🔧 执行治具 CLOSE 指令...');
+              final closeOk = await _sendJigCommand4(JigCommands.close, logState, description: '治具关闭');
+              if (!closeOk) {
+                success = false;
+                message = '治具 CLOSE 指令失败';
+              } else {
+                _jigFixtureClosed4 = true;
+              }
             }
             break;
           case 2:
@@ -3644,6 +3666,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
 
     setState(() => _isAutoTesting4 = false);
+    } finally {
+      await _releaseJigFixture4(logState);
+    }
 
     final passedCount = _stepResults4.where((s) => s.status == TestStepStatus.passed).length;
     final totalCount = _stepResults4.length;
@@ -4087,6 +4112,91 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
+  // ========== 工位4: 治具串口 ==========
+
+  Future<bool> _connectJigSerial4(LogState logState) async {
+    await _config.init();
+    final portName = _config.jigSerialPort.trim();
+
+    if (portName.isEmpty) {
+      logState.error('❌ 未配置治具串口，请在「产测通用配置」中设置');
+      if (!mounted) return false;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('治具串口未配置'),
+          content: const Text(
+            '未配置治具串口。\n\n'
+            '请在「产测通用配置」中设置工位4治具串口名称（如 /dev/ttyUSB0）。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
+    logState.info('📡 正在连接治具串口: $portName');
+    final connected = await _jigSerialService4.connect(portName);
+    if (connected) {
+      logState.success('✅ 治具串口连接成功');
+      return true;
+    }
+
+    logState.error('❌ 治具串口连接失败: $portName');
+    if (!mounted) return false;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('治具串口连接失败'),
+        content: Text(
+          '无法连接治具串口: $portName\n\n'
+          '请检查串口名称是否正确、治具是否已上电。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
+  Future<bool> _sendJigCommand4(
+    String command,
+    LogState logState, {
+    String? description,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final label = description ?? command;
+    logState.info('📤 治具指令: $label ($command)');
+    final ok = await _jigSerialService4.sendCommand(command, timeout: timeout);
+    if (ok) {
+      logState.success('✅ 治具指令成功: $label');
+    } else {
+      logState.error('❌ 治具指令失败: $label');
+    }
+    return ok;
+  }
+
+  Future<void> _releaseJigFixture4(LogState logState) async {
+    if (_jigFixtureClosed4 && _jigSerialService4.isConnected) {
+      logState.info('🔧 执行治具 OPEN 指令...');
+      await _sendJigCommand4(JigCommands.open, logState, description: '治具打开');
+      _jigFixtureClosed4 = false;
+    }
+    if (_jigSerialService4.isConnected) {
+      await _jigSerialService4.disconnect();
+      logState.info('ℹ️  治具串口已断开');
+    }
+  }
+
   // ========== 工位4: 测试步骤实现 ==========
 
   Future<bool> _testBluetoothConnection4(TestState state, LogState logState) async {
@@ -4426,34 +4536,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testLightSensorBrightDark4(TestState state, LogState logState) async {
     try {
       logState.info('💡 光敏传感器测试（亮/暗）');
-      
-      if (!mounted) return false;
-      final brightConfirm = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.wb_sunny, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('光敏测试 - 亮环境'),
-            ],
-          ),
-          content: const Text('请将设备放置在光源箱亮环境中，然后点击确定开始测试'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('确定'),
-            ),
-          ],
-        ),
-      );
 
-      if (brightConfirm != true) return false;
+      logState.info('   亮环境: 发送 LIGHT_SOURCE_CH1_ON');
+      if (!await _sendJigCommand4(JigCommands.lightSourceCh1On, logState, description: '光源通道1开')) {
+        return false;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
 
       final brightSuccess = await _testLightSensor(state, logState);
       if (!brightSuccess) {
@@ -4461,35 +4549,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
-      await Future.delayed(const Duration(seconds: 1));
-
-      if (!mounted) return false;
-      final darkConfirm = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.nightlight, color: Colors.indigo),
-              SizedBox(width: 8),
-              Text('光敏测试 - 暗环境'),
-            ],
-          ),
-          content: const Text('请将设备放置在光源箱暗环境中，然后点击确定开始测试'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('确定'),
-            ),
-          ],
-        ),
-      );
-
-      if (darkConfirm != true) return false;
+      logState.info('   暗环境: 发送 LIGHT_SOURCE_CH1_OFF');
+      if (!await _sendJigCommand4(JigCommands.lightSourceCh1Off, logState, description: '光源通道1关')) {
+        return false;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
 
       final darkSuccess = await _testLightSensor(state, logState);
       if (!darkSuccess) {
@@ -4558,6 +4622,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testISO12233MTF4(TestState state, LogState logState) async {
     try {
       logState.info('📊 ISO12233图卡MTF测试');
+
+      if (!await _sendJigCommand4(
+        JigCommands.onlyResolutionCardDown,
+        logState,
+        description: '分辨率图卡下降',
+        timeout: const Duration(seconds: 30),
+      )) {
+        return false;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+
       logState.info('   提示：此测试需要图像算法服务支持');
       
       await Future.delayed(const Duration(seconds: 1));
@@ -4572,6 +4647,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testColorChart4(TestState state, LogState logState) async {
     try {
       logState.info('🎨 24色色卡色彩误差测试');
+
+      if (!await _sendJigCommand4(
+        JigCommands.onlyColorCardDown,
+        logState,
+        description: '色卡下降',
+        timeout: const Duration(seconds: 30),
+      )) {
+        return false;
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+
       logState.info('   提示：此测试需要图像算法服务支持');
       
       await Future.delayed(const Duration(seconds: 1));

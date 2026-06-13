@@ -37,6 +37,7 @@ class ProductionConfig {
   static const String _keyIperfSpeedThresholdMbps = 'iperf_speed_threshold_mbps';
   static const String _keyNetworkPowerSupplyIp = 'network_power_supply_ip';
   static const String _keyNetworkPowerSupplyPort = 'network_power_supply_port';
+  static const String _keyJigSerialPort = 'jig_serial_port';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -64,6 +65,7 @@ class ProductionConfig {
   static const double defaultIperfSpeedThresholdMbps = 10.0;  // iperf 速率阈值 (Mbps)
   static const String defaultNetworkPowerSupplyIp = '192.168.1.13';  // 网络程控电源 IP
   static const int defaultNetworkPowerSupplyPort = 5025;  // 网络程控电源端口 (SCPI标准端口)
+  static const String defaultJigSerialPort = '';  // 治具串口（工位4），空则未配置
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -255,6 +257,12 @@ class ProductionConfig {
     await _prefs?.setInt(_keyNetworkPowerSupplyPort, value);
   }
 
+  // ========== 治具串口（工位4） ==========
+  String get jigSerialPort => _prefs?.getString(_keyJigSerialPort) ?? defaultJigSerialPort;
+  Future<void> setJigSerialPort(String value) async {
+    await _prefs?.setString(_keyJigSerialPort, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -281,6 +289,7 @@ class ProductionConfig {
     await setIperfSpeedThresholdMbps(defaultIperfSpeedThresholdMbps);
     await setNetworkPowerSupplyIp(defaultNetworkPowerSupplyIp);
     await setNetworkPowerSupplyPort(defaultNetworkPowerSupplyPort);
+    await setJigSerialPort(defaultJigSerialPort);
   }
 
   /// 获取所有配置的摘要
@@ -309,6 +318,7 @@ class ProductionConfig {
       'iperf 速率阈值': '≥${iperfSpeedThresholdMbps}Mbps',
       '网络程控电源IP': networkPowerSupplyIp,
       '网络程控电源端口': networkPowerSupplyPort,
+      '治具串口(工位4)': jigSerialPort.isEmpty ? '(未配置)' : jigSerialPort,
     };
   }
 }
