@@ -521,9 +521,9 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
 
   Widget _buildStepIndicator(OTAState otaState) {
     final steps = [
+      {'step': OTAStep.startTest, 'label': '产测开始'},
       {'step': OTAStep.connectWiFi, 'label': '连接WiFi'},
       {'step': OTAStep.uploadFile, 'label': '上传文件'},
-      {'step': OTAStep.startTest, 'label': '产测开始'},
       {'step': OTAStep.sendOTARequest, 'label': 'OTA请求'},
       {'step': OTAStep.upgrading, 'label': '升级中'},
     ];
@@ -633,12 +633,12 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
         return '等待开始';
       case OTAStep.selectFile:
         return '选择文件';
+      case OTAStep.startTest:
+        return '产测开始';
       case OTAStep.connectWiFi:
         return '连接WiFi';
       case OTAStep.uploadFile:
         return '上传文件';
-      case OTAStep.startTest:
-        return '产测开始';
       case OTAStep.sendOTARequest:
         return '发送OTA请求';
       case OTAStep.upgrading:

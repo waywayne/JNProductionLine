@@ -12,9 +12,9 @@ import 'log_state.dart';
 enum OTAStep {
   idle,           // 空闲
   selectFile,     // 选择文件
+  startTest,      // 发送产测开始指令
   connectWiFi,    // 连接WiFi
   uploadFile,     // FTP上传文件
-  startTest,      // 发送产测开始指令
   sendOTARequest, // 发送OTA请求
   upgrading,      // 升级中（监听状态）
   success,        // 升级成功
@@ -136,7 +136,15 @@ class OTAState extends ChangeNotifier {
     notifyListeners();
     
     try {
-      // 步骤1: 连接WiFi获取IP
+      // 步骤1: 发送产测开始指令 0x00
+      _updateStep(OTAStep.startTest, '发送产测开始指令...');
+      final startSuccess = await _sendStartTestCommand();
+      if (!startSuccess) {
+        _fail('产测开始指令发送失败');
+        return;
+      }
+
+      // 步骤2: 连接WiFi获取IP
       _updateStep(OTAStep.connectWiFi, '正在连接WiFi...');
       final wifiSuccess = await _connectWiFiAndGetIP();
       if (!wifiSuccess) {
@@ -144,19 +152,11 @@ class OTAState extends ChangeNotifier {
         return;
       }
       
-      // 步骤2: FTP上传文件
+      // 步骤3: FTP上传文件
       _updateStep(OTAStep.uploadFile, '正在上传OTA文件到设备...');
       final uploadSuccess = await _uploadFileViaFTP();
       if (!uploadSuccess) {
         _fail('FTP文件上传失败');
-        return;
-      }
-      
-      // 步骤3: 发送产测开始指令 0x00
-      _updateStep(OTAStep.startTest, '发送产测开始指令...');
-      final startSuccess = await _sendStartTestCommand();
-      if (!startSuccess) {
-        _fail('产测开始指令发送失败');
         return;
       }
       
@@ -208,7 +208,7 @@ class OTAState extends ChangeNotifier {
     notifyListeners();
   }
   
-  /// 步骤1: 连接WiFi获取设备IP
+  /// 步骤2: 连接WiFi获取设备IP
   /// 使用 0x04 + 0x05 方式直接连接热点并获取IP
   Future<bool> _connectWiFiAndGetIP() async {
     final config = ProductionConfig();
@@ -284,7 +284,7 @@ class OTAState extends ChangeNotifier {
     return false;
   }
   
-  /// 步骤2: FTP上传文件到设备
+  /// 步骤3: FTP上传文件到设备
   Future<bool> _uploadFileViaFTP() async {
     if (_deviceIP == null || _selectedFilePath == null || _selectedFileName == null) {
       return false;
@@ -378,7 +378,7 @@ class OTAState extends ChangeNotifier {
     return false;
   }
   
-  /// 步骤3: 发送产测开始指令
+  /// 步骤1: 发送产测开始指令
   Future<bool> _sendStartTestCommand() async {
     _logState?.info('📤 发送产测开始指令 (0x00)', type: LogType.debug);
     
