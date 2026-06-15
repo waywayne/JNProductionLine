@@ -55,7 +55,22 @@ fi
 # 安装系统依赖
 echo "📥 安装系统依赖..."
 
-# 启用 universe 仓库（某些 GPIB 包可能需要）
+# 移除已失效的 linux-gpib PPA（会导致 apt update 403 Forbidden）
+echo "   检查并清理失效的软件源..."
+if command -v add-apt-repository >/dev/null 2>&1; then
+    add-apt-repository --remove -y ppa:dkozel/linux-gpib 2>/dev/null || true
+fi
+for ppa_file in /etc/apt/sources.list.d/*dkozel*linux-gpib* /etc/apt/sources.list.d/*linux-gpib*.list; do
+    if [ -f "$ppa_file" ]; then
+        echo "   移除失效源: $ppa_file"
+        rm -f "$ppa_file"
+    fi
+done
+if grep -rq 'dkozel/linux-gpib' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+    echo "   ⚠️  检测到残留的 linux-gpib 源配置，请手动检查 /etc/apt/sources.list.d/"
+fi
+
+# 启用 universe 仓库（lxi-tools 等工具可能需要）
 echo "   启用 universe 仓库..."
 apt-add-repository -y universe 2>/dev/null || true
 
@@ -78,12 +93,12 @@ apt-get install -y \
     python3-pip \
     python3-bluez
 
-# 尝试安装 GPIB 驱动（如果可用）
-echo "   尝试安装 GPIB 驱动..."
-if apt-cache search linux-gpib 2>/dev/null | grep -q "linux-gpib"; then
-    apt-get install -y linux-gpib || echo "   ⚠️ linux-gpib 安装失败，将继续使用纯 Python 方案"
+# 安装 lxi-tools（网络 SCPI 程控电源，替代 GPIB）
+echo "   安装 lxi-tools (网络程控电源)..."
+if apt-get install -y lxi-tools; then
+    echo "   ✅ lxi-tools 安装成功"
 else
-    echo "   ⚠️ linux-gpib 包不可用，将使用 gpib-ctypes 纯 Python 方案"
+    echo "   ⚠️  lxi-tools 安装失败，网络程控电源功能需手动安装: sudo apt-get install lxi-tools"
 fi
 
 echo "   ✅ 已安装系统依赖和中文字体"
@@ -114,14 +129,14 @@ else
     echo "   ⚠️  警告: PyBluez 安装可能失败，RFCOMM Socket 功能可能不可用"
 fi
 
-# 安装 Python GPIB 库
-echo "🔌 安装 Python GPIB 库..."
-if ! python3 -c "import gpib" 2>/dev/null; then
-    echo "   正在安装 gpib-ctypes..."
-    pip3 install gpib-ctypes --break-system-packages 2>/dev/null || pip3 install gpib-ctypes
-    echo "   ✅ 已安装 gpib-ctypes"
+# 验证 lxi-tools（网络 SCPI 程控电源）
+echo "🔌 验证网络程控电源工具 (lxi-tools)..."
+if command -v lxi >/dev/null 2>&1; then
+    LXI_VERSION=$(lxi --version 2>/dev/null | head -1 || echo "已安装")
+    echo "   ✅ lxi-tools 验证成功 ($LXI_VERSION)"
 else
-    echo "   ✅ GPIB 库已安装"
+    echo "   ⚠️  警告: lxi-tools 未安装，网络程控电源功能可能不可用"
+    echo "   可手动安装: sudo apt-get install lxi-tools"
 fi
 
 # 创建安装目录
@@ -261,6 +276,7 @@ echo ""
 echo "   2. 已安装以下依赖："
 echo "      ✅ Python3 和 PyBluez (RFCOMM Socket 支持)"
 echo "      ✅ BlueZ 蓝牙工具"
+echo "      ✅ lxi-tools (网络 SCPI 程控电源)"
 echo "      ✅ 中文字体支持"
 echo ""
 echo "   3. 如果中文显示异常："
