@@ -18,8 +18,28 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
   bool _isConnecting = false;
   String? _connectedDeviceLabel;
 
-  Future<void> _connectBluetooth(TestState testState) async {
+  Future<void> _resetOtaSession(TestState testState, OTAState otaState) async {
+    otaState.reset();
+    if (mounted) {
+      setState(() => _connectedDeviceLabel = null);
+    }
+    if (testState.isLinuxBluetoothConnected) {
+      await testState.disconnectLinuxBluetooth();
+    }
+  }
+
+  Future<void> _retryWithReconnect(TestState testState, OTAState otaState) async {
+    await _resetOtaSession(testState, otaState);
+    if (!mounted) return;
+    await _connectBluetooth(testState);
+  }
+
+  Future<void> _connectBluetooth(TestState testState, {bool disconnectFirst = false}) async {
     if (_isConnecting || !mounted) return;
+
+    if (disconnectFirst && testState.isLinuxBluetoothConnected) {
+      await testState.disconnectLinuxBluetooth();
+    }
 
     final logState = context.read<LogState>();
 
@@ -90,6 +110,10 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
     return Consumer2<OTAState, TestState>(
       builder: (context, otaState, testState, _) {
         final isConnected = otaState.isConnected;
+        final isTerminalStep = otaState.currentStep == OTAStep.success ||
+            otaState.currentStep == OTAStep.failed;
+        final showConnectPanel = !otaState.isUpgrading &&
+            (!isConnected || isTerminalStep);
 
         return Container(
           decoration: BoxDecoration(
@@ -167,10 +191,10 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
 
                 const SizedBox(height: 16),
 
-                if (!isConnected && !otaState.isUpgrading)
-                  _buildBluetoothConnectPanel(testState),
+                if (showConnectPanel)
+                  _buildBluetoothConnectPanel(testState, otaState, isTerminalStep: isTerminalStep),
 
-                if (!isConnected && !otaState.isUpgrading)
+                if (showConnectPanel)
                   const SizedBox(height: 16),
 
                 _buildFileSelector(context, otaState),
@@ -181,8 +205,10 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
 
                 const SizedBox(height: 16),
 
-                if (otaState.isUpgrading || otaState.currentStep == OTAStep.success || otaState.currentStep == OTAStep.failed)
-                  Expanded(child: _buildProgressPanel(context, otaState)),
+                if (otaState.isUpgrading)
+                  Expanded(child: _buildProgressPanel(context, otaState, testState))
+                else if (isTerminalStep)
+                  _buildTerminalPanel(context, otaState, testState),
               ],
             ),
           ),
@@ -191,42 +217,63 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
     );
   }
 
-  Widget _buildBluetoothConnectPanel(TestState testState) {
+  Widget _buildBluetoothConnectPanel(
+    TestState testState,
+    OTAState otaState, {
+    bool isTerminalStep = false,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.blue[50],
+        color: isTerminalStep ? Colors.orange[50] : Colors.blue[50],
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.blue[200]!),
+        border: Border.all(color: isTerminalStep ? Colors.orange[200]! : Colors.blue[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.bluetooth_searching, color: Colors.blue[700], size: 22),
+              Icon(
+                Icons.bluetooth_searching,
+                color: isTerminalStep ? Colors.orange[700] : Colors.blue[700],
+                size: 22,
+              ),
               const SizedBox(width: 8),
               Text(
-                '设备未连接',
+                isTerminalStep ? '重新连接设备' : '设备未连接',
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: Colors.blue[900],
+                  color: isTerminalStep ? Colors.orange[900] : Colors.blue[900],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Text(
-            '请先扫描 SN 码或输入蓝牙 MAC 地址连接设备，再进行 OTA 升级。',
-            style: TextStyle(fontSize: 13, color: Colors.blue[800]),
+            isTerminalStep
+                ? '升级已结束或失败时，请重新扫码 SN 或输入蓝牙 MAC 连接设备后再试。'
+                : '请先扫描 SN 码或输入蓝牙 MAC 地址连接设备，再进行 OTA 升级。',
+            style: TextStyle(
+              fontSize: 13,
+              color: isTerminalStep ? Colors.orange[800] : Colors.blue[800],
+            ),
           ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             height: 44,
             child: ElevatedButton.icon(
-              onPressed: _isConnecting ? null : () => _connectBluetooth(testState),
+              onPressed: _isConnecting
+                  ? null
+                  : () {
+                      if (isTerminalStep) {
+                        _retryWithReconnect(testState, otaState);
+                      } else {
+                        _connectBluetooth(testState);
+                      }
+                    },
               icon: _isConnecting
                   ? const SizedBox(
                       width: 18,
@@ -235,11 +282,11 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
                     )
                   : const Icon(Icons.bluetooth_connected, size: 20),
               label: Text(
-                _isConnecting ? '正在连接...' : '连接蓝牙',
+                _isConnecting ? '正在连接...' : (isTerminalStep ? '重新扫码连接' : '连接蓝牙'),
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue[700],
+                backgroundColor: isTerminalStep ? Colors.orange[700] : Colors.blue[700],
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -357,7 +404,10 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
       );
     }
 
-    final canStart = otaState.selectedFilePath != null && otaState.isConnected;
+    final canStart = otaState.selectedFilePath != null &&
+        otaState.isConnected &&
+        otaState.currentStep != OTAStep.failed &&
+        otaState.currentStep != OTAStep.success;
 
     return SizedBox(
       height: 50,
@@ -366,7 +416,9 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
             ? () => otaState.startOTAUpgrade()
             : (!otaState.isConnected && !_isConnecting)
                 ? () => _connectBluetooth(testState)
-                : null,
+                : (otaState.currentStep == OTAStep.failed && !_isConnecting)
+                    ? () => _retryWithReconnect(testState, otaState)
+                    : null,
         icon: Icon(
           canStart
               ? Icons.rocket_launch
@@ -376,11 +428,13 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
           size: 24,
         ),
         label: Text(
-          !otaState.isConnected
-              ? '请先连接设备'
-              : otaState.selectedFilePath == null
-                  ? '请先选择OTA文件'
-                  : '开始OTA升级',
+          canStart
+              ? '开始OTA升级'
+              : otaState.currentStep == OTAStep.failed
+                  ? '重新扫码连接'
+                  : !otaState.isConnected
+                      ? '请先连接设备'
+                      : '请先选择OTA文件',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         style: ElevatedButton.styleFrom(
@@ -396,7 +450,69 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
     );
   }
 
-  Widget _buildProgressPanel(BuildContext context, OTAState otaState) {
+  Widget _buildTerminalPanel(BuildContext context, OTAState otaState, TestState testState) {
+    final isSuccess = otaState.currentStep == OTAStep.success;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            isSuccess ? Icons.check_circle : Icons.error,
+            color: isSuccess ? Colors.green[600] : Colors.red[600],
+            size: 56,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            isSuccess ? 'OTA升级成功！' : 'OTA升级失败',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isSuccess ? Colors.green[700] : Colors.red[700],
+            ),
+          ),
+          if (!isSuccess && otaState.errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              otaState.errorMessage!,
+              style: TextStyle(fontSize: 13, color: Colors.red[700]),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              if (!isSuccess)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isConnecting
+                        ? null
+                        : () => _retryWithReconnect(testState, otaState),
+                    icon: const Icon(Icons.bluetooth_searching, size: 18),
+                    label: const Text('重新扫码连接'),
+                  ),
+                ),
+              if (!isSuccess) const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => _resetOtaSession(testState, otaState),
+                  child: Text(isSuccess ? '完成' : '返回'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressPanel(BuildContext context, OTAState otaState, TestState testState) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -442,74 +558,22 @@ class _OTAUpgradeWidgetState extends State<OTAUpgradeWidget> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (otaState.currentStep == OTAStep.success) ...[
-                    Icon(Icons.check_circle, color: Colors.green[600], size: 80),
-                    const SizedBox(height: 16),
-                    Text(
-                      'OTA升级成功！',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green[700],
-                      ),
+                  const SizedBox(
+                    width: 60,
+                    height: 60,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 4,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
                     ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => otaState.reset(),
-                      child: const Text('完成'),
-                    ),
-                  ] else if (otaState.currentStep == OTAStep.failed) ...[
-                    Icon(Icons.error, color: Colors.red[600], size: 80),
-                    const SizedBox(height: 16),
-                    Text(
-                      'OTA升级失败',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red[700],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (otaState.errorMessage != null)
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red[200]!),
-                        ),
-                        child: Text(
-                          otaState.errorMessage!,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.red[700],
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    const SizedBox(height: 16),
-                    ElevatedButton(
-                      onPressed: () => otaState.reset(),
-                      child: const Text('重试'),
-                    ),
-                  ] else ...[
-                    const SizedBox(
-                      width: 60,
-                      height: 60,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 4,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      otaState.statusMessage,
-                      style: const TextStyle(fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 16),
-                    _buildStepIndicator(otaState),
-                  ],
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    otaState.statusMessage,
+                    style: const TextStyle(fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  _buildStepIndicator(otaState),
                 ],
               ),
             ),
