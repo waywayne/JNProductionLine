@@ -3027,6 +3027,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
+      final imageFile = File(imagePath);
+      if (!await imageFile.exists()) {
+        logState.error('❌ 图片文件不存在: $imagePath');
+        return false;
+      }
+
+      // Image.file 会按路径缓存解码结果，同路径覆盖下载后仍可能显示旧图
+      PaintingBinding.instance.imageCache.evict(FileImage(imageFile));
+      final imageBytes = await imageFile.readAsBytes();
+      if (imageBytes.isEmpty) {
+        logState.error('❌ 图片文件为空');
+        return false;
+      }
+
       if (!mounted) return false;
 
       final imageReviewResult = await showDialog<bool>(
@@ -3041,9 +3055,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               const SizedBox(height: 16),
               Container(
                 constraints: const BoxConstraints(maxHeight: 400, maxWidth: 600),
-                child: Image.file(
-                  File(imagePath),
+                child: Image.memory(
+                  imageBytes,
                   fit: BoxFit.contain,
+                  gaplessPlayback: true,
                   errorBuilder: (context, error, stackTrace) {
                     return const Text('❌ 无法加载图片');
                   },

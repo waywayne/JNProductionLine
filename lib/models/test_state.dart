@@ -10423,6 +10423,8 @@ class TestState extends ChangeNotifier {
             if (fileSize > 0) {
               _logState?.success('✅ 图片下载成功 (大小: ${fileSize} bytes)', type: LogType.debug);
               _sensorImagePath = savePath;
+              // 同路径重复下载时清除 Flutter 解码缓存，避免 Image.file 显示旧图
+              PaintingBinding.instance.imageCache.evict(FileImage(file));
               notifyListeners();
               return true;
             }
