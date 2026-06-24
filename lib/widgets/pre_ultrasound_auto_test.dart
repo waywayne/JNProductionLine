@@ -71,6 +71,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   bool _cancelRestartCommand4 = false; // 取消重启命令标志
   final JigSerialService _jigSerialService4 = JigSerialService();
   bool _jigFixtureClosed4 = false;
+  bool _enableJigCommands4 = true; // 治具指令开关，默认开启
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -3373,17 +3374,24 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     _stepResults4.addAll([
       TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: 'WiFi连接并获取IP', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: 'WiFi拉距测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: '光敏传感器测试(亮/暗)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: '纯色画面测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: 'IMU校准', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: 'IMU值测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '24色色卡测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '治具关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: 'WiFi连接并获取IP', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: 'WiFi拉距测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '治具光源通道1开', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: '光敏传感器测试(亮)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: '治具光源通道1关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: '光敏传感器测试(暗)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: '纯色画面测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: 'IMU校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: 'IMU值测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '治具分辨率图卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: '治具色卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 18, name: '24色色卡测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 19, name: '治具打开', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 20, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -3511,14 +3519,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   SN: ${_scannedSN4 ?? "MAC直连"}');
     logState.info('   蓝牙: ${_productInfo4!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod4)}');
+    logState.info('   治具指令: ${_enableJigCommands4 ? "开启" : "关闭（跳过所有治具步骤）"}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
     String? failItem;
     String? failValue;
 
-    if (!await _connectJigSerial4(logState)) {
-      return;
+    if (_enableJigCommands4) {
+      if (!await _connectJigSerial4(logState)) {
+        setState(() => _isAutoTesting4 = false);
+        return;
+      }
+    } else {
+      logState.info('⏭️ 治具指令已关闭，跳过治具串口连接');
     }
 
     _jigFixtureClosed4 = false;
@@ -3528,7 +3542,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       if (!_isAutoTesting4) break;
 
       setState(() {
-        _currentStep4 = i;
+        _currentStep4 = i + 1;
         _stepResults4[i].status = TestStepStatus.running;
       });
 
@@ -3567,71 +3581,146 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               success = true;
               message = 'MAC直连模式，跳过 MES';
             }
-            if (success) {
-              logState.info('🔧 执行治具 CLOSE 指令...');
-              final closeOk = await _sendJigCommand4(JigCommands.close, logState, description: '治具关闭');
-              if (!closeOk) {
-                success = false;
-                message = '治具 CLOSE 指令失败';
-              } else {
-                _jigFixtureClosed4 = true;
-              }
-            }
             break;
           case 2:
-            logState.info('步骤3: 产测开始');
+            logState.info('步骤3: 治具关闭');
+            success = await _runJigStep4(
+              JigCommands.close,
+              logState,
+              description: '治具关闭',
+            );
+            message = success
+                ? (_enableJigCommands4 ? '治具关闭成功' : '治具指令已关闭，已跳过')
+                : '治具 CLOSE 指令失败';
+            break;
+          case 3:
+            logState.info('步骤4: 产测开始');
             success = await _testProductionStart(state, logState);
             message = success ? '产测开始命令发送成功' : '产测开始命令失败';
             break;
-          case 3:
-            logState.info('步骤4: WIFI连接热点并获取IP');
+          case 4:
+            logState.info('步骤5: WIFI连接热点并获取IP');
             final ip = await _testWiFiConnection4(state, logState);
             success = ip != null && ip.isNotEmpty;
             _deviceIP4 = ip;
             message = success ? 'WiFi连接成功，IP: $ip' : 'WiFi连接失败';
             break;
-          case 4:
-            logState.info('步骤5: 拉距测试WIFI');
+          case 5:
+            logState.info('步骤6: 拉距测试WIFI');
             success = await _testWiFiRange4(state, logState);
             message = success ? 'WiFi拉距测试通过' : 'WiFi拉距测试失败';
             break;
-          case 5:
-            logState.info('步骤6: 光源箱不同照度光敏值(亮/暗)');
-            success = await _testLightSensorBrightDark4(state, logState);
-            message = success ? '光敏值测试通过' : '光敏值测试失败';
-            break;
           case 6:
-            logState.info('步骤7: 摄像头位置与IMU位置标定');
+            logState.info('步骤7: 治具光源通道1开');
+            success = await _runJigStep4(
+              JigCommands.lightSourceCh1On,
+              logState,
+              description: '光源通道1开',
+            );
+            message = success
+                ? (_enableJigCommands4 ? '光源通道1开成功' : '治具指令已关闭，已跳过')
+                : '光源通道1开失败';
+            if (success && _enableJigCommands4) {
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+            break;
+          case 7:
+            logState.info('步骤8: 光敏传感器测试(亮)');
+            success = await _testLightSensorBright4(state, logState);
+            message = success ? '亮环境光敏值测试通过' : '亮环境光敏值测试失败';
+            break;
+          case 8:
+            logState.info('步骤9: 治具光源通道1关');
+            success = await _runJigStep4(
+              JigCommands.lightSourceCh1Off,
+              logState,
+              description: '光源通道1关',
+            );
+            message = success
+                ? (_enableJigCommands4 ? '光源通道1关成功' : '治具指令已关闭，已跳过')
+                : '光源通道1关失败';
+            if (success && _enableJigCommands4) {
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+            break;
+          case 9:
+            logState.info('步骤10: 光敏传感器测试(暗)');
+            success = await _testLightSensorDark4(state, logState);
+            message = success ? '暗环境光敏值测试通过' : '暗环境光敏值测试失败';
+            break;
+          case 10:
+            logState.info('步骤11: 摄像头位置与IMU位置标定');
             success = await _testCameraIMUCalibration4(state, logState);
             message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
             break;
-          case 7:
-            logState.info('步骤8: 纯色画面测试');
+          case 11:
+            logState.info('步骤12: 纯色画面测试');
             success = await _testPureColorStream4(state, logState);
             message = success ? '纯色画面测试通过' : '纯色画面测试失败';
             break;
-          case 8:
-            logState.info('步骤9: IMU校准(棋盘格)');
+          case 12:
+            logState.info('步骤13: IMU校准(棋盘格)');
             success = await _testIMUCalibration4(state, logState);
             message = success ? 'IMU校准完成' : 'IMU校准失败';
             break;
-          case 9:
-            logState.info('步骤10: IMU值测试');
+          case 13:
+            logState.info('步骤14: IMU值测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
             break;
-          case 10:
-            logState.info('步骤11: ISO12233图卡MTF测试');
+          case 14:
+            logState.info('步骤15: 治具分辨率图卡下降');
+            success = await _runJigStep4(
+              JigCommands.onlyResolutionCardDown,
+              logState,
+              description: '分辨率图卡下降',
+              timeout: const Duration(seconds: 30),
+            );
+            message = success
+                ? (_enableJigCommands4 ? '分辨率图卡下降成功' : '治具指令已关闭，已跳过')
+                : '分辨率图卡下降失败';
+            if (success && _enableJigCommands4) {
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+            break;
+          case 15:
+            logState.info('步骤16: ISO12233图卡MTF测试');
             success = await _testISO12233MTF4(state, logState);
             message = success ? 'MTF测试通过' : 'MTF测试失败';
             break;
-          case 11:
-            logState.info('步骤12: 24色色卡色彩误差测试');
+          case 16:
+            logState.info('步骤17: 治具色卡下降');
+            success = await _runJigStep4(
+              JigCommands.onlyColorCardDown,
+              logState,
+              description: '色卡下降',
+              timeout: const Duration(seconds: 30),
+            );
+            message = success
+                ? (_enableJigCommands4 ? '色卡下降成功' : '治具指令已关闭，已跳过')
+                : '色卡下降失败';
+            if (success && _enableJigCommands4) {
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+            break;
+          case 17:
+            logState.info('步骤18: 24色色卡色彩误差测试');
             success = await _testColorChart4(state, logState);
             message = success ? '色彩误差测试通过' : '色彩误差测试失败';
             break;
-          case 12:
-            logState.info('步骤13: 产测结束');
+          case 18:
+            logState.info('步骤19: 治具打开');
+            success = await _runJigStep4(
+              JigCommands.open,
+              logState,
+              description: '治具打开',
+            );
+            message = success
+                ? (_enableJigCommands4 ? '治具打开成功' : '治具指令已关闭，已跳过')
+                : '治具 OPEN 指令失败';
+            break;
+          case 19:
+            logState.info('步骤20: 产测结束');
             success = await _testProductionEnd4(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -4200,9 +4289,47 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return ok;
   }
 
+  /// 执行治具步骤；关闭治具开关时自动跳过
+  Future<bool> _runJigStep4(
+    String command,
+    LogState logState, {
+    String? description,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final label = description ?? command;
+    if (!_enableJigCommands4) {
+      logState.info('⏭️ 治具指令已关闭，跳过: $label');
+      return true;
+    }
+
+    final ok = await _sendJigCommand4(
+      command,
+      logState,
+      description: description,
+      timeout: timeout,
+    );
+    if (ok) {
+      if (command == JigCommands.close) {
+        _jigFixtureClosed4 = true;
+      } else if (command == JigCommands.open) {
+        _jigFixtureClosed4 = false;
+      }
+    }
+    return ok;
+  }
+
   Future<void> _releaseJigFixture4(LogState logState) async {
+    if (!_enableJigCommands4) {
+      if (_jigSerialService4.isConnected) {
+        await _jigSerialService4.disconnect();
+        logState.info('ℹ️  治具串口已断开');
+      }
+      return;
+    }
+
+    // 异常中断时可能未执行「治具打开」步骤，在此补偿释放
     if (_jigFixtureClosed4 && _jigSerialService4.isConnected) {
-      logState.info('🔧 执行治具 OPEN 指令...');
+      logState.info('🔧 补偿执行治具 OPEN 指令...');
       await _sendJigCommand4(JigCommands.open, logState, description: '治具打开');
       _jigFixtureClosed4 = false;
     }
@@ -4548,38 +4675,34 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
   }
 
-  Future<bool> _testLightSensorBrightDark4(TestState state, LogState logState) async {
+  Future<bool> _testLightSensorBright4(TestState state, LogState logState) async {
     try {
-      logState.info('💡 光敏传感器测试（亮/暗）');
-
-      logState.info('   亮环境: 发送 LIGHT_SOURCE_CH1_ON');
-      if (!await _sendJigCommand4(JigCommands.lightSourceCh1On, logState, description: '光源通道1开')) {
-        return false;
-      }
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      final brightSuccess = await _testLightSensor(state, logState);
-      if (!brightSuccess) {
+      logState.info('💡 光敏传感器测试（亮环境）');
+      final success = await _testLightSensor(state, logState);
+      if (!success) {
         logState.error('❌ 亮环境光敏值获取失败');
         return false;
       }
+      logState.success('✅ 亮环境光敏值测试通过');
+      return true;
+    } catch (e) {
+      logState.error('亮环境光敏传感器测试失败: $e');
+      return false;
+    }
+  }
 
-      logState.info('   暗环境: 发送 LIGHT_SOURCE_CH1_OFF');
-      if (!await _sendJigCommand4(JigCommands.lightSourceCh1Off, logState, description: '光源通道1关')) {
-        return false;
-      }
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      final darkSuccess = await _testLightSensor(state, logState);
-      if (!darkSuccess) {
+  Future<bool> _testLightSensorDark4(TestState state, LogState logState) async {
+    try {
+      logState.info('💡 光敏传感器测试（暗环境）');
+      final success = await _testLightSensor(state, logState);
+      if (!success) {
         logState.error('❌ 暗环境光敏值获取失败');
         return false;
       }
-
-      logState.success('✅ 光敏传感器测试完成（亮/暗）');
+      logState.success('✅ 暗环境光敏值测试通过');
       return true;
     } catch (e) {
-      logState.error('光敏传感器测试失败: $e');
+      logState.error('暗环境光敏传感器测试失败: $e');
       return false;
     }
   }
@@ -4637,17 +4760,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testISO12233MTF4(TestState state, LogState logState) async {
     try {
       logState.info('📊 ISO12233图卡MTF测试');
-
-      if (!await _sendJigCommand4(
-        JigCommands.onlyResolutionCardDown,
-        logState,
-        description: '分辨率图卡下降',
-        timeout: const Duration(seconds: 30),
-      )) {
-        return false;
-      }
-      await Future.delayed(const Duration(milliseconds: 500));
-
       logState.info('   提示：此测试需要图像算法服务支持');
       
       await Future.delayed(const Duration(seconds: 1));
@@ -4662,17 +4774,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testColorChart4(TestState state, LogState logState) async {
     try {
       logState.info('🎨 24色色卡色彩误差测试');
-
-      if (!await _sendJigCommand4(
-        JigCommands.onlyColorCardDown,
-        logState,
-        description: '色卡下降',
-        timeout: const Duration(seconds: 30),
-      )) {
-        return false;
-      }
-      await Future.delayed(const Duration(milliseconds: 500));
-
       logState.info('   提示：此测试需要图像算法服务支持');
       
       await Future.delayed(const Duration(seconds: 1));
@@ -5746,6 +5847,27 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
           Row(
             children: [
+              Icon(
+                Icons.precision_manufacturing,
+                color: _enableJigCommands4 ? Colors.blue : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '启用治具指令',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _enableJigCommands4 ? Colors.blue : Colors.grey,
+                ),
+              ),
+              Switch(
+                value: _enableJigCommands4,
+                onChanged: _isAutoTesting4
+                    ? null
+                    : (value) => setState(() => _enableJigCommands4 = value),
+                activeColor: Colors.blue,
+              ),
+              const Spacer(),
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: _isAutoTesting4 ? null : () => _startAutoTest4(state),
