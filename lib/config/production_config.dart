@@ -38,6 +38,8 @@ class ProductionConfig {
   static const String _keyNetworkPowerSupplyIp = 'network_power_supply_ip';
   static const String _keyNetworkPowerSupplyPort = 'network_power_supply_port';
   static const String _keyJigSerialPort = 'jig_serial_port';
+  static const String _keyResolutionChartThreshold = 'resolution_chart_threshold';
+  static const String _keyColorChartThreshold = 'color_chart_threshold';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -66,6 +68,8 @@ class ProductionConfig {
   static const String defaultNetworkPowerSupplyIp = '192.168.1.13';  // 网络程控电源 IP
   static const int defaultNetworkPowerSupplyPort = 5025;  // 网络程控电源端口 (SCPI标准端口)
   static const String defaultJigSerialPort = '';  // 治具串口（工位4），空则未配置
+  static const double defaultResolutionChartThreshold = 700.0;  // ISO12233 分辨率图卡阈值
+  static const double defaultColorChartThreshold = 11.0;  // 24色色卡阈值
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -263,6 +267,19 @@ class ProductionConfig {
     await _prefs?.setString(_keyJigSerialPort, value);
   }
 
+  // ========== 图像算法阈值（工位4） ==========
+  double get resolutionChartThreshold =>
+      _prefs?.getDouble(_keyResolutionChartThreshold) ?? defaultResolutionChartThreshold;
+  Future<void> setResolutionChartThreshold(double value) async {
+    await _prefs?.setDouble(_keyResolutionChartThreshold, value);
+  }
+
+  double get colorChartThreshold =>
+      _prefs?.getDouble(_keyColorChartThreshold) ?? defaultColorChartThreshold;
+  Future<void> setColorChartThreshold(double value) async {
+    await _prefs?.setDouble(_keyColorChartThreshold, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -290,6 +307,8 @@ class ProductionConfig {
     await setNetworkPowerSupplyIp(defaultNetworkPowerSupplyIp);
     await setNetworkPowerSupplyPort(defaultNetworkPowerSupplyPort);
     await setJigSerialPort(defaultJigSerialPort);
+    await setResolutionChartThreshold(defaultResolutionChartThreshold);
+    await setColorChartThreshold(defaultColorChartThreshold);
   }
 
   /// 获取所有配置的摘要
@@ -319,6 +338,8 @@ class ProductionConfig {
       '网络程控电源IP': networkPowerSupplyIp,
       '网络程控电源端口': networkPowerSupplyPort,
       '治具串口(工位4)': jigSerialPort.isEmpty ? '(未配置)' : jigSerialPort,
+      '分辨率图卡阈值': resolutionChartThreshold,
+      '色卡阈值': colorChartThreshold,
     };
   }
 }

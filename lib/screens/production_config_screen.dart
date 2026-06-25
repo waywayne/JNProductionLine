@@ -37,6 +37,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _networkPowerSupplyIpController;
   late TextEditingController _networkPowerSupplyPortController;
   late TextEditingController _jigSerialPortController;
+  late TextEditingController _resolutionChartThresholdController;
+  late TextEditingController _colorChartThresholdController;
 
   @override
   void initState() {
@@ -67,6 +69,10 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _networkPowerSupplyIpController = TextEditingController(text: _config.networkPowerSupplyIp);
     _networkPowerSupplyPortController = TextEditingController(text: _config.networkPowerSupplyPort.toString());
     _jigSerialPortController = TextEditingController(text: _config.jigSerialPort);
+    _resolutionChartThresholdController =
+        TextEditingController(text: _config.resolutionChartThreshold.toString());
+    _colorChartThresholdController =
+        TextEditingController(text: _config.colorChartThreshold.toString());
   }
 
   @override
@@ -93,6 +99,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _networkPowerSupplyIpController.dispose();
     _networkPowerSupplyPortController.dispose();
     _jigSerialPortController.dispose();
+    _resolutionChartThresholdController.dispose();
+    _colorChartThresholdController.dispose();
     super.dispose();
   }
 
@@ -120,6 +128,12 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       await _config.setNetworkPowerSupplyIp(_networkPowerSupplyIpController.text);
       await _config.setNetworkPowerSupplyPort(int.parse(_networkPowerSupplyPortController.text));
       await _config.setJigSerialPort(_jigSerialPortController.text.trim());
+      await _config.setResolutionChartThreshold(
+        double.parse(_resolutionChartThresholdController.text),
+      );
+      await _config.setColorChartThreshold(
+        double.parse(_colorChartThresholdController.text),
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -417,6 +431,44 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               icon: Icons.usb,
               inputType: TextInputType.text,
               helperText: '超声后射频图像测试工位治具串口名称',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _resolutionChartThresholdController,
+              label: '分辨率图卡阈值',
+              hint: '700.0',
+              suffix: '',
+              icon: Icons.high_quality,
+              inputType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入分辨率图卡阈值';
+                }
+                if (double.tryParse(value) == null) {
+                  return '请输入有效的数值';
+                }
+                return null;
+              },
+              helperText: 'ISO12233 MTF 测试 imagetest_resolution_chart 阈值，默认 700.0',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _colorChartThresholdController,
+              label: '色卡阈值',
+              hint: '11.0',
+              suffix: '',
+              icon: Icons.palette,
+              inputType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入色卡阈值';
+                }
+                if (double.tryParse(value) == null) {
+                  return '请输入有效的数值';
+                }
+                return null;
+              },
+              helperText: '24色色卡测试 imagetest_color_chart 阈值，默认 11.0',
             ),
             const SizedBox(height: 24),
 

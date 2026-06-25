@@ -19,6 +19,7 @@ import '../services/gtp_protocol.dart';
 import '../services/network_scpi_power_supply_service.dart';
 import '../services/jig_serial_service.dart';
 import '../services/jig_commands.dart';
+import '../services/image_test_service.dart';
 import 'sn_input_dialog.dart';
 import 'bluetooth_test_options_dialog.dart';
 
@@ -4757,14 +4758,146 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return result == true;
   }
 
+  /// 工位4: 直接拍照并通过 FTP 下载图片（无弹窗确认）
+  Future<String?> _captureAndDownloadImage4(TestState state, LogState logState) async {
+    logState.info('📸 发送拍照命令...');
+
+    final command = ProductionTestCommands.createSensorCommand(0x02);
+    final cmdHex = command.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+    logState.info('📤 发送: [$cmdHex] (${command.length} bytes)');
+
+    logState.info('⏳ 等待嵌入式推送拍照完成指令 (超时: 10s)...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 10),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null) {
+      logState.error('❌ 等待拍照响应超时');
+      return null;
+    }
+
+    if (response.containsKey('error')) {
+      logState.error('❌ 拍照命令失败: ${response['error']}');
+      return null;
+    }
+
+    if (response.containsKey('payload')) {
+      final payload = response['payload'];
+      if (payload is Uint8List && payload.isNotEmpty) {
+        final payloadHex = payload.map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0')).join(' ');
+        logState.info('📥 收到响应: [$payloadHex]');
+
+        if (payload[0] == ProductionTestCommands.cmdSensor) {
+          logState.info('✅ 收到 Sensor 响应，拍照完成');
+        } else {
+          logState.warning('⚠️ 响应 CMD 不匹配: 0x${payload[0].toRadixString(16).toUpperCase()}');
+        }
+      }
+    }
+
+    if (_deviceIP4 == null || _deviceIP4!.isEmpty) {
+      logState.error('❌ 无法下载图片：设备IP地址为空');
+      return null;
+    }
+
+    logState.info('📥 开始FTP下载图片...');
+    final downloadSuccess = await state.downloadImageFromDevice(_deviceIP4!);
+    if (!downloadSuccess) {
+      logState.error('❌ 图片下载失败');
+      return null;
+    }
+
+    final imagePath = state.sensorImagePath;
+    if (imagePath == null || imagePath.isEmpty) {
+      logState.error('❌ 图片路径为空');
+      return null;
+    }
+
+    final imageFile = File(imagePath);
+    if (!await imageFile.exists()) {
+      logState.error('❌ 图片文件不存在: $imagePath');
+      return null;
+    }
+
+    final fileSize = await imageFile.length();
+    if (fileSize == 0) {
+      logState.error('❌ 图片文件为空');
+      return null;
+    }
+
+    // 同路径覆盖下载后清除 Flutter 解码缓存，确保使用最新图片
+    PaintingBinding.instance.imageCache.evict(FileImage(imageFile));
+    logState.success('✅ 图片下载成功 (${(fileSize / 1024).toStringAsFixed(2)} KB): $imagePath');
+    return imagePath;
+  }
+
+  Future<bool> _ensureImageTestServiceLoaded4(LogState logState) async {
+    final imageTestService = ImageTestService.instance;
+    if (imageTestService.isLoaded) {
+      return true;
+    }
+
+    logState.info('📦 加载 image_test 原生库...');
+    final loaded = imageTestService.load(
+      searchLog: (msg) => logState.info(msg),
+    );
+    if (!loaded) {
+      logState.error('❌ 无法加载 libimage_test.so 原生库');
+      return false;
+    }
+
+    final version = imageTestService.getVersion();
+    if (version != null) {
+      logState.info('   库版本: $version');
+    }
+    return true;
+  }
+
   Future<bool> _testISO12233MTF4(TestState state, LogState logState) async {
     try {
       logState.info('📊 ISO12233图卡MTF测试');
-      logState.info('   提示：此测试需要图像算法服务支持');
-      
-      await Future.delayed(const Duration(seconds: 1));
-      logState.success('✅ ISO12233 MTF测试完成（模拟通过）');
-      return true;
+
+      final imagePath = await _captureAndDownloadImage4(state, logState);
+      if (imagePath == null) {
+        return false;
+      }
+
+      if (!await _ensureImageTestServiceLoaded4(logState)) {
+        return false;
+      }
+
+      await _config.init();
+      final threshold = _config.resolutionChartThreshold;
+      logState.info('🔍 调用 imagetest_resolution_chart 检测分辨率图卡...');
+      logState.info('   参数: threshold=$threshold');
+
+      final result = ImageTestService.instance.testResolutionChart(
+        imagePath,
+        threshold: threshold,
+      );
+
+      if (result == null) {
+        logState.error('❌ 分辨率图卡检测调用失败');
+        return false;
+      }
+
+      final ret = result['ret'] as int;
+      final output = result['output'] as double;
+      final pass = result['pass'] as bool;
+
+      logState.info('   返回值: $ret (${pass ? "PASS" : "FAIL"})');
+      logState.info('   输出值: ${output.toStringAsFixed(4)}');
+      logState.info('   阈值: $threshold');
+
+      if (pass) {
+        logState.success('✅ ISO12233 MTF测试通过');
+      } else {
+        logState.error('❌ ISO12233 MTF测试失败 (output=${output.toStringAsFixed(4)}, threshold=$threshold)');
+      }
+      return pass;
     } catch (e) {
       logState.error('ISO12233 MTF测试失败: $e');
       return false;
@@ -4774,11 +4907,45 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   Future<bool> _testColorChart4(TestState state, LogState logState) async {
     try {
       logState.info('🎨 24色色卡色彩误差测试');
-      logState.info('   提示：此测试需要图像算法服务支持');
-      
-      await Future.delayed(const Duration(seconds: 1));
-      logState.success('✅ 24色色卡测试完成（模拟通过）');
-      return true;
+
+      final imagePath = await _captureAndDownloadImage4(state, logState);
+      if (imagePath == null) {
+        return false;
+      }
+
+      if (!await _ensureImageTestServiceLoaded4(logState)) {
+        return false;
+      }
+
+      await _config.init();
+      final threshold = _config.colorChartThreshold;
+      logState.info('🔍 调用 imagetest_color_chart 检测色卡...');
+      logState.info('   参数: threshold=$threshold');
+
+      final result = ImageTestService.instance.testColorChart(
+        imagePath,
+        threshold: threshold,
+      );
+
+      if (result == null) {
+        logState.error('❌ 色卡检测调用失败');
+        return false;
+      }
+
+      final ret = result['ret'] as int;
+      final output = result['output'] as double;
+      final pass = result['pass'] as bool;
+
+      logState.info('   返回值: $ret (${pass ? "PASS" : "FAIL"})');
+      logState.info('   输出值: ${output.toStringAsFixed(4)}');
+      logState.info('   阈值: $threshold');
+
+      if (pass) {
+        logState.success('✅ 24色色卡测试通过');
+      } else {
+        logState.error('❌ 24色色卡测试失败 (output=${output.toStringAsFixed(4)}, threshold=$threshold)');
+      }
+      return pass;
     } catch (e) {
       logState.error('24色色卡测试失败: $e');
       return false;
