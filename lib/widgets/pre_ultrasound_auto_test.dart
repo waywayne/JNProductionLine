@@ -843,21 +843,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             logState.info('步骤1: 蓝牙连接测试');
             success = await _testBluetoothConnection1(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
-            // 蓝牙连接成功后发送产测状态重置命令 (0xFF 0xFF)
-            if (success) {
-              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
-              try {
-                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
-                await state.sendCommandViaLinuxBluetooth(
-                  resetCommand,
-                  timeout: const Duration(seconds: 3),
-                  moduleId: ProductionTestCommands.moduleId,
-                );
-                logState.info('✅ 产测状态重置命令发送成功');
-              } catch (e) {
-                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
-              }
-            }
             break;
           case 1: // BYD MES 开始
             logState.info('步骤2: BYD MES 开始');
@@ -1258,6 +1243,66 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   // ========== 工位1: 测试步骤实现 ==========
 
+  /// 发送产测状态重置命令 (0xFF 0xFF) 并验证设备响应
+  Future<bool> _sendProductionTestResetCommand(TestState state, LogState logState) async {
+    logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
+    final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
+    final response = await state.sendCommandViaLinuxBluetooth(
+      resetCommand,
+      timeout: const Duration(seconds: 3),
+      moduleId: ProductionTestCommands.moduleId,
+    );
+    if (response != null && !response.containsKey('error')) {
+      logState.info('✅ 产测状态重置命令响应成功');
+      return true;
+    }
+    final errorMsg = response?['error'] ?? response?['details'] ?? '无响应';
+    logState.error('❌ 产测状态重置命令失败: $errorMsg');
+    return false;
+  }
+
+  /// 蓝牙连接（含重试）并通过重置命令验证连接真正可用
+  Future<bool> _connectBluetoothWithReset(
+    TestState state,
+    LogState logState,
+    String bluetoothAddress, {
+    int maxRetries = 3,
+  }) async {
+    logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
+    logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
+
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      if (attempt > 1) {
+        logState.info('🔄 第 $attempt 次尝试连接...');
+        await state.disconnectLinuxBluetooth();
+        await Future.delayed(const Duration(seconds: 2));
+      }
+
+      final connected = await state.testBluetoothMethod4RfcommSocket(
+        deviceAddress: bluetoothAddress,
+        channel: 5,
+        uuid: '7033',
+      );
+
+      if (!connected) {
+        logState.warning('⚠️ 第 $attempt 次蓝牙连接失败');
+        continue;
+      }
+
+      logState.success('✅ 蓝牙连接成功');
+
+      if (await _sendProductionTestResetCommand(state, logState)) {
+        return true;
+      }
+
+      logState.warning('⚠️ 第 $attempt 次连接验证失败（重置命令无响应），断开并重试');
+      await state.disconnectLinuxBluetooth();
+    }
+
+    logState.error('❌ 蓝牙连接失败（已尝试 $maxRetries 次）');
+    return false;
+  }
+
   /// 工位1 步骤1: 蓝牙连接测试
   Future<bool> _testBluetoothConnection1(TestState state, LogState logState) async {
     try {
@@ -1272,23 +1317,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
-      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
-      
-      // 使用RFCOMM Socket方式，固定channel 5
-      final success = await state.testBluetoothMethod4RfcommSocket(
-        deviceAddress: bluetoothAddress,
-        channel: 5,
-        uuid: '7033',
-      );
-
-      if (success) {
-        logState.success('✅ 蓝牙连接成功');
-      } else {
-        logState.error('❌ 蓝牙连接失败');
-      }
-      
-      return success;
+      return await _connectBluetoothWithReset(state, logState, bluetoothAddress);
     } catch (e) {
       logState.error('❌ 蓝牙连接测试异常: $e');
       return false;
@@ -1589,21 +1618,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           case 0: // 蓝牙连接
             success = await _testBluetoothConnection3(state, logState);
             message = success ? '蓝牙连接成功' : '蓝牙连接失败';
-            // 蓝牙连接成功后发送产测状态重置命令 (0xFF 0xFF)
-            if (success) {
-              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
-              try {
-                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
-                await state.sendCommandViaLinuxBluetooth(
-                  resetCommand,
-                  timeout: const Duration(seconds: 3),
-                  moduleId: ProductionTestCommands.moduleId,
-                );
-                logState.info('✅ 产测状态重置命令发送成功');
-              } catch (e) {
-                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
-              }
-            }
             break;
           case 1: // BYD MES 开始
             logState.info('步骤2: BYD MES 开始');
@@ -1820,45 +1834,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
-      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
-      
-      // 增加重试机制，最多尝试3次
-      const maxRetries = 3;
-      for (int attempt = 1; attempt <= maxRetries; attempt++) {
-        if (attempt > 1) {
-          logState.info('🔄 第 $attempt 次尝试连接...');
-          // 重试前等待一段时间，让蓝牙设备准备好
-          await Future.delayed(const Duration(seconds: 2));
-        }
-        
-        try {
-          // 使用RFCOMM Socket方式，固定channel 5
-          final success = await state.testBluetoothMethod4RfcommSocket(
-            deviceAddress: bluetoothAddress,
-            channel: 5,
-            uuid: '7033',
-          );
-
-          if (success) {
-            logState.info('✅ 蓝牙连接成功');
-            return true;
-          } else {
-            logState.warning('⚠️ 第 $attempt 次连接失败');
-            if (attempt < maxRetries) {
-              logState.info('   准备重试...');
-            }
-          }
-        } catch (e) {
-          logState.warning('⚠️ 第 $attempt 次连接异常: $e');
-          if (attempt < maxRetries) {
-            logState.info('   准备重试...');
-          }
-        }
-      }
-      
-      logState.error('❌ 蓝牙连接失败（已尝试 $maxRetries 次）');
-      return false;
+      return await _connectBluetoothWithReset(state, logState, bluetoothAddress);
     } catch (e) {
       logState.error('蓝牙连接测试失败: $e');
       return false;
@@ -3561,20 +3537,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             logState.info('步骤1: 蓝牙连接');
             success = await _testBluetoothConnection4(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
-            if (success) {
-              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
-              try {
-                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
-                await state.sendCommandViaLinuxBluetooth(
-                  resetCommand,
-                  timeout: const Duration(seconds: 3),
-                  moduleId: ProductionTestCommands.moduleId,
-                );
-                logState.info('✅ 产测状态重置命令发送成功');
-              } catch (e) {
-                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
-              }
-            }
             break;
           case 1:
             logState.info('步骤2: BYD MES 开始');
@@ -3980,16 +3942,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             logState.info('步骤1: 蓝牙连接');
             success = await _testBluetoothConnection6(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
-            if (success) {
-              logState.info('🔄 发送产测状态重置命令 (0xFF 0xFF)...');
-              try {
-                final resetCommand = ProductionTestCommands.createEndTestCommand(opt: 0xFF);
-                await state.sendCommandViaLinuxBluetooth(resetCommand, timeout: const Duration(seconds: 3), moduleId: ProductionTestCommands.moduleId);
-                logState.info('✅ 产测状态重置命令发送成功');
-              } catch (e) {
-                logState.warning('⚠️ 产测状态重置命令发送失败: $e');
-              }
-            }
             break;
           case 1:
             logState.info('步骤2: BYD MES 开始');
@@ -4366,23 +4318,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
-      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
-      
-      // 使用RFCOMM Socket方式，固定channel 5
-      final success = await state.testBluetoothMethod4RfcommSocket(
-        deviceAddress: bluetoothAddress,
-        channel: 5,
-        uuid: '7033',
-      );
-
-      if (success) {
-        logState.success('✅ 蓝牙连接成功');
-      } else {
-        logState.error('❌ 蓝牙连接失败');
-      }
-      
-      return success;
+      return await _connectBluetoothWithReset(state, logState, bluetoothAddress);
     } catch (e) {
       logState.error('❌ 蓝牙连接测试异常: $e');
       return false;
@@ -5022,23 +4958,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         return false;
       }
 
-      logState.info('🔵 目标蓝牙地址: $bluetoothAddress');
-      logState.info('🔗 使用 RFCOMM Socket (固定Channel 5)');
-      
-      // 使用RFCOMM Socket方式，固定channel 5
-      final success = await state.testBluetoothMethod4RfcommSocket(
-        deviceAddress: bluetoothAddress,
-        channel: 5,
-        uuid: '7033',
-      );
-
-      if (success) {
-        logState.success('✅ 蓝牙连接成功');
-      } else {
-        logState.error('❌ 蓝牙连接失败');
-      }
-      
-      return success;
+      return await _connectBluetoothWithReset(state, logState, bluetoothAddress);
     } catch (e) {
       logState.error('❌ 蓝牙连接测试异常: $e');
       return false;

@@ -577,7 +577,9 @@ echo "trust $deviceAddress" | bluetoothctl
       // 监听 stderr（日志 + 连接状态检测）
       process.stderr.transform(const SystemEncoding().decoder).listen((line) {
         _logState?.debug('   [Python] $line');
-        if (line.contains('连接已建立') || line.contains('连接成功')) {
+        if (line.contains('连接已建立') ||
+            line.contains('连接成功') ||
+            line.contains('开始双向数据传输')) {
           connectionReady = true;
         }
       });
@@ -610,9 +612,10 @@ echo "trust $deviceAddress" | bluetoothctl
         if (_isConnected) disconnect();
       });
       
-      // 等待连接建立（检测 Python 成功消息，或进程退出表示失败，最多 15s）
+      // 等待连接建立（Python 端最多 3 轮重试，每轮 10s 超时 + 2s 间隔，共约 36s）
       _logState?.info('⏳ 等待 Bluetooth Socket 连接建立...');
-      for (int i = 0; i < 30; i++) {
+      const maxWaitIterations = 90; // 45 秒
+      for (int i = 0; i < maxWaitIterations; i++) {
         await Future.delayed(const Duration(milliseconds: 500));
         if (connectionReady) {
           _logState?.success('✅ SPP 桥接连接已就绪');
@@ -627,6 +630,15 @@ echo "trust $deviceAddress" | bluetoothctl
       
       if (processExited) {
         _logState?.error('❌ 桥接进程已退出，连接失败');
+        _socketProcess = null;
+        return false;
+      }
+
+      if (!connectionReady) {
+        _logState?.error('❌ 等待连接超时，Python 桥接未就绪');
+        try {
+          _socketProcess?.kill(ProcessSignal.sigterm);
+        } catch (_) {}
         _socketProcess = null;
         return false;
       }
