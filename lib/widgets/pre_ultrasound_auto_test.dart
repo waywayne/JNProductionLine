@@ -73,6 +73,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   final JigSerialService _jigSerialService4 = JigSerialService();
   bool _jigFixtureClosed4 = false;
   bool _enableJigCommands4 = true; // 治具指令开关，默认开启
+  bool _skipWiFiRangeTest4 = false; // 跳过WiFi拉距测试
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -3497,6 +3498,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   蓝牙: ${_productInfo4!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod4)}');
     logState.info('   治具指令: ${_enableJigCommands4 ? "开启" : "关闭（跳过所有治具步骤）"}');
+    logState.info('   WiFi拉距测试: ${_skipWiFiRangeTest4 ? "跳过" : "执行"}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
@@ -3575,8 +3577,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 5:
             logState.info('步骤6: 拉距测试WIFI');
-            success = await _testWiFiRange4(state, logState);
-            message = success ? 'WiFi拉距测试通过' : 'WiFi拉距测试失败';
+            if (_skipWiFiRangeTest4) {
+              logState.warning('⚠️ 已跳过WiFi拉距测试');
+              success = true;
+              message = '已跳过WiFi拉距测试';
+            } else {
+              success = await _testWiFiRange4(state, logState);
+              message = success ? 'WiFi拉距测试通过' : 'WiFi拉距测试失败';
+            }
             break;
           case 6:
             logState.info('步骤7: 治具光源通道1开');
@@ -4364,57 +4372,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           );
 
           if (response != null && !response.containsKey('error')) {
-            // 显示响应数据
             if (response.containsKey('payload') && response['payload'] != null) {
               final responsePayload = response['payload'] as Uint8List;
               final payloadHex = responsePayload
                   .map((b) => b.toRadixString(16).toUpperCase().padLeft(2, '0'))
                   .join(' ');
               logState.info('📥 响应: [$payloadHex] (${responsePayload.length} bytes)');
-              
-              // 检查响应格式: 0x04 0x05 + IP地址
-              // 响应可能是 [0x04, 0x05, IP字节...] 或 [0x05, IP字节...]
-              int ipOffset = 0;
-              if (responsePayload.length >= 2 && responsePayload[0] == 0x04 && responsePayload[1] == 0x05) {
-                ipOffset = 2;
-                logState.info('✅ 收到 0x04 0x05 响应');
-              } else if (responsePayload.length >= 1 && responsePayload[0] == 0x05) {
-                ipOffset = 1;
-                logState.info('✅ 收到 0x05 响应');
-              } else {
-                logState.warning('⚠️ 响应格式不匹配，期望 0x04 0x05 或 0x05');
-                continue;
+
+              final wifiResult = ProductionTestCommands.parseWifiResponse(responsePayload, 0x06);
+              if (wifiResult != null &&
+                  wifiResult['success'] == true &&
+                  wifiResult.containsKey('ip')) {
+                final deviceIP = wifiResult['ip'] as String;
+                logState.success('✅ 获取到设备IP: $deviceIP');
+                logState.info('✅ WiFi连接成功，iperf3服务已启动');
+                return deviceIP;
               }
-              
-              // 解析IP地址
-              if (responsePayload.length > ipOffset) {
-                final ipBytes = responsePayload.sublist(ipOffset);
-                // IP可能是ASCII字符串或4字节数值
-                String? deviceIP;
-                
-                // 尝试作为ASCII字符串解析
-                try {
-                  final ipStr = String.fromCharCodes(ipBytes.where((b) => b != 0));
-                  if (ipStr.contains('.') && ipStr.split('.').length == 4) {
-                    deviceIP = ipStr;
-                  }
-                } catch (_) {}
-                
-                // 尝试作为4字节数值解析
-                if (deviceIP == null && ipBytes.length >= 4) {
-                  deviceIP = '${ipBytes[0]}.${ipBytes[1]}.${ipBytes[2]}.${ipBytes[3]}';
-                }
-                
-                if (deviceIP != null && deviceIP.isNotEmpty) {
-                  logState.success('✅ 获取到设备IP: $deviceIP');
-                  logState.info('✅ WiFi连接成功，iperf3服务已启动');
-                  return deviceIP;
-                } else {
-                  logState.warning('⚠️ 无法解析IP地址');
-                }
-              } else {
-                logState.warning('⚠️ 响应中未包含IP地址数据');
-              }
+              logState.warning('⚠️ WiFi响应解析失败: ${wifiResult?['error'] ?? '未知格式'}');
             } else {
               logState.warning('⚠️ 响应中无payload数据');
             }
@@ -4444,183 +4418,177 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     final threshold = _config.iperfSpeedThresholdMbps;
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    logState.info('📡 WiFi 拉距测试');
+    logState.info('📡 WiFi 拉距测试（自动执行，无需人工确认）');
     logState.info('   设备IP: $_deviceIP4');
     logState.info('   速率阈值: ≥${threshold}Mbps');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
+    logState.info('⏳ 等待 iperf3 服务就绪...');
+    await Future.delayed(const Duration(seconds: 3));
+    await _waitForDeviceReachable(_deviceIP4!, logState);
+
     // ========== 第一轮测试 ==========
-    // iperf3 服务已在 _testWiFiConnection4 中通过 0x04 0x06 命令启动
-    // 弹窗确认
-    if (!mounted) return false;
-    final round1Confirm = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.wifi, color: Colors.blue),
-            SizedBox(width: 8),
-            Text('WiFi拉距测试 - 第一轮'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('设备IP: $_deviceIP4', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 8),
-            Text('速率阈值: ≥${threshold}Mbps', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 16),
-            const Text('点击确定开始iperf3测试'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-
-    if (round1Confirm != true) {
-      logState.warning('⚠️ 用户取消第一轮测试');
-      return false;
-    }
-
     logState.info('🚀 第一轮测试: iperf3 → $_deviceIP4 ...');
-    final result1 = await _runIperf(_deviceIP4!, logState);
-    
+    final result1 = await _runIperfWithRetry(_deviceIP4!, logState);
+
     if (result1 == null) {
       logState.error('❌ 第一轮测试失败');
       return false;
     }
 
-    final speed1 = result1['speed'];
+    final speed1 = result1['speed'] as double;
     logState.info('📊 第一轮速率: ${speed1.toStringAsFixed(2)} Mbps');
-    
+
     if (speed1 < threshold) {
       logState.error('❌ 第一轮速率 ${speed1.toStringAsFixed(2)} Mbps < 阈值 ${threshold} Mbps');
       return false;
     }
-    
+
     logState.success('✅ 第一轮测试通过: ${speed1.toStringAsFixed(2)} Mbps ≥ ${threshold} Mbps');
 
     // ========== 第二轮测试 ==========
-    await Future.delayed(const Duration(seconds: 1));
-    
-    // 弹窗确认
-    if (!mounted) return false;
-    final round2Confirm = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.wifi_tethering, color: Colors.orange),
-            SizedBox(width: 8),
-            Text('WiFi拉距测试 - 第二轮'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('第一轮速率: ${speed1.toStringAsFixed(2)} Mbps ✅', 
-                style: const TextStyle(fontSize: 14, color: Colors.green)),
-            const SizedBox(height: 16),
-            const Text('请将设备拉远，点击确定开始第二轮测试', 
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
+    logState.info('⏳ 间隔 3 秒后执行第二轮测试...');
+    await Future.delayed(const Duration(seconds: 3));
 
-    if (round2Confirm != true) {
-      logState.warning('⚠️ 用户取消第二轮测试');
-      return false;
-    }
+    logState.info('🚀 第二轮测试: iperf3 → $_deviceIP4 ...');
+    final result2 = await _runIperfWithRetry(_deviceIP4!, logState);
 
-    logState.info('🚀 第二轮测试（设备已拉远）: iperf3 → $_deviceIP4 ...');
-    final result2 = await _runIperf(_deviceIP4!, logState);
-    
     if (result2 == null) {
       logState.error('❌ 第二轮测试失败');
       return false;
     }
 
-    final speed2 = result2['speed'];
+    final speed2 = result2['speed'] as double;
     logState.info('📊 第二轮速率: ${speed2.toStringAsFixed(2)} Mbps');
-    
+
     if (speed2 < threshold) {
       logState.error('❌ 第二轮速率 ${speed2.toStringAsFixed(2)} Mbps < 阈值 ${threshold} Mbps');
       return false;
     }
-    
+
     logState.success('✅ 第二轮测试通过: ${speed2.toStringAsFixed(2)} Mbps ≥ ${threshold} Mbps');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     logState.success('🎉 WiFi拉距测试全部通过！');
     logState.info('   第一轮: ${speed1.toStringAsFixed(2)} Mbps');
     logState.info('   第二轮: ${speed2.toStringAsFixed(2)} Mbps');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    
+
     return true;
+  }
+
+  /// 等待设备 IP 网络可达（ping 检测，不阻塞 iperf 重试）
+  Future<void> _waitForDeviceReachable(String ip, LogState logState, {int maxAttempts = 15}) async {
+    logState.info('⏳ 检测设备网络可达性 ($ip)...');
+    for (int i = 1; i <= maxAttempts; i++) {
+      try {
+        final result = await Process.run('ping', ['-c', '1', '-W', '1', ip]);
+        if (result.exitCode == 0) {
+          logState.info('✅ 设备网络可达 (第$i次检测)');
+          return;
+        }
+      } catch (e) {
+        logState.debug('   ping 异常: $e');
+      }
+      if (i < maxAttempts) {
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    }
+    logState.warning('⚠️ 设备 ping 不通，仍尝试 iperf3 连接');
+  }
+
+  /// 带重试的 iperf3 测试
+  Future<Map<String, dynamic>?> _runIperfWithRetry(
+    String deviceIP,
+    LogState logState, {
+    int maxRetries = 3,
+  }) async {
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+      if (attempt > 1) {
+        logState.info('🔄 iperf3 重试 ($attempt/$maxRetries)...');
+        await Future.delayed(const Duration(seconds: 2));
+      }
+      final result = await _runIperf(deviceIP, logState);
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  /// 从 iperf3 输出中提取速率 (Mbps)
+  double? _parseIperfSpeedMbps(String output) {
+    final receiverMatch = RegExp(r'(\d+\.?\d*)\s+Mbits/sec\s+receiver').firstMatch(output);
+    if (receiverMatch != null) {
+      return double.tryParse(receiverMatch.group(1)!);
+    }
+    final senderMatch = RegExp(r'(\d+\.?\d*)\s+Mbits/sec\s+sender').firstMatch(output);
+    if (senderMatch != null) {
+      return double.tryParse(senderMatch.group(1)!);
+    }
+    final gbitsReceiver = RegExp(r'(\d+\.?\d*)\s+Gbits/sec\s+receiver').firstMatch(output);
+    if (gbitsReceiver != null) {
+      final gbps = double.tryParse(gbitsReceiver.group(1)!);
+      return gbps != null ? gbps * 1000 : null;
+    }
+    return null;
+  }
+
+  /// 从 iperf3 JSON 输出中提取速率 (Mbps)
+  double? _parseIperfJsonSpeedMbps(String jsonStr) {
+    try {
+      final data = json.decode(jsonStr) as Map<String, dynamic>;
+      final end = data['end'] as Map<String, dynamic>?;
+      if (end == null) return null;
+
+      final sumReceived = end['sum_received'] as Map<String, dynamic>?;
+      final sumSent = end['sum_sent'] as Map<String, dynamic>?;
+      final bps = (sumReceived?['bits_per_second'] as num?) ??
+          (sumSent?['bits_per_second'] as num?);
+      if (bps != null && bps > 0) {
+        return bps / 1000000;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// 执行iperf3测试
   /// 返回 Map 包含 speed (Mbps) 和 rawOutput
   Future<Map<String, dynamic>?> _runIperf(String deviceIP, LogState logState) async {
-    final cmd = 'iperf3';
-    final args = ['-c', deviceIP, '-p', '5001', '-t', '3', '-i', '1', '--json'];
-    logState.info('🚀 执行: $cmd ${args.join(' ')}');
+    const cmd = 'iperf3';
+    final argSets = [
+      ['-c', deviceIP, '-p', '5001', '-t', '3', '-i', '1', '--json', '--connect-timeout', '5000'],
+      ['-c', deviceIP, '-p', '5001', '-t', '3', '-i', '1', '--connect-timeout', '5000'],
+      ['-c', deviceIP, '-p', '5001', '-t', '3', '-i', '1', '--json'],
+      ['-c', deviceIP, '-p', '5001', '-t', '3', '-i', '1'],
+    ];
 
-    try {
-      final result = await Process.run(cmd, args, stdoutEncoding: utf8, stderrEncoding: utf8);
+    for (final args in argSets) {
+      logState.info('🚀 执行: $cmd ${args.join(' ')}');
+      try {
+        final result = await Process.run(cmd, args, stdoutEncoding: utf8, stderrEncoding: utf8);
+        final stdout = result.stdout?.toString() ?? '';
+        final stderr = result.stderr?.toString() ?? '';
+        final combined = '$stdout\n$stderr';
 
-      if (result.exitCode == 0) {
-        final jsonStr = result.stdout as String;
-        try {
-          final data = json.decode(jsonStr) as Map<String, dynamic>;
-          final end = data['end'] as Map<String, dynamic>?;
-          if (end != null) {
-            final sumReceived = end['sum_received'] as Map<String, dynamic>?;
-            if (sumReceived != null) {
-              final bps = (sumReceived['bits_per_second'] as num?) ?? 0;
-              final mbps = bps / 1000000;
-              logState.success('📥 接收速率: ${mbps.toStringAsFixed(2)} Mbps');
-              return {'speed': mbps, 'rawOutput': jsonStr};
-            }
+        if (result.exitCode == 0) {
+          final jsonSpeed = stdout.isNotEmpty ? _parseIperfJsonSpeedMbps(stdout) : null;
+          final textSpeed = _parseIperfSpeedMbps(combined);
+          final speed = jsonSpeed ?? textSpeed;
+
+          if (speed != null && speed > 0) {
+            logState.success('📥 速率: ${speed.toStringAsFixed(2)} Mbps');
+            return {'speed': speed, 'rawOutput': combined};
           }
-        } catch (e) {
-          logState.warning('⚠️ JSON解析失败: $e');
+          logState.warning('⚠️ iperf3 成功但无法解析速率，尝试下一参数组合');
+          continue;
         }
-        logState.error('❌ 无法从iperf3输出中提取速率');
-        return null;
-      } else {
-        final err = '退出码: ${result.exitCode}\n${result.stderr}';
-        logState.error('❌ iperf3 失败: $err');
-        return null;
+
+        logState.warning('⚠️ iperf3 失败 (退出码 ${result.exitCode}): ${stderr.trim().isNotEmpty ? stderr.trim() : stdout.trim()}');
+      } catch (e) {
+        logState.warning('⚠️ 执行 iperf3 异常: $e');
       }
-    } catch (e) {
-      final err = '执行iperf3异常: $e\n请确认已安装 iperf3';
-      logState.error('❌ $err');
-      return null;
     }
+
+    logState.error('❌ iperf3 全部尝试均失败，请确认设备 iperf3 服务已启动且网络互通');
+    return null;
   }
 
   Future<bool> _testLightSensorBright4(TestState state, LogState logState) async {
@@ -5964,6 +5932,27 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                     ? null
                     : (value) => setState(() => _enableJigCommands4 = value),
                 activeColor: Colors.blue,
+              ),
+              const SizedBox(width: 12),
+              Icon(
+                Icons.wifi_tethering,
+                color: _skipWiFiRangeTest4 ? Colors.orange : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '跳过拉距测试WiFi',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _skipWiFiRangeTest4 ? Colors.orange : Colors.grey,
+                ),
+              ),
+              Switch(
+                value: _skipWiFiRangeTest4,
+                onChanged: _isAutoTesting4
+                    ? null
+                    : (value) => setState(() => _skipWiFiRangeTest4 = value),
+                activeColor: Colors.orange,
               ),
               const Spacer(),
               Expanded(
