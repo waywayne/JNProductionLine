@@ -74,6 +74,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   bool _jigFixtureClosed4 = false;
   bool _enableJigCommands4 = true; // 治具指令开关，默认开启
   bool _skipWiFiRangeTest4 = false; // 跳过WiFi拉距测试
+  bool _skipIMUCalibration4 = false; // 跳过IMU校准(棋盘格)
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -3499,6 +3500,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   连接方案: ${_getMethodName(_selectedMethod4)}');
     logState.info('   治具指令: ${_enableJigCommands4 ? "开启" : "关闭（跳过所有治具步骤）"}');
     logState.info('   WiFi拉距测试: ${_skipWiFiRangeTest4 ? "跳过" : "执行"}');
+    logState.info('   IMU校准(棋盘格): ${_skipIMUCalibration4 ? "跳过" : "执行"}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
@@ -3636,8 +3638,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 12:
             logState.info('步骤13: IMU校准(棋盘格)');
-            success = await _testIMUCalibration4(state, logState);
-            message = success ? 'IMU校准完成' : 'IMU校准失败';
+            if (_skipIMUCalibration4) {
+              logState.warning('⚠️ 已跳过IMU校准(棋盘格)');
+              success = true;
+              message = '已跳过IMU校准(棋盘格)';
+            } else {
+              success = await _testIMUCalibration4(state, logState);
+              message = success ? 'IMU校准完成' : 'IMU校准失败';
+            }
             break;
           case 13:
             logState.info('步骤14: IMU值测试');
@@ -5952,6 +5960,27 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 onChanged: _isAutoTesting4
                     ? null
                     : (value) => setState(() => _skipWiFiRangeTest4 = value),
+                activeColor: Colors.orange,
+              ),
+              const SizedBox(width: 12),
+              Icon(
+                Icons.compass_calibration,
+                color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '跳过IMU校准(棋盘格)',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
+                ),
+              ),
+              Switch(
+                value: _skipIMUCalibration4,
+                onChanged: _isAutoTesting4
+                    ? null
+                    : (value) => setState(() => _skipIMUCalibration4 = value),
                 activeColor: Colors.orange,
               ),
               const Spacer(),
