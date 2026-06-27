@@ -3526,6 +3526,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     bool hasFailure = false;
     String? failItem;
     String? failValue;
+    bool reachedMesPhase = false;
 
     if (_enableJigCommands4) {
       if (!await _connectJigSerial4(logState)) {
@@ -3541,6 +3542,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     try {
     for (int i = 0; i < _stepResults4.length; i++) {
       if (!_isAutoTesting4) break;
+
+      if (i >= 1) {
+        reachedMesPhase = true;
+      }
 
       setState(() {
         _currentStep4 = i + 1;
@@ -3804,7 +3809,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
         
         logState.info('🎉 工位4测试全部通过！($passedCount/$totalCount)');
-      } else {
+      } else if (reachedMesPhase) {
         logState.info('🏭 调用 BYD MES 不良品接口...');
         final mesResult = await _mesService4.ncComplete(
           _scannedSN4!,
@@ -3819,17 +3824,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
         }
         logState.warning('⚠️ 工位4测试完成，通过 $passedCount/$totalCount 项');
+      } else {
+        logState.warning('⚠️ 工位4测试在 BYD MES 开始前失败，跳过 MES 上报 ($passedCount/$totalCount)');
       }
     } else {
       if (allPassed) {
         logState.info('🎉 工位4测试全部通过！($passedCount/$totalCount)（MAC直连模式，跳过MES上报）');
-      } else {
+      } else if (reachedMesPhase) {
         logState.warning('⚠️ 工位4测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
+      } else {
+        logState.warning('⚠️ 工位4测试在 BYD MES 开始前失败（MAC直连模式，跳过MES上报）');
       }
     }
     
-    logState.info('🔄 发送设备重启命令...');
-    await _sendDeviceRestartCommand(state, logState);
+    if (allPassed || (hasFailure && reachedMesPhase)) {
+      logState.info('🔄 发送设备重启命令...');
+      await _sendDeviceRestartCommand(state, logState);
+    }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
