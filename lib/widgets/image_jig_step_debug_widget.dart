@@ -29,6 +29,11 @@ class _JigCommandDef {
 /// 与 PreUltrasoundAutoTest._runJigStep4 调用的指令一致
 const _jigCommands = [
   _JigCommandDef(
+    command: JigCommands.powerIn,
+    label: '治具上电',
+    description: '测试开始前上电（POWER_IN）',
+  ),
+  _JigCommandDef(
     command: JigCommands.close,
     label: '治具关闭',
     description: 'MES 开始后夹紧设备（CLOSE）',
@@ -59,6 +64,11 @@ const _jigCommands = [
     command: JigCommands.open,
     label: '治具打开',
     description: '测试结束或异常时释放设备（OPEN）',
+  ),
+  _JigCommandDef(
+    command: JigCommands.powerOut,
+    label: '治具断电',
+    description: '开箱释放设备后断电（POWER_OUT）',
   ),
 ];
 

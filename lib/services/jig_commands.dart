@@ -23,4 +23,10 @@ class JigCommands {
 
   /// 仅色卡下降
   static const String onlyColorCardDown = 'ONLY_COLOR_CARD_DOWN';
+
+  /// 治具上电（测试开始前）
+  static const String powerIn = 'POWER_IN';
+
+  /// 治具断电（开箱释放设备后）
+  static const String powerOut = 'POWER_OUT';
 }
