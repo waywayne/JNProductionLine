@@ -8,6 +8,7 @@ import 'byd_mes_test_dialog.dart';
 import 'ota_upgrade_widget.dart';
 import 'wifi_range_test_widget.dart';
 import 'image_algorithm_test_widget.dart';
+import 'image_jig_step_debug_widget.dart';
 
 class MenuBarWidget extends StatelessWidget {
   const MenuBarWidget({super.key});
@@ -257,6 +258,62 @@ class MenuBarWidget extends StatelessWidget {
                           child: Padding(
                             padding: EdgeInsets.all(16),
                             child: ImageAlgorithmTestWidget(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          _MenuButton(
+            title: '图像治具单步调试',
+            icon: Icons.precision_manufacturing,
+            onPressed: () {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => Dialog(
+                  child: Container(
+                    width: 960,
+                    height: 720,
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade700,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(4),
+                              topRight: Radius.circular(4),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.precision_manufacturing, color: Colors.white, size: 24),
+                              const SizedBox(width: 8),
+                              const Text(
+                                '图像治具单步调试',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white),
+                                onPressed: () => Navigator.of(context).pop(),
+                                tooltip: '关闭',
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Expanded(
+                          child: Padding(
+                            padding: EdgeInsets.all(16),
+                            child: ImageJigStepDebugWidget(),
                           ),
                         ),
                       ],
