@@ -4725,6 +4725,32 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     LogState logState, {
     String saveFileName = 'camera_test.jpg',
   }) async {
+    final ch1OffOk = await _runJigStep4(
+      JigCommands.lightSourceCh1Off,
+      logState,
+      description: '光源通道1关',
+    );
+    if (!ch1OffOk) {
+      logState.error('❌ 拍照前光源通道1关失败');
+      return null;
+    }
+    if (_enableJigCommands4) {
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    final ch2OnOk = await _runJigStep4(
+      JigCommands.lightSourceCh2On,
+      logState,
+      description: '光源通道2开',
+    );
+    if (!ch2OnOk) {
+      logState.error('❌ 拍照前光源通道2开失败');
+      return null;
+    }
+    if (_enableJigCommands4) {
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+
     logState.info('📸 发送拍照命令...');
 
     final command = ProductionTestCommands.createSensorCommand(0x02);

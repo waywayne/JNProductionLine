@@ -18,6 +18,9 @@ class JigCommands {
   /// 光源通道1 关（暗环境）
   static const String lightSourceCh1Off = 'LIGHT_SOURCE_CH1_OFF';
 
+  /// 光源通道2 开
+  static const String lightSourceCh2On = 'LIGHT_SOURCE_CH2_ON';
+
   /// 仅分辨率图卡下降
   static const String onlyResolutionCardDown = 'ONLY_RESOLUTION_CARD_DOWN';
 
