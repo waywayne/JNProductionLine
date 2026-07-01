@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:image/image.dart' as img;
 import '../models/test_state.dart';
 import '../models/log_state.dart';
 import '../services/product_sn_api.dart';
@@ -4718,7 +4719,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   }
 
   /// 工位4: 直接拍照并通过 FTP 下载图片（无弹窗确认）
-  Future<String?> _captureAndDownloadImage4(TestState state, LogState logState) async {
+  /// [saveFileName] 本地保存文件名，两次拍照使用不同文件名避免互相覆盖
+  Future<String?> _captureAndDownloadImage4(
+    TestState state,
+    LogState logState, {
+    String saveFileName = 'camera_test.jpg',
+  }) async {
     logState.info('📸 发送拍照命令...');
 
     final command = ProductionTestCommands.createSensorCommand(0x02);
@@ -4762,8 +4768,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       return null;
     }
 
-    logState.info('📥 开始FTP下载图片...');
-    final downloadSuccess = await state.downloadImageFromDevice(_deviceIP4!);
+    // 等待设备端 test.jpg 写入完成
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    logState.info('📥 开始FTP下载图片 ($saveFileName)...');
+    final downloadSuccess = await state.downloadImageFromDevice(
+      _deviceIP4!,
+      saveFileName: saveFileName,
+    );
     if (!downloadSuccess) {
       logState.error('❌ 图片下载失败');
       return null;
@@ -4789,8 +4801,40 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     // 同路径覆盖下载后清除 Flutter 解码缓存，确保使用最新图片
     PaintingBinding.instance.imageCache.evict(FileImage(imageFile));
-    logState.success('✅ 图片下载成功 (${(fileSize / 1024).toStringAsFixed(2)} KB): $imagePath');
-    return imagePath;
+
+    final rotatedPath = await _rotateImageCounterClockwise90(imagePath, logState);
+    if (rotatedPath == null) {
+      return null;
+    }
+
+    final rotatedFile = File(rotatedPath);
+    final rotatedSize = await rotatedFile.length();
+    logState.success('✅ 图片下载并旋转成功 (${(rotatedSize / 1024).toStringAsFixed(2)} KB): $rotatedPath');
+    return rotatedPath;
+  }
+
+  /// 将 JPEG 图片逆时针旋转 90 度并覆盖原文件
+  Future<String?> _rotateImageCounterClockwise90(String imagePath, LogState logState) async {
+    try {
+      logState.info('🔄 逆时针旋转图片 90°...');
+      final imageFile = File(imagePath);
+      final bytes = await imageFile.readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        logState.error('❌ 无法解码图片，跳过旋转');
+        return null;
+      }
+
+      final rotated = img.copyRotate(decoded, angle: -90);
+      final jpgBytes = img.encodeJpg(rotated, quality: 95);
+      await imageFile.writeAsBytes(jpgBytes, flush: true);
+      PaintingBinding.instance.imageCache.evict(FileImage(imageFile));
+      logState.info('   旋转后尺寸: ${rotated.width}x${rotated.height}');
+      return imagePath;
+    } catch (e) {
+      logState.error('❌ 图片旋转失败: $e');
+      return null;
+    }
   }
 
   Future<bool> _ensureImageTestServiceLoaded4(LogState logState) async {
@@ -4819,7 +4863,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     try {
       logState.info('📊 ISO12233图卡MTF测试');
 
-      final imagePath = await _captureAndDownloadImage4(state, logState);
+      final imagePath = await _captureAndDownloadImage4(
+        state,
+        logState,
+        saveFileName: 'camera_test_mtf.jpg',
+      );
       if (imagePath == null) {
         return false;
       }
@@ -4867,7 +4915,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     try {
       logState.info('🎨 24色色卡色彩误差测试');
 
-      final imagePath = await _captureAndDownloadImage4(state, logState);
+      final imagePath = await _captureAndDownloadImage4(
+        state,
+        logState,
+        saveFileName: 'camera_test_color.jpg',
+      );
       if (imagePath == null) {
         return false;
       }

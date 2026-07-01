@@ -10338,10 +10338,28 @@ class TestState extends ChangeNotifier {
 
   // ========== 整机产测专用方法 ==========
 
+  /// 若 FTP 文件含多张拼接 JPEG，提取最后一张（设备端可能追加写入）
+  static Uint8List _extractLastJpegSegment(Uint8List data) {
+    var lastSoi = -1;
+    for (var i = 0; i < data.length - 1; i++) {
+      if (data[i] == 0xFF && data[i + 1] == 0xD8) {
+        lastSoi = i;
+      }
+    }
+    if (lastSoi > 0) {
+      return Uint8List.fromList(data.sublist(lastSoi));
+    }
+    return data;
+  }
+
   /// 从设备下载图片（用于整机产测）
   /// [deviceIP] 设备IP地址
+  /// [saveFileName] 本地保存文件名，默认 camera_test.jpg
   /// 返回true表示下载成功，false表示失败
-  Future<bool> downloadImageFromDevice(String deviceIP) async {
+  Future<bool> downloadImageFromDevice(
+    String deviceIP, {
+    String saveFileName = 'camera_test.jpg',
+  }) async {
     try {
       _logState?.info('📥 开始从设备下载图片...', type: LogType.debug);
       _logState?.info('   设备IP: $deviceIP', type: LogType.debug);
@@ -10354,12 +10372,12 @@ class TestState extends ChangeNotifier {
       String savePath;
       if (Platform.isMacOS) {
         final homeDir = Platform.environment['HOME'] ?? '';
-        savePath = path.join(homeDir, 'Documents', 'JNProductionLine', 'camera_test.jpg');
+        savePath = path.join(homeDir, 'Documents', 'JNProductionLine', saveFileName);
       } else if (Platform.isWindows) {
         final userProfile = Platform.environment['USERPROFILE'] ?? '';
-        savePath = path.join(userProfile, 'Documents', 'JNProductionLine', 'camera_test.jpg');
+        savePath = path.join(userProfile, 'Documents', 'JNProductionLine', saveFileName);
       } else {
-        savePath = path.join(Directory.current.path, 'camera_test.jpg');
+        savePath = path.join(Directory.current.path, saveFileName);
       }
       
       _logState?.info('   保存路径: $savePath', type: LogType.debug);
@@ -10386,6 +10404,11 @@ class TestState extends ChangeNotifier {
         if (retry > 0) {
           _logState?.warning('🔄 FTP下载重试 $retry/$maxRetries...', type: LogType.debug);
           await Future.delayed(Duration(seconds: retry));
+          // 重试前删除不完整文件，避免 curl 追加导致多张图片拼接
+          final partialFile = File(savePath);
+          if (await partialFile.exists()) {
+            await partialFile.delete();
+          }
         }
         
         if (Platform.isMacOS || Platform.isLinux) {
@@ -10421,7 +10444,17 @@ class TestState extends ChangeNotifier {
           if (await file.exists()) {
             final fileSize = await file.length();
             if (fileSize > 0) {
-              _logState?.success('✅ 图片下载成功 (大小: ${fileSize} bytes)', type: LogType.debug);
+              final rawBytes = await file.readAsBytes();
+              final sanitized = _extractLastJpegSegment(rawBytes);
+              if (sanitized.length != rawBytes.length) {
+                _logState?.warning(
+                  '⚠️ 检测到多张 JPEG 拼接 (${rawBytes.length} → ${sanitized.length} bytes)，已提取最后一张',
+                  type: LogType.debug,
+                );
+                await file.writeAsBytes(sanitized, flush: true);
+              }
+              final finalSize = await file.length();
+              _logState?.success('✅ 图片下载成功 (大小: ${finalSize} bytes)', type: LogType.debug);
               _sensorImagePath = savePath;
               // 同路径重复下载时清除 Flutter 解码缓存，避免 Image.file 显示旧图
               PaintingBinding.instance.imageCache.evict(FileImage(file));
