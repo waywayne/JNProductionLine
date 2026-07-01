@@ -29,6 +29,11 @@ class _JigCommandDef {
 /// 与 PreUltrasoundAutoTest._runJigStep4 调用的指令一致
 const _jigCommands = [
   _JigCommandDef(
+    command: JigCommands.clawClamp,
+    label: '夹爪夹紧',
+    description: '测试开始前夹紧设备（CLAW_CLAMP）',
+  ),
+  _JigCommandDef(
     command: JigCommands.powerIn,
     label: '治具上电',
     description: '测试开始前上电（POWER_IN）',
