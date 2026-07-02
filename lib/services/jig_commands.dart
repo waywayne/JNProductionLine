@@ -27,6 +27,9 @@ class JigCommands {
   /// 仅色卡下降
   static const String onlyColorCardDown = 'ONLY_COLOR_CARD_DOWN';
 
+  /// 仅棋盘格卡下降
+  static const String onlyCheckerCardDown = 'ONLY_CHECKER_CARD_DOWN';
+
   /// 夹爪夹紧（测试开始前）
   static const String clawClamp = 'CLAW_CLAMP';
 

@@ -3378,17 +3378,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       TestStepResult(stepNumber: 10, name: '光敏传感器测试(亮)', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 11, name: '治具光源通道1关', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 12, name: '光敏传感器测试(暗)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '纯色画面测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: 'IMU校准', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 16, name: 'IMU值测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 17, name: '治具分辨率图卡下降', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 18, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 19, name: '治具色卡下降', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 20, name: '24色色卡测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 21, name: '治具打开', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 22, name: '治具断电', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 23, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: '治具棋盘格卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '纯色画面测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: 'IMU校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: 'IMU值测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 18, name: '治具分辨率图卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 19, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 20, name: '治具色卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 21, name: '24色色卡测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 22, name: '治具打开', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 23, name: '治具断电', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 24, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -3667,33 +3668,48 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             message = success ? '暗环境光敏值测试通过' : '暗环境光敏值测试失败';
             break;
           case 12:
-            logState.info('步骤13: 摄像头位置与IMU位置标定');
+            logState.info('步骤13: 治具棋盘格卡下降');
+            success = await _runJigStep4(
+              JigCommands.onlyCheckerCardDown,
+              logState,
+              description: '棋盘格卡下降',
+              timeout: const Duration(seconds: 30),
+            );
+            message = success
+                ? (_enableJigCommands4 ? '棋盘格卡下降成功' : '治具指令已关闭，已跳过')
+                : '棋盘格卡下降失败';
+            if (success && _enableJigCommands4) {
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+            break;
+          case 13:
+            logState.info('步骤14: 摄像头位置与IMU位置标定(棋盘格)');
             success = await _testCameraIMUCalibration4(state, logState);
             message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
             break;
-          case 13:
-            logState.info('步骤14: 纯色画面测试');
+          case 14:
+            logState.info('步骤15: 纯色画面测试');
             success = await _testPureColorStream4(state, logState);
             message = success ? '纯色画面测试通过' : '纯色画面测试失败';
             break;
-          case 14:
-            logState.info('步骤15: IMU校准(棋盘格)');
+          case 15:
+            logState.info('步骤16: IMU校准');
             if (_skipIMUCalibration4) {
-              logState.warning('⚠️ 已跳过IMU校准(棋盘格)');
+              logState.warning('⚠️ 已跳过IMU校准');
               success = true;
-              message = '已跳过IMU校准(棋盘格)';
+              message = '已跳过IMU校准';
             } else {
               success = await _testIMUCalibration4(state, logState);
               message = success ? 'IMU校准完成' : 'IMU校准失败';
             }
             break;
-          case 15:
-            logState.info('步骤16: IMU值测试');
+          case 16:
+            logState.info('步骤17: IMU值测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
             break;
-          case 16:
-            logState.info('步骤17: 治具分辨率图卡下降');
+          case 17:
+            logState.info('步骤18: 治具分辨率图卡下降');
             success = await _runJigStep4(
               JigCommands.onlyResolutionCardDown,
               logState,
@@ -3707,13 +3723,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               await Future.delayed(const Duration(milliseconds: 500));
             }
             break;
-          case 17:
-            logState.info('步骤18: ISO12233图卡MTF测试');
+          case 18:
+            logState.info('步骤19: ISO12233图卡MTF测试');
             success = await _testISO12233MTF4(state, logState);
             message = success ? 'MTF测试通过' : 'MTF测试失败';
             break;
-          case 18:
-            logState.info('步骤19: 治具色卡下降');
+          case 19:
+            logState.info('步骤20: 治具色卡下降');
             success = await _runJigStep4(
               JigCommands.onlyColorCardDown,
               logState,
@@ -3727,13 +3743,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               await Future.delayed(const Duration(milliseconds: 500));
             }
             break;
-          case 19:
-            logState.info('步骤20: 24色色卡色彩误差测试');
+          case 20:
+            logState.info('步骤21: 24色色卡色彩误差测试');
             success = await _testColorChart4(state, logState);
             message = success ? '色彩误差测试通过' : '色彩误差测试失败';
             break;
-          case 20:
-            logState.info('步骤21: 治具打开');
+          case 21:
+            logState.info('步骤22: 治具打开');
             success = await _runJigStep4(
               JigCommands.open,
               logState,
@@ -3743,8 +3759,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 ? (_enableJigCommands4 ? '治具打开成功' : '治具指令已关闭，已跳过')
                 : '治具 OPEN 指令失败';
             break;
-          case 21:
-            logState.info('步骤22: 治具断电');
+          case 22:
+            logState.info('步骤23: 治具断电');
             success = await _runJigStep4(
               JigCommands.powerOut,
               logState,
@@ -3754,8 +3770,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 ? (_enableJigCommands4 ? '治具断电成功' : '治具指令已关闭，已跳过')
                 : '治具 POWER_OUT 指令失败';
             break;
-          case 22:
-            logState.info('步骤23: 产测结束');
+          case 23:
+            logState.info('步骤24: 产测结束');
             success = await _testProductionEnd4(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -3779,6 +3795,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           hasFailure = true;
           failItem = _stepResults4[i].name;
           failValue = message ?? '测试未通过';
+        }
+        // 治具关闭后的产测项失败时，立即释放治具
+        if (i >= 4) {
+          await _openJigFixtureOnFailure4(logState);
         }
         logState.info('🔄 发送产测状态更新命令 (0xFF 0x01) - 测试失败...');
         try {
@@ -4324,7 +4344,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return ok;
   }
 
-  /// 执行治具步骤；关闭治具开关时自动跳过
+  /// 执行治具步骤；关闭治具开关时自动跳过，失败时最多重试 3 次
   Future<bool> _runJigStep4(
     String command,
     LogState logState, {
@@ -4337,20 +4357,44 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       return true;
     }
 
-    final ok = await _sendJigCommand4(
-      command,
-      logState,
-      description: description,
-      timeout: timeout,
-    );
-    if (ok) {
-      if (command == JigCommands.close) {
-        _jigFixtureClosed4 = true;
-      } else if (command == JigCommands.open) {
-        _jigFixtureClosed4 = false;
+    const maxRetries = 3;
+    for (int retry = 0; retry < maxRetries; retry++) {
+      if (retry > 0) {
+        logState.info('   治具指令重试 ($retry/$maxRetries): $label');
+        await Future.delayed(const Duration(seconds: 1));
+      }
+
+      final ok = await _sendJigCommand4(
+        command,
+        logState,
+        description: description,
+        timeout: timeout,
+      );
+      if (ok) {
+        if (command == JigCommands.close) {
+          _jigFixtureClosed4 = true;
+        } else if (command == JigCommands.open) {
+          _jigFixtureClosed4 = false;
+        }
+        return true;
       }
     }
-    return ok;
+
+    logState.error('❌ 治具指令 $maxRetries 次重试后仍失败: $label');
+    return false;
+  }
+
+  /// 产测项失败或异常时，补偿执行治具打开释放设备
+  Future<void> _openJigFixtureOnFailure4(LogState logState) async {
+    if (!_enableJigCommands4 || !_jigFixtureClosed4) return;
+    if (!_jigSerialService4.isConnected) return;
+
+    logState.info('🔧 产测项失败，执行治具打开释放设备...');
+    await _runJigStep4(
+      JigCommands.open,
+      logState,
+      description: '治具打开（失败释放）',
+    );
   }
 
   Future<void> _releaseJigFixture4(LogState logState) async {
@@ -4688,12 +4732,62 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   Future<bool> _testCameraIMUCalibration4(TestState state, LogState logState) async {
     try {
-      logState.info('📷 摄像头位置与IMU位置标定');
-      logState.info('   提示：此测试需要图像算法服务支持');
-      
-      await Future.delayed(const Duration(seconds: 1));
-      logState.success('✅ 摄像头IMU标定完成（模拟通过）');
-      return true;
+      logState.info('📷 摄像头位置与IMU位置标定（棋盘格）');
+
+      final imagePath = await _captureAndDownloadImage4(
+        state,
+        logState,
+        saveFileName: 'camera_test_chessboard.jpg',
+      );
+      if (imagePath == null) {
+        return false;
+      }
+
+      if (!await _ensureImageTestServiceLoaded4(logState)) {
+        return false;
+      }
+
+      await _config.init();
+      final gridX = _config.chessboardGridX;
+      final gridY = _config.chessboardGridY;
+      final threshold = _config.chessboardThreshold;
+      logState.info('🔍 调用 imagetest_chessboard 检测棋盘格...');
+      logState.info('   参数: gridX=$gridX, gridY=$gridY, threshold=$threshold');
+
+      final result = await ImageTestService.instance.testChessboardAsync(
+        imagePath,
+        gridX: gridX,
+        gridY: gridY,
+        threshold: threshold,
+      );
+
+      if (result == null) {
+        logState.error('❌ 棋盘格检测调用失败');
+        return false;
+      }
+
+      if (result.containsKey('error')) {
+        logState.error('❌ 棋盘格检测异常: ${result['error']}');
+        return false;
+      }
+
+      final ret = result['ret'] as int;
+      final output = result['output'] as double;
+      final pass = result['pass'] as bool;
+
+      logState.info('   返回值: $ret (${pass ? "PASS" : "FAIL"})');
+      logState.info('   输出值: ${output.toStringAsFixed(4)}');
+      logState.info('   参数: gridX=$gridX, gridY=$gridY, threshold=$threshold');
+
+      if (pass) {
+        logState.success('✅ 摄像头IMU标定（棋盘格）测试通过');
+      } else {
+        logState.error(
+          '❌ 摄像头IMU标定（棋盘格）测试失败 '
+          '(output=${output.toStringAsFixed(4)}, threshold=$threshold)',
+        );
+      }
+      return pass;
     } catch (e) {
       logState.error('摄像头IMU标定失败: $e');
       return false;

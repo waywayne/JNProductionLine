@@ -60,6 +60,12 @@ const _jigCommands = [
     timeout: Duration(seconds: 30),
   ),
   _JigCommandDef(
+    command: JigCommands.onlyCheckerCardDown,
+    label: '棋盘格卡下降',
+    description: '摄像头 IMU 标定测试前下降棋盘格卡',
+    timeout: Duration(seconds: 30),
+  ),
+  _JigCommandDef(
     command: JigCommands.onlyColorCardDown,
     label: '色卡下降',
     description: '24 色色卡测试前下降色卡',

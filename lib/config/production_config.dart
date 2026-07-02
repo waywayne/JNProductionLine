@@ -40,6 +40,9 @@ class ProductionConfig {
   static const String _keyJigSerialPort = 'jig_serial_port';
   static const String _keyResolutionChartThreshold = 'resolution_chart_threshold';
   static const String _keyColorChartThreshold = 'color_chart_threshold';
+  static const String _keyChessboardGridX = 'chessboard_grid_x';
+  static const String _keyChessboardGridY = 'chessboard_grid_y';
+  static const String _keyChessboardThreshold = 'chessboard_threshold';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -70,6 +73,9 @@ class ProductionConfig {
   static const String defaultJigSerialPort = '';  // 治具串口（工位4），空则未配置
   static const double defaultResolutionChartThreshold = 700.0;  // ISO12233 分辨率图卡阈值
   static const double defaultColorChartThreshold = 11.0;  // 24色色卡阈值
+  static const int defaultChessboardGridX = 17;  // imagetest_chessboard grid_x 默认值
+  static const int defaultChessboardGridY = 29;  // imagetest_chessboard grid_y 默认值
+  static const double defaultChessboardThreshold = 1.0;  // imagetest_chessboard 阈值默认值
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -280,6 +286,24 @@ class ProductionConfig {
     await _prefs?.setDouble(_keyColorChartThreshold, value);
   }
 
+  int get chessboardGridX =>
+      _prefs?.getInt(_keyChessboardGridX) ?? defaultChessboardGridX;
+  Future<void> setChessboardGridX(int value) async {
+    await _prefs?.setInt(_keyChessboardGridX, value);
+  }
+
+  int get chessboardGridY =>
+      _prefs?.getInt(_keyChessboardGridY) ?? defaultChessboardGridY;
+  Future<void> setChessboardGridY(int value) async {
+    await _prefs?.setInt(_keyChessboardGridY, value);
+  }
+
+  double get chessboardThreshold =>
+      _prefs?.getDouble(_keyChessboardThreshold) ?? defaultChessboardThreshold;
+  Future<void> setChessboardThreshold(double value) async {
+    await _prefs?.setDouble(_keyChessboardThreshold, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -309,6 +333,9 @@ class ProductionConfig {
     await setJigSerialPort(defaultJigSerialPort);
     await setResolutionChartThreshold(defaultResolutionChartThreshold);
     await setColorChartThreshold(defaultColorChartThreshold);
+    await setChessboardGridX(defaultChessboardGridX);
+    await setChessboardGridY(defaultChessboardGridY);
+    await setChessboardThreshold(defaultChessboardThreshold);
   }
 
   /// 获取所有配置的摘要
@@ -340,6 +367,9 @@ class ProductionConfig {
       '治具串口(工位4)': jigSerialPort.isEmpty ? '(未配置)' : jigSerialPort,
       '分辨率图卡阈值': resolutionChartThreshold,
       '色卡阈值': colorChartThreshold,
+      '棋盘格 grid_x': chessboardGridX,
+      '棋盘格 grid_y': chessboardGridY,
+      '棋盘格阈值': chessboardThreshold,
     };
   }
 }

@@ -39,6 +39,9 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _jigSerialPortController;
   late TextEditingController _resolutionChartThresholdController;
   late TextEditingController _colorChartThresholdController;
+  late TextEditingController _chessboardGridXController;
+  late TextEditingController _chessboardGridYController;
+  late TextEditingController _chessboardThresholdController;
 
   @override
   void initState() {
@@ -73,6 +76,12 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
         TextEditingController(text: _config.resolutionChartThreshold.toString());
     _colorChartThresholdController =
         TextEditingController(text: _config.colorChartThreshold.toString());
+    _chessboardGridXController =
+        TextEditingController(text: _config.chessboardGridX.toString());
+    _chessboardGridYController =
+        TextEditingController(text: _config.chessboardGridY.toString());
+    _chessboardThresholdController =
+        TextEditingController(text: _config.chessboardThreshold.toString());
   }
 
   @override
@@ -101,6 +110,9 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _jigSerialPortController.dispose();
     _resolutionChartThresholdController.dispose();
     _colorChartThresholdController.dispose();
+    _chessboardGridXController.dispose();
+    _chessboardGridYController.dispose();
+    _chessboardThresholdController.dispose();
     super.dispose();
   }
 
@@ -133,6 +145,15 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       );
       await _config.setColorChartThreshold(
         double.parse(_colorChartThresholdController.text),
+      );
+      await _config.setChessboardGridX(
+        int.parse(_chessboardGridXController.text),
+      );
+      await _config.setChessboardGridY(
+        int.parse(_chessboardGridYController.text),
+      );
+      await _config.setChessboardThreshold(
+        double.parse(_chessboardThresholdController.text),
       );
 
       if (mounted) {
@@ -469,6 +490,65 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
                 return null;
               },
               helperText: '24色色卡测试 imagetest_color_chart 阈值，默认 11.0',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _chessboardGridXController,
+              label: '棋盘格 grid_x',
+              hint: '17',
+              suffix: '',
+              icon: Icons.grid_on,
+              inputType: TextInputType.number,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入 grid_x';
+                }
+                final gridX = int.tryParse(value);
+                if (gridX == null || gridX <= 0) {
+                  return '请输入大于 0 的整数';
+                }
+                return null;
+              },
+              helperText: 'imagetest_chessboard X 方向网格数，默认 17',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _chessboardGridYController,
+              label: '棋盘格 grid_y',
+              hint: '29',
+              suffix: '',
+              icon: Icons.grid_on,
+              inputType: TextInputType.number,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入 grid_y';
+                }
+                final gridY = int.tryParse(value);
+                if (gridY == null || gridY <= 0) {
+                  return '请输入大于 0 的整数';
+                }
+                return null;
+              },
+              helperText: 'imagetest_chessboard Y 方向网格数，默认 29',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _chessboardThresholdController,
+              label: '棋盘格阈值',
+              hint: '1.0',
+              suffix: '',
+              icon: Icons.crop_free,
+              inputType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入棋盘格阈值';
+                }
+                if (double.tryParse(value) == null) {
+                  return '请输入有效的数值';
+                }
+                return null;
+              },
+              helperText: '摄像头 IMU 标定 imagetest_chessboard 阈值，默认 1.0',
             ),
             const SizedBox(height: 24),
 
