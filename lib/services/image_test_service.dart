@@ -314,18 +314,8 @@ class ImageTestService {
     }
   }
 
-  /// 在 Isolate 中运行棋盘格检测（避免阻塞 UI 线程）
-  /// 参数通过 Map 传递，因为 Isolate 不能传递 FFI 对象
-  Future<Map<String, dynamic>?> testChessboardAsync(
-    String imagePath, {
-    int gridX = 17,
-    int gridY = 29,
-    double threshold = 1.0,
-  }) async {
-    // 获取库文件路径（需要在 isolate 中重新打开）
-    if (!_isLoaded || _lib == null) return null;
-
-    // 找到已加载的库路径
+  /// 查找 libimage_test.so 路径（Isolate 中需重新打开动态库）
+  String? _resolveLibPath() {
     final executableDir = File(Platform.resolvedExecutable).parent.path;
     final candidates = [
       '$executableDir/lib/libimage_test.so',
@@ -337,29 +327,88 @@ class ImageTestService {
       'lib/image_detect/libimage_test.so',
     ];
 
-    String? libPath;
     for (final path in candidates) {
       if (File(path).existsSync()) {
-        libPath = path;
-        break;
+        return path;
       }
     }
+    return null;
+  }
 
+  Future<Map<String, dynamic>?> _runInIsolate(
+    Map<String, dynamic> params,
+    Map<String, dynamic>? Function(Map<String, dynamic>) runner,
+  ) async {
+    try {
+      return await Isolate.run(() => runner(params));
+    } catch (e) {
+      return {'ret': -1, 'output': 0.0, 'pass': false, 'error': e.toString()};
+    }
+  }
+
+  /// 在 Isolate 中运行棋盘格检测（避免阻塞 UI 线程）
+  /// 参数通过 Map 传递，因为 Isolate 不能传递 FFI 对象
+  Future<Map<String, dynamic>?> testChessboardAsync(
+    String imagePath, {
+    int gridX = 17,
+    int gridY = 29,
+    double threshold = 1.0,
+  }) async {
+    if (!_isLoaded || _lib == null) return null;
+
+    final libPath = _resolveLibPath();
     if (libPath == null) return null;
 
-    final params = {
-      'libPath': libPath,
-      'imagePath': imagePath,
-      'gridX': gridX,
-      'gridY': gridY,
-      'threshold': threshold,
-    };
+    return _runInIsolate(
+      {
+        'libPath': libPath,
+        'imagePath': imagePath,
+        'gridX': gridX,
+        'gridY': gridY,
+        'threshold': threshold,
+      },
+      _runChessboardInIsolate,
+    );
+  }
 
-    try {
-      return await Isolate.run(() => _runChessboardInIsolate(params));
-    } catch (e) {
-      return null;
-    }
+  /// 在 Isolate 中运行分辨率图卡检测（避免原生库异常导致整个应用闪退）
+  Future<Map<String, dynamic>?> testResolutionChartAsync(
+    String imagePath, {
+    double threshold = 700.0,
+  }) async {
+    if (!_isLoaded || _lib == null) return null;
+
+    final libPath = _resolveLibPath();
+    if (libPath == null) return null;
+
+    return _runInIsolate(
+      {
+        'libPath': libPath,
+        'imagePath': imagePath,
+        'threshold': threshold,
+      },
+      _runResolutionChartInIsolate,
+    );
+  }
+
+  /// 在 Isolate 中运行色卡检测（避免原生库异常导致整个应用闪退）
+  Future<Map<String, dynamic>?> testColorChartAsync(
+    String imagePath, {
+    double threshold = 11.0,
+  }) async {
+    if (!_isLoaded || _lib == null) return null;
+
+    final libPath = _resolveLibPath();
+    if (libPath == null) return null;
+
+    return _runInIsolate(
+      {
+        'libPath': libPath,
+        'imagePath': imagePath,
+        'threshold': threshold,
+      },
+      _runColorChartInIsolate,
+    );
   }
 
   /// Isolate 中执行的棋盘格检测（顶层静态方法）
@@ -388,6 +437,78 @@ class ImageTestService {
 
       try {
         final ret = chessboardFn(pathPtr, gridX, gridY, threshold, outputPtr);
+        return {
+          'ret': ret,
+          'output': outputPtr.value,
+          'pass': ret == 0,
+        };
+      } finally {
+        calloc.free(pathPtr);
+        calloc.free(outputPtr);
+      }
+    } catch (e) {
+      return {'ret': -1, 'output': 0.0, 'pass': false, 'error': e.toString()};
+    }
+  }
+
+  static Map<String, dynamic>? _runResolutionChartInIsolate(Map<String, dynamic> params) {
+    final libPath = params['libPath'] as String;
+    final imagePath = params['imagePath'] as String;
+    final threshold = params['threshold'] as double;
+
+    try {
+      final lib = DynamicLibrary.open(libPath);
+
+      late final int Function(Pointer<Utf8>, double, Pointer<Double>) resolutionFn;
+      try {
+        resolutionFn = lib.lookupFunction<_ImagetestResolutionChartC, _ImagetestResolutionChartDart>(
+            'imagetest_resolution_chart');
+      } catch (_) {
+        resolutionFn = lib.lookupFunction<_ImagetestResolutionChartC, _ImagetestResolutionChartDart>(
+            '_Z26imagetest_resolution_chartPKcdPd');
+      }
+
+      final pathPtr = imagePath.toNativeUtf8();
+      final outputPtr = calloc<Double>();
+
+      try {
+        final ret = resolutionFn(pathPtr, threshold, outputPtr);
+        return {
+          'ret': ret,
+          'output': outputPtr.value,
+          'pass': ret == 0,
+        };
+      } finally {
+        calloc.free(pathPtr);
+        calloc.free(outputPtr);
+      }
+    } catch (e) {
+      return {'ret': -1, 'output': 0.0, 'pass': false, 'error': e.toString()};
+    }
+  }
+
+  static Map<String, dynamic>? _runColorChartInIsolate(Map<String, dynamic> params) {
+    final libPath = params['libPath'] as String;
+    final imagePath = params['imagePath'] as String;
+    final threshold = params['threshold'] as double;
+
+    try {
+      final lib = DynamicLibrary.open(libPath);
+
+      late final int Function(Pointer<Utf8>, double, Pointer<Double>) colorChartFn;
+      try {
+        colorChartFn = lib.lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
+            'imagetest_color_chart');
+      } catch (_) {
+        colorChartFn = lib.lookupFunction<_ImagetestColorChartC, _ImagetestColorChartDart>(
+            '_Z21imagetest_color_chartPKcdPd');
+      }
+
+      final pathPtr = imagePath.toNativeUtf8();
+      final outputPtr = calloc<Double>();
+
+      try {
+        final ret = colorChartFn(pathPtr, threshold, outputPtr);
         return {
           'ret': ret,
           'output': outputPtr.value,

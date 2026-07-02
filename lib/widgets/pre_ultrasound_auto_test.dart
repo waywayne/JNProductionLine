@@ -126,6 +126,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     super.dispose();
   }
 
+  /// 异步测试流程中安全更新 UI，避免 TestState.notifyListeners 触发重建时 setState 冲突
+  void _safeSetState(VoidCallback fn) {
+    if (!mounted) return;
+    void apply() {
+      if (mounted) setState(fn);
+    }
+
+    if (WidgetsBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      apply();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => apply());
+    }
+  }
+
   void _initializeSteps1() {
     _stepResults1.clear();
     _stepResults1.addAll([
@@ -3491,7 +3505,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
     _cancelRestartCommand4 = false; // 重置标志
     
-    setState(() {
+    _safeSetState(() {
       _isAutoTesting4 = true;
       _currentStep4 = 0;
       _initializeSteps4();
@@ -3514,7 +3528,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     if (_enableJigCommands4) {
       if (!await _connectJigSerial4(logState)) {
-        setState(() => _isAutoTesting4 = false);
+        _safeSetState(() => _isAutoTesting4 = false);
         return;
       }
     } else {
@@ -3525,13 +3539,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     try {
     for (int i = 0; i < _stepResults4.length; i++) {
-      if (!_isAutoTesting4) break;
+      if (!mounted || !_isAutoTesting4) break;
 
       if (i >= 3) {
         reachedMesPhase = true;
       }
 
-      setState(() {
+      _safeSetState(() {
         _currentStep4 = i + 1;
         _stepResults4[i].status = TestStepStatus.running;
       });
@@ -3752,9 +3766,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         logState.error('步骤${i + 1}异常: $e');
       }
 
-      if (!_isAutoTesting4) break;
+      if (!mounted || !_isAutoTesting4) break;
 
-      setState(() {
+      _safeSetState(() {
         _stepResults4[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
         _stepResults4[i].message = message;
       });
@@ -3790,7 +3804,11 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       await Future.delayed(const Duration(milliseconds: 500));
     }
 
-    setState(() => _isAutoTesting4 = false);
+    _safeSetState(() => _isAutoTesting4 = false);
+    } catch (e, stackTrace) {
+      logState.error('❌ 工位4自动测试流程异常: $e');
+      logState.error('   $stackTrace', type: LogType.debug);
+      _safeSetState(() => _isAutoTesting4 = false);
     } finally {
       await _releaseJigFixture4(logState);
     }
@@ -4907,13 +4925,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('🔍 调用 imagetest_resolution_chart 检测分辨率图卡...');
       logState.info('   参数: threshold=$threshold');
 
-      final result = ImageTestService.instance.testResolutionChart(
+      final result = await ImageTestService.instance.testResolutionChartAsync(
         imagePath,
         threshold: threshold,
       );
 
       if (result == null) {
         logState.error('❌ 分辨率图卡检测调用失败');
+        return false;
+      }
+
+      if (result.containsKey('error')) {
+        logState.error('❌ 分辨率图卡检测异常: ${result['error']}');
         return false;
       }
 
@@ -4959,13 +4982,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       logState.info('🔍 调用 imagetest_color_chart 检测色卡...');
       logState.info('   参数: threshold=$threshold');
 
-      final result = ImageTestService.instance.testColorChart(
+      final result = await ImageTestService.instance.testColorChartAsync(
         imagePath,
         threshold: threshold,
       );
 
       if (result == null) {
         logState.error('❌ 色卡检测调用失败');
+        return false;
+      }
+
+      if (result.containsKey('error')) {
+        logState.error('❌ 色卡检测异常: ${result['error']}');
         return false;
       }
 
@@ -6842,17 +6870,17 @@ class _IMUCalibrationDialogState extends State<_IMUCalibrationDialog> {
             _onSuccess();
           } else if (opt == 0x00) {
             widget.logState.info('🔄 设备IMU启动中...', type: LogType.debug);
-            setState(() => _statusText = '设备IMU启动中...');
+            if (mounted) setState(() => _statusText = '设备IMU启动中...');
           } else if (opt == 0x01) {
             widget.logState.info('🔄 设备朝向检测中...', type: LogType.debug);
-            setState(() => _statusText = '设备朝向检测中...');
+            if (mounted) setState(() => _statusText = '设备朝向检测中...');
           } else if (opt == 0x02) {
             widget.logState.info('🔄 设备校准中...', type: LogType.debug);
-            setState(() => _statusText = '设备校准中...');
+            if (mounted) setState(() => _statusText = '设备校准中...');
           } else {
             _retryCount++;
             widget.logState.warning('⚠️ 未知状态: 0x${opt.toRadixString(16).toUpperCase()} 重试 $_retryCount/$_maxRetries', type: LogType.debug);
-            setState(() => _statusText = '未知状态... 重试 $_retryCount/$_maxRetries');
+            if (mounted) setState(() => _statusText = '未知状态... 重试 $_retryCount/$_maxRetries');
             if (_retryCount >= _maxRetries) {
               _onMaxRetriesExceeded();
             }
