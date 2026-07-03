@@ -10359,6 +10359,7 @@ class TestState extends ChangeNotifier {
   Future<bool> downloadImageFromDevice(
     String deviceIP, {
     String saveFileName = 'camera_test.jpg',
+    bool notifyOnSuccess = true,
   }) async {
     try {
       _logState?.info('📥 开始从设备下载图片...', type: LogType.debug);
@@ -10458,7 +10459,9 @@ class TestState extends ChangeNotifier {
               _sensorImagePath = savePath;
               // 同路径重复下载时清除 Flutter 解码缓存，避免 Image.file 显示旧图
               PaintingBinding.instance.imageCache.evict(FileImage(file));
-              notifyListeners();
+              if (notifyOnSuccess) {
+                notifyListeners();
+              }
               return true;
             }
           }

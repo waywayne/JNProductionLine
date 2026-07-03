@@ -13,7 +13,7 @@ const char* imagetest_getversion();
  *
  * image_path               [in]   the input path of JPEG image
  * grid_x					[in]   the grid cells in x direction, default: 17
- * grid_y					[in]   the grid cells in x direction, default: 29
+ * grid_y					[in]   the grid cells in y direction, default: 29
  * threshold                [in]   the threshold value, default: 1.0
  * output					[out]  the output value
  * @return                          0: PASS, otherwise: FAIL

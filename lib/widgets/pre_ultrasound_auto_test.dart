@@ -3432,7 +3432,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   // ========== 工位4: 停止测试 ==========
   void _stopAutoTest4() {
-    setState(() {
+    _safeSetState(() {
       _isAutoTesting4 = false;
     });
   }
@@ -3824,16 +3824,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       await Future.delayed(const Duration(milliseconds: 500));
     }
-
-    _safeSetState(() => _isAutoTesting4 = false);
     } catch (e, stackTrace) {
       logState.error('❌ 工位4自动测试流程异常: $e');
       logState.error('   $stackTrace', type: LogType.debug);
-      _safeSetState(() => _isAutoTesting4 = false);
     } finally {
       await _releaseJigFixture4(logState);
     }
 
+    try {
     final passedCount = _stepResults4.where((s) => s.status == TestStepStatus.passed).length;
     final totalCount = _stepResults4.length;
     final allPassed = passedCount == totalCount;
@@ -3896,6 +3894,12 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       await _sendDeviceRestartCommand(state, logState);
     }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    } catch (e, stackTrace) {
+      logState.error('❌ 工位4收尾流程异常: $e');
+      logState.error('   $stackTrace', type: LogType.debug);
+    } finally {
+      _safeSetState(() => _isAutoTesting4 = false);
+    }
   }
 
   // ========== 工位5: 开始自动测试 ==========
@@ -4914,6 +4918,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     final downloadSuccess = await state.downloadImageFromDevice(
       _deviceIP4!,
       saveFileName: saveFileName,
+      notifyOnSuccess: false,
     );
     if (!downloadSuccess) {
       logState.error('❌ 图片下载失败');
@@ -4991,10 +4996,6 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       return false;
     }
 
-    final version = imageTestService.getVersion();
-    if (version != null) {
-      logState.info('   库版本: $version');
-    }
     return true;
   }
 
@@ -6223,7 +6224,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               const Spacer(),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: _isAutoTesting4 ? null : () => _startAutoTest4(state),
+                  onPressed: _isAutoTesting4
+                      ? null
+                      : () {
+                          final log = context.read<LogState>();
+                          _startAutoTest4(state).catchError((Object e, StackTrace stackTrace) {
+                            log.error('❌ 工位4自动测试未捕获异常: $e');
+                            log.error('   $stackTrace', type: LogType.debug);
+                            _safeSetState(() => _isAutoTesting4 = false);
+                          });
+                        },
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('开始自动测试'),
                   style: ElevatedButton.styleFrom(

@@ -63,6 +63,7 @@ typedef _ImagetestGreyboardDart = int Function(
 class ImageTestService {
   static ImageTestService? _instance;
   DynamicLibrary? _lib;
+  String? _libPath;
   bool _isLoaded = false;
 
   _ImagetestGetversionDart? _getVersion;
@@ -80,52 +81,61 @@ class ImageTestService {
 
   bool get isLoaded => _isLoaded;
 
-  /// 加载原生库
-  /// 搜索多个路径查找 libimage_test.so
+  /// 定位原生库路径（不在主 Isolate 中打开动态库，避免与 Isolate 检测重复加载 OpenCV 导致崩溃）
   /// [searchLog] 可选回调，用于输出搜索过程日志
   bool load({void Function(String message)? searchLog}) {
     if (_isLoaded) return true;
 
     final executableDir = File(Platform.resolvedExecutable).parent.path;
 
-    final candidates = [
-      '$executableDir/lib/libimage_test.so',
-      '$executableDir/libimage_test.so',
-      '/opt/jn-production-line/lib/libimage_test.so',
-      '/usr/local/lib/libimage_test.so',
-      '/usr/lib/libimage_test.so',
-      '${Platform.environment['HOME']}/git/JNProductionLine/lib/image_detect/libimage_test.so',
-      'lib/image_detect/libimage_test.so',
-    ];
-
     searchLog?.call('🔍 搜索 libimage_test.so ...');
     searchLog?.call('   可执行文件目录: $executableDir');
 
-    for (final path in candidates) {
-      try {
-        final exists = File(path).existsSync();
-        searchLog?.call('   ${exists ? "✅" : "❌"} $path');
-        if (exists) {
-          _lib = DynamicLibrary.open(path);
-          searchLog?.call('   ✅ 库文件已打开: $path');
-          try {
-            _bindFunctions(searchLog: searchLog);
-          } catch (e) {
-            searchLog?.call('   ⚠️  绑定函数时异常(已忽略): $e');
-          }
-          _isLoaded = true;
-          searchLog?.call('   ✅ 成功加载并绑定函数');
-          return true;
-        }
-      } catch (e) {
-        searchLog?.call('   ⚠️  $path 加载异常: $e');
-        _lib = null;
+    for (final path in _libSearchCandidates(executableDir)) {
+      final exists = File(path).existsSync();
+      searchLog?.call('   ${exists ? "✅" : "❌"} $path');
+      if (exists) {
+        _libPath = path;
+        _isLoaded = true;
+        searchLog?.call('   ✅ 已找到库文件: $path');
+        searchLog?.call('   ℹ️  算法检测将在独立 Isolate 中加载库（避免主线程重复加载）');
+        return true;
       }
     }
 
-    searchLog?.call('❌ 所有路径均未找到或加载失败 libimage_test.so');
+    searchLog?.call('❌ 所有路径均未找到 libimage_test.so');
     return false;
   }
+
+  /// 同步检测接口需在主 Isolate 打开库；异步检测仅标记路径即可
+  bool _ensureMainLibLoaded({void Function(String message)? searchLog}) {
+    if (_lib != null) return true;
+    if (!_isLoaded) return false;
+
+    final path = _libPath ?? _resolveLibPath();
+    if (path == null) return false;
+
+    try {
+      _lib = DynamicLibrary.open(path);
+      _libPath = path;
+      _bindFunctions(searchLog: searchLog);
+      return true;
+    } catch (e) {
+      searchLog?.call('   ⚠️  主线程打开库失败: $e');
+      _lib = null;
+      return false;
+    }
+  }
+
+  List<String> _libSearchCandidates(String executableDir) => [
+        '$executableDir/lib/libimage_test.so',
+        '$executableDir/libimage_test.so',
+        '/opt/jn-production-line/lib/libimage_test.so',
+        '/usr/local/lib/libimage_test.so',
+        '/usr/lib/libimage_test.so',
+        '${Platform.environment['HOME']}/git/JNProductionLine/lib/image_detect/libimage_test.so',
+        'lib/image_detect/libimage_test.so',
+      ];
 
   void _bindFunctions({void Function(String message)? searchLog}) {
     // 注意: 库是 C++ 编译的，头文件无 extern "C"，符号被 C++ name mangling。
@@ -207,9 +217,9 @@ class ImageTestService {
     }
   }
 
-  /// 获取库版本
+  /// 获取库版本（同步接口，需在主 Isolate 打开库）
   String? getVersion() {
-    if (!_isLoaded || _getVersion == null) return null;
+    if (!_ensureMainLibLoaded() || _getVersion == null) return null;
     final ptr = _getVersion!();
     if (ptr == nullptr) return null;
     return ptr.toDartString();
@@ -227,7 +237,7 @@ class ImageTestService {
     int gridY = 29,
     double threshold = 1.0,
   }) {
-    if (!_isLoaded || _chessboard == null) return null;
+    if (!_ensureMainLibLoaded() || _chessboard == null) return null;
 
     final pathPtr = imagePath.toNativeUtf8();
     final outputPtr = calloc<Double>();
@@ -250,7 +260,7 @@ class ImageTestService {
     String imagePath, {
     double threshold = 11.0,
   }) {
-    if (!_isLoaded || _colorChart == null) return null;
+    if (!_ensureMainLibLoaded() || _colorChart == null) return null;
 
     final pathPtr = imagePath.toNativeUtf8();
     final outputPtr = calloc<Double>();
@@ -273,7 +283,7 @@ class ImageTestService {
     String imagePath, {
     double threshold = 700.0,
   }) {
-    if (!_isLoaded || _resolutionChart == null) return null;
+    if (!_ensureMainLibLoaded() || _resolutionChart == null) return null;
 
     final pathPtr = imagePath.toNativeUtf8();
     final outputPtr = calloc<Double>();
@@ -296,7 +306,7 @@ class ImageTestService {
     String imagePath, {
     double threshold = 0.68,
   }) {
-    if (!_isLoaded || _greyboard == null) return null;
+    if (!_ensureMainLibLoaded() || _greyboard == null) return null;
 
     final pathPtr = imagePath.toNativeUtf8();
     final outputPtr = calloc<Double>();
@@ -316,19 +326,14 @@ class ImageTestService {
 
   /// 查找 libimage_test.so 路径（Isolate 中需重新打开动态库）
   String? _resolveLibPath() {
-    final executableDir = File(Platform.resolvedExecutable).parent.path;
-    final candidates = [
-      '$executableDir/lib/libimage_test.so',
-      '$executableDir/libimage_test.so',
-      '/opt/jn-production-line/lib/libimage_test.so',
-      '/usr/local/lib/libimage_test.so',
-      '/usr/lib/libimage_test.so',
-      '${Platform.environment['HOME']}/git/JNProductionLine/lib/image_detect/libimage_test.so',
-      'lib/image_detect/libimage_test.so',
-    ];
+    if (_libPath != null && File(_libPath!).existsSync()) {
+      return _libPath;
+    }
 
-    for (final path in candidates) {
+    final executableDir = File(Platform.resolvedExecutable).parent.path;
+    for (final path in _libSearchCandidates(executableDir)) {
       if (File(path).existsSync()) {
+        _libPath = path;
         return path;
       }
     }
@@ -354,7 +359,7 @@ class ImageTestService {
     int gridY = 29,
     double threshold = 1.0,
   }) async {
-    if (!_isLoaded || _lib == null) return null;
+    if (!_isLoaded) return null;
 
     final libPath = _resolveLibPath();
     if (libPath == null) return null;
@@ -376,7 +381,7 @@ class ImageTestService {
     String imagePath, {
     double threshold = 700.0,
   }) async {
-    if (!_isLoaded || _lib == null) return null;
+    if (!_isLoaded) return null;
 
     final libPath = _resolveLibPath();
     if (libPath == null) return null;
@@ -396,7 +401,7 @@ class ImageTestService {
     String imagePath, {
     double threshold = 11.0,
   }) async {
-    if (!_isLoaded || _lib == null) return null;
+    if (!_isLoaded) return null;
 
     final libPath = _resolveLibPath();
     if (libPath == null) return null;
