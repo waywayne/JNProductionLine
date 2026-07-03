@@ -416,6 +416,26 @@ class ImageTestService {
     );
   }
 
+  /// 在 Isolate 中运行灰板检测（避免原生库异常导致整个应用闪退）
+  Future<Map<String, dynamic>?> testGreyboardAsync(
+    String imagePath, {
+    double threshold = 0.68,
+  }) async {
+    if (!_isLoaded) return null;
+
+    final libPath = _resolveLibPath();
+    if (libPath == null) return null;
+
+    return _runInIsolate(
+      {
+        'libPath': libPath,
+        'imagePath': imagePath,
+        'threshold': threshold,
+      },
+      _runGreyboardInIsolate,
+    );
+  }
+
   /// Isolate 中执行的棋盘格检测（顶层静态方法）
   static Map<String, dynamic>? _runChessboardInIsolate(Map<String, dynamic> params) {
     final libPath = params['libPath'] as String;
@@ -514,6 +534,42 @@ class ImageTestService {
 
       try {
         final ret = colorChartFn(pathPtr, threshold, outputPtr);
+        return {
+          'ret': ret,
+          'output': outputPtr.value,
+          'pass': ret == 0,
+        };
+      } finally {
+        calloc.free(pathPtr);
+        calloc.free(outputPtr);
+      }
+    } catch (e) {
+      return {'ret': -1, 'output': 0.0, 'pass': false, 'error': e.toString()};
+    }
+  }
+
+  static Map<String, dynamic>? _runGreyboardInIsolate(Map<String, dynamic> params) {
+    final libPath = params['libPath'] as String;
+    final imagePath = params['imagePath'] as String;
+    final threshold = params['threshold'] as double;
+
+    try {
+      final lib = DynamicLibrary.open(libPath);
+
+      late final int Function(Pointer<Utf8>, double, Pointer<Double>) greyboardFn;
+      try {
+        greyboardFn = lib.lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
+            'imagetest_greyboard');
+      } catch (_) {
+        greyboardFn = lib.lookupFunction<_ImagetestGreyboardC, _ImagetestGreyboardDart>(
+            '_Z19imagetest_greyboardPKcdPd');
+      }
+
+      final pathPtr = imagePath.toNativeUtf8();
+      final outputPtr = calloc<Double>();
+
+      try {
+        final ret = greyboardFn(pathPtr, threshold, outputPtr);
         return {
           'ret': ret,
           'output': outputPtr.value,

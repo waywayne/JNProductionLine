@@ -66,6 +66,12 @@ const _jigCommands = [
     timeout: Duration(seconds: 30),
   ),
   _JigCommandDef(
+    command: JigCommands.onlyGrayCardDown,
+    label: '灰卡下降',
+    description: '纯色画面/灰板测试前下降灰卡',
+    timeout: Duration(seconds: 30),
+  ),
+  _JigCommandDef(
     command: JigCommands.onlyColorCardDown,
     label: '色卡下降',
     description: '24 色色卡测试前下降色卡',

@@ -42,6 +42,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _chessboardGridXController;
   late TextEditingController _chessboardGridYController;
   late TextEditingController _chessboardThresholdController;
+  late TextEditingController _greyboardThresholdController;
 
   @override
   void initState() {
@@ -82,6 +83,8 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
         TextEditingController(text: _config.chessboardGridY.toString());
     _chessboardThresholdController =
         TextEditingController(text: _config.chessboardThreshold.toString());
+    _greyboardThresholdController =
+        TextEditingController(text: _config.greyboardThreshold.toString());
   }
 
   @override
@@ -113,6 +116,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _chessboardGridXController.dispose();
     _chessboardGridYController.dispose();
     _chessboardThresholdController.dispose();
+    _greyboardThresholdController.dispose();
     super.dispose();
   }
 
@@ -154,6 +158,9 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       );
       await _config.setChessboardThreshold(
         double.parse(_chessboardThresholdController.text),
+      );
+      await _config.setGreyboardThreshold(
+        double.parse(_greyboardThresholdController.text),
       );
 
       if (mounted) {
@@ -549,6 +556,25 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
                 return null;
               },
               helperText: '摄像头 IMU 标定 imagetest_chessboard 阈值，默认 1.0',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _greyboardThresholdController,
+              label: '灰板阈值',
+              hint: '0.68',
+              suffix: '',
+              icon: Icons.gradient,
+              inputType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return '请输入灰板阈值';
+                }
+                if (double.tryParse(value) == null) {
+                  return '请输入有效的数值';
+                }
+                return null;
+              },
+              helperText: '纯色画面/灰板测试 imagetest_greyboard 阈值，默认 0.68',
             ),
             const SizedBox(height: 24),
 

@@ -43,6 +43,7 @@ class ProductionConfig {
   static const String _keyChessboardGridX = 'chessboard_grid_x';
   static const String _keyChessboardGridY = 'chessboard_grid_y';
   static const String _keyChessboardThreshold = 'chessboard_threshold';
+  static const String _keyGreyboardThreshold = 'greyboard_threshold';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -76,6 +77,7 @@ class ProductionConfig {
   static const int defaultChessboardGridX = 17;  // imagetest_chessboard grid_x 默认值
   static const int defaultChessboardGridY = 29;  // imagetest_chessboard grid_y 默认值
   static const double defaultChessboardThreshold = 1.0;  // imagetest_chessboard 阈值默认值
+  static const double defaultGreyboardThreshold = 0.68;  // imagetest_greyboard 阈值默认值
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -304,6 +306,12 @@ class ProductionConfig {
     await _prefs?.setDouble(_keyChessboardThreshold, value);
   }
 
+  double get greyboardThreshold =>
+      _prefs?.getDouble(_keyGreyboardThreshold) ?? defaultGreyboardThreshold;
+  Future<void> setGreyboardThreshold(double value) async {
+    await _prefs?.setDouble(_keyGreyboardThreshold, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -336,6 +344,7 @@ class ProductionConfig {
     await setChessboardGridX(defaultChessboardGridX);
     await setChessboardGridY(defaultChessboardGridY);
     await setChessboardThreshold(defaultChessboardThreshold);
+    await setGreyboardThreshold(defaultGreyboardThreshold);
   }
 
   /// 获取所有配置的摘要
@@ -370,6 +379,7 @@ class ProductionConfig {
       '棋盘格 grid_x': chessboardGridX,
       '棋盘格 grid_y': chessboardGridY,
       '棋盘格阈值': chessboardThreshold,
+      '灰板阈值': greyboardThreshold,
     };
   }
 }

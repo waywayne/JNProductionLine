@@ -77,6 +77,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   bool _enableJigCommands4 = true; // 治具指令开关，默认开启
   bool _skipWiFiRangeTest4 = false; // 跳过WiFi拉距测试
   bool _skipIMUCalibration4 = false; // 跳过IMU校准(棋盘格)
+  bool _skipGrayCardTest4 = false; // 跳过灰卡测试
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -3381,16 +3382,17 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       TestStepResult(stepNumber: 12, name: '光敏传感器测试(暗)', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 13, name: '治具棋盘格卡下降', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 14, name: '摄像头IMU位置标定', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: '纯色画面测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 16, name: 'IMU校准', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 17, name: 'IMU值测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 18, name: '治具分辨率图卡下降', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 19, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 20, name: '治具色卡下降', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 21, name: '24色色卡测试', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 22, name: '治具打开', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 23, name: '治具断电', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 24, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '治具灰卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '纯色画面测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: 'IMU校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 18, name: 'IMU值测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 19, name: '治具分辨率图卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 20, name: 'ISO12233 MTF测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 21, name: '治具色卡下降', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 22, name: '24色色卡测试', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 23, name: '治具打开', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 24, name: '治具断电', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 25, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -3521,6 +3523,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   治具指令: ${_enableJigCommands4 ? "开启" : "关闭（跳过所有治具步骤）"}');
     logState.info('   WiFi拉距测试: ${_skipWiFiRangeTest4 ? "跳过" : "执行"}');
     logState.info('   IMU校准(棋盘格): ${_skipIMUCalibration4 ? "跳过" : "执行"}');
+    logState.info('   灰卡测试: ${_skipGrayCardTest4 ? "跳过" : "执行"}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
@@ -3689,12 +3692,39 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
             break;
           case 14:
-            logState.info('步骤15: 纯色画面测试');
-            success = await _testPureColorStream4(state, logState);
-            message = success ? '纯色画面测试通过' : '纯色画面测试失败';
+            logState.info('步骤15: 治具灰卡下降');
+            if (_skipGrayCardTest4) {
+              logState.warning('⚠️ 已跳过灰卡测试');
+              success = true;
+              message = '已跳过灰卡测试';
+            } else {
+              success = await _runJigStep4(
+                JigCommands.onlyGrayCardDown,
+                logState,
+                description: '灰卡下降',
+                timeout: const Duration(seconds: 30),
+              );
+              message = success
+                  ? (_enableJigCommands4 ? '灰卡下降成功' : '治具指令已关闭，已跳过')
+                  : '灰卡下降失败';
+              if (success && _enableJigCommands4) {
+                await Future.delayed(const Duration(milliseconds: 500));
+              }
+            }
             break;
           case 15:
-            logState.info('步骤16: IMU校准');
+            logState.info('步骤16: 纯色画面测试');
+            if (_skipGrayCardTest4) {
+              logState.warning('⚠️ 已跳过灰卡测试');
+              success = true;
+              message = '已跳过灰卡测试';
+            } else {
+              success = await _testPureColorStream4(state, logState);
+              message = success ? '纯色画面测试通过' : '纯色画面测试失败';
+            }
+            break;
+          case 16:
+            logState.info('步骤17: IMU校准');
             if (_skipIMUCalibration4) {
               logState.warning('⚠️ 已跳过IMU校准');
               success = true;
@@ -3704,13 +3734,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'IMU校准完成' : 'IMU校准失败';
             }
             break;
-          case 16:
-            logState.info('步骤17: IMU值测试');
+          case 17:
+            logState.info('步骤18: IMU值测试');
             success = await _testIMUSensor(state, logState);
             message = success ? '获取到IMU值' : 'IMU传感器测试失败';
             break;
-          case 17:
-            logState.info('步骤18: 治具分辨率图卡下降');
+          case 18:
+            logState.info('步骤19: 治具分辨率图卡下降');
             success = await _runJigStep4(
               JigCommands.onlyResolutionCardDown,
               logState,
@@ -3724,13 +3754,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               await Future.delayed(const Duration(milliseconds: 500));
             }
             break;
-          case 18:
-            logState.info('步骤19: ISO12233图卡MTF测试');
+          case 19:
+            logState.info('步骤20: ISO12233图卡MTF测试');
             success = await _testISO12233MTF4(state, logState);
             message = success ? 'MTF测试通过' : 'MTF测试失败';
             break;
-          case 19:
-            logState.info('步骤20: 治具色卡下降');
+          case 20:
+            logState.info('步骤21: 治具色卡下降');
             success = await _runJigStep4(
               JigCommands.onlyColorCardDown,
               logState,
@@ -3744,13 +3774,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               await Future.delayed(const Duration(milliseconds: 500));
             }
             break;
-          case 20:
-            logState.info('步骤21: 24色色卡色彩误差测试');
+          case 21:
+            logState.info('步骤22: 24色色卡色彩误差测试');
             success = await _testColorChart4(state, logState);
             message = success ? '色彩误差测试通过' : '色彩误差测试失败';
             break;
-          case 21:
-            logState.info('步骤22: 治具打开');
+          case 22:
+            logState.info('步骤23: 治具打开');
             success = await _runJigStep4(
               JigCommands.open,
               logState,
@@ -3760,8 +3790,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 ? (_enableJigCommands4 ? '治具打开成功' : '治具指令已关闭，已跳过')
                 : '治具 OPEN 指令失败';
             break;
-          case 22:
-            logState.info('步骤23: 治具断电');
+          case 23:
+            logState.info('步骤24: 治具断电');
             success = await _runJigStep4(
               JigCommands.powerOut,
               logState,
@@ -3771,8 +3801,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 ? (_enableJigCommands4 ? '治具断电成功' : '治具指令已关闭，已跳过')
                 : '治具 POWER_OUT 指令失败';
             break;
-          case 23:
-            logState.info('步骤24: 产测结束');
+          case 24:
+            logState.info('步骤25: 产测结束');
             success = await _testProductionEnd4(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -4801,12 +4831,55 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   Future<bool> _testPureColorStream4(TestState state, LogState logState) async {
     try {
-      logState.info('🎨 纯色画面测试');
-      logState.info('   提示：此测试需要图像算法服务支持');
-      
-      await Future.delayed(const Duration(seconds: 1));
-      logState.success('✅ 纯色画面测试完成（模拟通过）');
-      return true;
+      logState.info('🎨 纯色画面测试（灰板检测）');
+
+      final imagePath = await _captureAndDownloadImage4(
+        state,
+        logState,
+        saveFileName: 'camera_test_greyboard.jpg',
+      );
+      if (imagePath == null) {
+        return false;
+      }
+
+      if (!await _ensureImageTestServiceLoaded4(logState)) {
+        return false;
+      }
+
+      await _config.init();
+      final threshold = _config.greyboardThreshold;
+      logState.info('🔍 调用 imagetest_greyboard 检测灰板...');
+      logState.info('   参数: threshold=$threshold');
+
+      final result = await ImageTestService.instance.testGreyboardAsync(
+        imagePath,
+        threshold: threshold,
+      );
+
+      if (result == null) {
+        logState.error('❌ 灰板检测调用失败');
+        return false;
+      }
+
+      if (result.containsKey('error')) {
+        logState.error('❌ 灰板检测异常: ${result['error']}');
+        return false;
+      }
+
+      final ret = result['ret'] as int;
+      final output = result['output'] as double;
+      final pass = result['pass'] as bool;
+
+      logState.info('   返回值: $ret (${pass ? "PASS" : "FAIL"})');
+      logState.info('   输出值: ${output.toStringAsFixed(4)}');
+      logState.info('   阈值: $threshold');
+
+      if (pass) {
+        logState.success('✅ 纯色画面测试通过');
+      } else {
+        logState.error('❌ 纯色画面测试失败 (output=${output.toStringAsFixed(4)}, threshold=$threshold)');
+      }
+      return pass;
     } catch (e) {
       logState.error('纯色画面测试失败: $e');
       return false;
@@ -6222,6 +6295,27 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 onChanged: _isAutoTesting4
                     ? null
                     : (value) => setState(() => _skipIMUCalibration4 = value),
+                activeColor: Colors.orange,
+              ),
+              const SizedBox(width: 12),
+              Icon(
+                Icons.gradient,
+                color: _skipGrayCardTest4 ? Colors.orange : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '跳过灰卡测试',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _skipGrayCardTest4 ? Colors.orange : Colors.grey,
+                ),
+              ),
+              Switch(
+                value: _skipGrayCardTest4,
+                onChanged: _isAutoTesting4
+                    ? null
+                    : (value) => setState(() => _skipGrayCardTest4 = value),
                 activeColor: Colors.orange,
               ),
               const Spacer(),
