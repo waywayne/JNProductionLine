@@ -4946,15 +4946,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     // 同路径覆盖下载后清除 Flutter 解码缓存，确保使用最新图片
     PaintingBinding.instance.imageCache.evict(FileImage(imageFile));
 
-    final rotatedPath = await _rotateImageCounterClockwise90(imagePath, logState);
-    if (rotatedPath == null) {
-      return null;
-    }
+    // 直接使用 FTP 下载的直出图，不再旋转
+    // final rotatedPath = await _rotateImageCounterClockwise90(imagePath, logState);
+    // if (rotatedPath == null) {
+    //   return null;
+    // }
+    // final rotatedFile = File(rotatedPath);
+    // final rotatedSize = await rotatedFile.length();
+    // logState.success('✅ 图片下载并旋转成功 (${(rotatedSize / 1024).toStringAsFixed(2)} KB): $rotatedPath');
+    // return rotatedPath;
 
-    final rotatedFile = File(rotatedPath);
-    final rotatedSize = await rotatedFile.length();
-    logState.success('✅ 图片下载并旋转成功 (${(rotatedSize / 1024).toStringAsFixed(2)} KB): $rotatedPath');
-    return rotatedPath;
+    logState.success('✅ 图片下载成功 (${(fileSize / 1024).toStringAsFixed(2)} KB): $imagePath');
+    return imagePath;
   }
 
   /// 将 JPEG 图片逆时针旋转 90 度并覆盖原文件
