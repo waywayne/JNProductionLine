@@ -76,7 +76,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   bool _jigFixtureClosed4 = false;
   bool _enableJigCommands4 = true; // 治具指令开关，默认开启
   bool _skipWiFiRangeTest4 = false; // 跳过WiFi拉距测试
-  bool _skipIMUCalibration4 = false; // 跳过IMU校准(棋盘格)
+  bool _skipCameraIMUCalibration4 = false; // 跳过步骤14: 摄像头位置与IMU位置标定(棋盘格)
   bool _skipGrayCardTest4 = false; // 跳过灰卡测试
 
   // 工位5状态
@@ -3522,7 +3522,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   连接方案: ${_getMethodName(_selectedMethod4)}');
     logState.info('   治具指令: ${_enableJigCommands4 ? "开启" : "关闭（跳过所有治具步骤）"}');
     logState.info('   WiFi拉距测试: ${_skipWiFiRangeTest4 ? "跳过" : "执行"}');
-    logState.info('   IMU校准(棋盘格): ${_skipIMUCalibration4 ? "跳过" : "执行"}');
+    logState.info('   摄像头IMU标定(棋盘格): ${_skipCameraIMUCalibration4 ? "跳过" : "执行"}');
     logState.info('   灰卡测试: ${_skipGrayCardTest4 ? "跳过" : "执行"}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
@@ -3688,8 +3688,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 13:
             logState.info('步骤14: 摄像头位置与IMU位置标定(棋盘格)');
-            success = await _testCameraIMUCalibration4(state, logState);
-            message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
+            if (_skipCameraIMUCalibration4) {
+              logState.warning('⚠️ 已跳过摄像头位置与IMU位置标定(棋盘格)');
+              success = true;
+              message = '已跳过摄像头IMU标定(棋盘格)';
+            } else {
+              success = await _testCameraIMUCalibration4(state, logState);
+              message = success ? '摄像头IMU标定通过' : '摄像头IMU标定失败';
+            }
             break;
           case 14:
             logState.info('步骤15: 治具灰卡下降');
@@ -3725,14 +3731,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 16:
             logState.info('步骤17: IMU校准');
-            if (_skipIMUCalibration4) {
-              logState.warning('⚠️ 已跳过IMU校准');
-              success = true;
-              message = '已跳过IMU校准';
-            } else {
-              success = await _testIMUCalibration4(state, logState);
-              message = success ? 'IMU校准完成' : 'IMU校准失败';
-            }
+            success = await _testIMUCalibration4(state, logState);
+            message = success ? 'IMU校准完成' : 'IMU校准失败';
             break;
           case 17:
             logState.info('步骤18: IMU值测试');
@@ -6293,22 +6293,22 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 children: [
                   Icon(
                     Icons.compass_calibration,
-                    color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
+                    color: _skipCameraIMUCalibration4 ? Colors.orange : Colors.grey,
                     size: 20,
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '跳过IMU校准(棋盘格)',
+                    '跳过摄像头IMU标定(棋盘格)',
                     style: TextStyle(
                       fontSize: 12,
-                      color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
+                      color: _skipCameraIMUCalibration4 ? Colors.orange : Colors.grey,
                     ),
                   ),
                   Switch(
-                    value: _skipIMUCalibration4,
+                    value: _skipCameraIMUCalibration4,
                     onChanged: _isAutoTesting4
                         ? null
-                        : (value) => setState(() => _skipIMUCalibration4 = value),
+                        : (value) => setState(() => _skipCameraIMUCalibration4 = value),
                     activeColor: Colors.orange,
                   ),
                 ],
