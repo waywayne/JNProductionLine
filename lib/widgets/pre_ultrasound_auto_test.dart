@@ -6233,92 +6233,118 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
           const SizedBox(height: 16),
 
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.precision_manufacturing,
+                    color: _enableJigCommands4 ? Colors.blue : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '启用治具指令',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _enableJigCommands4 ? Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  Switch(
+                    value: _enableJigCommands4,
+                    onChanged: _isAutoTesting4
+                        ? null
+                        : (value) => setState(() => _enableJigCommands4 = value),
+                    activeColor: Colors.blue,
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.wifi_tethering,
+                    color: _skipWiFiRangeTest4 ? Colors.orange : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '跳过拉距测试WiFi',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _skipWiFiRangeTest4 ? Colors.orange : Colors.grey,
+                    ),
+                  ),
+                  Switch(
+                    value: _skipWiFiRangeTest4,
+                    onChanged: _isAutoTesting4
+                        ? null
+                        : (value) => setState(() => _skipWiFiRangeTest4 = value),
+                    activeColor: Colors.orange,
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.compass_calibration,
+                    color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '跳过IMU校准(棋盘格)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
+                    ),
+                  ),
+                  Switch(
+                    value: _skipIMUCalibration4,
+                    onChanged: _isAutoTesting4
+                        ? null
+                        : (value) => setState(() => _skipIMUCalibration4 = value),
+                    activeColor: Colors.orange,
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.gradient,
+                    color: _skipGrayCardTest4 ? Colors.orange : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '跳过灰卡测试',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _skipGrayCardTest4 ? Colors.orange : Colors.grey,
+                    ),
+                  ),
+                  Switch(
+                    value: _skipGrayCardTest4,
+                    onChanged: _isAutoTesting4
+                        ? null
+                        : (value) => setState(() => _skipGrayCardTest4 = value),
+                    activeColor: Colors.orange,
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
           Row(
             children: [
-              Icon(
-                Icons.precision_manufacturing,
-                color: _enableJigCommands4 ? Colors.blue : Colors.grey,
-                size: 20,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '启用治具指令',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _enableJigCommands4 ? Colors.blue : Colors.grey,
-                ),
-              ),
-              Switch(
-                value: _enableJigCommands4,
-                onChanged: _isAutoTesting4
-                    ? null
-                    : (value) => setState(() => _enableJigCommands4 = value),
-                activeColor: Colors.blue,
-              ),
-              const SizedBox(width: 12),
-              Icon(
-                Icons.wifi_tethering,
-                color: _skipWiFiRangeTest4 ? Colors.orange : Colors.grey,
-                size: 20,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '跳过拉距测试WiFi',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _skipWiFiRangeTest4 ? Colors.orange : Colors.grey,
-                ),
-              ),
-              Switch(
-                value: _skipWiFiRangeTest4,
-                onChanged: _isAutoTesting4
-                    ? null
-                    : (value) => setState(() => _skipWiFiRangeTest4 = value),
-                activeColor: Colors.orange,
-              ),
-              const SizedBox(width: 12),
-              Icon(
-                Icons.compass_calibration,
-                color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
-                size: 20,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '跳过IMU校准(棋盘格)',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _skipIMUCalibration4 ? Colors.orange : Colors.grey,
-                ),
-              ),
-              Switch(
-                value: _skipIMUCalibration4,
-                onChanged: _isAutoTesting4
-                    ? null
-                    : (value) => setState(() => _skipIMUCalibration4 = value),
-                activeColor: Colors.orange,
-              ),
-              const SizedBox(width: 12),
-              Icon(
-                Icons.gradient,
-                color: _skipGrayCardTest4 ? Colors.orange : Colors.grey,
-                size: 20,
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '跳过灰卡测试',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _skipGrayCardTest4 ? Colors.orange : Colors.grey,
-                ),
-              ),
-              Switch(
-                value: _skipGrayCardTest4,
-                onChanged: _isAutoTesting4
-                    ? null
-                    : (value) => setState(() => _skipGrayCardTest4 = value),
-                activeColor: Colors.orange,
-              ),
-              const Spacer(),
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: _isAutoTesting4
