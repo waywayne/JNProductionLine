@@ -41,4 +41,7 @@ class JigCommands {
 
   /// 治具断电（开箱释放设备后）
   static const String powerOut = 'POWER_OUT';
+
+  /// Touch 按压指令，如 PRESS_TK1_100G（tkIndex: 1=右Touch, 2=左Touch, 3=佩戴检测）
+  static String pressTk(int tkIndex, int grams) => 'PRESS_TK${tkIndex}_${grams}G';
 }

@@ -44,6 +44,9 @@ class ProductionConfig {
   static const String _keyChessboardGridY = 'chessboard_grid_y';
   static const String _keyChessboardThreshold = 'chessboard_threshold';
   static const String _keyGreyboardThreshold = 'greyboard_threshold';
+  static const String _keyJigRightTouchPressGrams = 'jig_right_touch_press_grams';
+  static const String _keyJigLeftTouchPressGrams = 'jig_left_touch_press_grams';
+  static const String _keyJigWearDetectPressGrams = 'jig_wear_detect_press_grams';
 
   // 默认值
   static const String defaultHardwareVersion = '1.0.0';
@@ -78,6 +81,9 @@ class ProductionConfig {
   static const int defaultChessboardGridY = 29;  // imagetest_chessboard grid_y 默认值
   static const double defaultChessboardThreshold = 1.0;  // imagetest_chessboard 阈值默认值
   static const double defaultGreyboardThreshold = 0.68;  // imagetest_greyboard 阈值默认值
+  static const int defaultJigRightTouchPressGrams = 100;  // 工位6 右Touch治具按压力度(克)
+  static const int defaultJigLeftTouchPressGrams = 100;   // 工位6 左Touch治具按压力度(克)
+  static const int defaultJigWearDetectPressGrams = 100;  // 工位6 佩戴检测治具按压力度(克)
 
   /// 初始化配置
   /// 优先从注册表/SharedPreferences加载，如果不存在则使用默认值
@@ -269,7 +275,7 @@ class ProductionConfig {
     await _prefs?.setInt(_keyNetworkPowerSupplyPort, value);
   }
 
-  // ========== 治具串口（工位4） ==========
+  // ========== 治具串口（工位4/6） ==========
   String get jigSerialPort => _prefs?.getString(_keyJigSerialPort) ?? defaultJigSerialPort;
   Future<void> setJigSerialPort(String value) async {
     await _prefs?.setString(_keyJigSerialPort, value);
@@ -312,6 +318,25 @@ class ProductionConfig {
     await _prefs?.setDouble(_keyGreyboardThreshold, value);
   }
 
+  // ========== 治具 Touch 按压力度（工位6，单位：克） ==========
+  int get jigRightTouchPressGrams =>
+      _prefs?.getInt(_keyJigRightTouchPressGrams) ?? defaultJigRightTouchPressGrams;
+  Future<void> setJigRightTouchPressGrams(int value) async {
+    await _prefs?.setInt(_keyJigRightTouchPressGrams, value);
+  }
+
+  int get jigLeftTouchPressGrams =>
+      _prefs?.getInt(_keyJigLeftTouchPressGrams) ?? defaultJigLeftTouchPressGrams;
+  Future<void> setJigLeftTouchPressGrams(int value) async {
+    await _prefs?.setInt(_keyJigLeftTouchPressGrams, value);
+  }
+
+  int get jigWearDetectPressGrams =>
+      _prefs?.getInt(_keyJigWearDetectPressGrams) ?? defaultJigWearDetectPressGrams;
+  Future<void> setJigWearDetectPressGrams(int value) async {
+    await _prefs?.setInt(_keyJigWearDetectPressGrams, value);
+  }
+
   /// 重置所有配置为默认值
   Future<void> resetToDefaults() async {
     await setHardwareVersion(defaultHardwareVersion);
@@ -345,6 +370,9 @@ class ProductionConfig {
     await setChessboardGridY(defaultChessboardGridY);
     await setChessboardThreshold(defaultChessboardThreshold);
     await setGreyboardThreshold(defaultGreyboardThreshold);
+    await setJigRightTouchPressGrams(defaultJigRightTouchPressGrams);
+    await setJigLeftTouchPressGrams(defaultJigLeftTouchPressGrams);
+    await setJigWearDetectPressGrams(defaultJigWearDetectPressGrams);
   }
 
   /// 获取所有配置的摘要
@@ -373,13 +401,16 @@ class ProductionConfig {
       'iperf 速率阈值': '≥${iperfSpeedThresholdMbps}Mbps',
       '网络程控电源IP': networkPowerSupplyIp,
       '网络程控电源端口': networkPowerSupplyPort,
-      '治具串口(工位4)': jigSerialPort.isEmpty ? '(未配置)' : jigSerialPort,
+      '治具串口(工位4/6)': jigSerialPort.isEmpty ? '(未配置)' : jigSerialPort,
       '分辨率图卡阈值': resolutionChartThreshold,
       '色卡阈值': colorChartThreshold,
       '棋盘格 grid_x': chessboardGridX,
       '棋盘格 grid_y': chessboardGridY,
       '棋盘格阈值': chessboardThreshold,
       '灰板阈值': greyboardThreshold,
+      '右Touch治具按压力度': '${jigRightTouchPressGrams}g',
+      '左Touch治具按压力度': '${jigLeftTouchPressGrams}g',
+      '佩戴检测治具按压力度': '${jigWearDetectPressGrams}g',
     };
   }
 }

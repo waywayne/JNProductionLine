@@ -97,6 +97,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   BluetoothTestMethod _selectedMethod6 = BluetoothTestMethod.rfcommSocket;
   final BydMesService _mesService6 = BydMesService();
   bool _cancelRestartCommand6 = false; // 取消重启命令标志
+  final JigSerialService _jigSerialService6 = JigSerialService();
+  bool _jigFixtureClosed6 = false;
+  bool _enableJigCommands6 = true; // 治具指令开关，默认开启
 
   // 工位3状态
   bool _isAutoTesting3 = false;
@@ -125,6 +128,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   void dispose() {
     _tabController.dispose();
     _jigSerialService4.dispose();
+    _jigSerialService6.dispose();
     super.dispose();
   }
 
@@ -3411,24 +3415,32 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   void _initializeSteps6() {
     _stepResults6.clear();
     _stepResults6.addAll([
-      TestStepResult(stepNumber: 1, name: '蓝牙连接', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 2, name: 'BYD MES 开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 3, name: '产测开始', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 4, name: '电池电压测试(>2.5V)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 5, name: '电量检测(0~100%)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 6, name: '充电状态(充电中)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 7, name: 'LED外侧亮', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 8, name: 'LED外侧关', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 9, name: 'LED内侧亮', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 10, name: 'LED内侧关', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 11, name: '右Touch-TK1(>500)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 12, name: '右Touch-TK2(>500)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 13, name: '右Touch-TK3(>500)', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 14, name: '佩戴检测', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 15, name: '左触控-点击', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 16, name: '左触控-双击', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 17, name: '左触控-长按', status: TestStepStatus.pending),
-      TestStepResult(stepNumber: 18, name: '产测结束', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 1, name: '夹爪夹紧', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 2, name: '治具上电', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 3, name: '蓝牙连接', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 4, name: 'BYD MES 开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 5, name: '治具关闭', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 6, name: '产测开始', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 7, name: '电池电压测试(>2.5V)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 8, name: '电量检测(0~100%)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 9, name: '充电状态(充电中)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 10, name: 'LED外侧亮', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 11, name: 'LED外侧关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 12, name: 'LED内侧亮', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 13, name: 'LED内侧关', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 14, name: '右Touch-TK1校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 15, name: '右Touch-TK2校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 16, name: '右Touch-TK3校准', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 17, name: '右Touch-TK1(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 18, name: '右Touch-TK2(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 19, name: '右Touch-TK3(>500)', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 20, name: '佩戴检测', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 21, name: '左触控-点击', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 22, name: '左触控-双击', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 23, name: '左触控-长按', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 24, name: '治具打开', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 25, name: '治具断电', status: TestStepStatus.pending),
+      TestStepResult(stepNumber: 26, name: '产测结束', status: TestStepStatus.pending),
     ]);
   }
 
@@ -4031,7 +4043,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     await Future.delayed(const Duration(milliseconds: 100)); // 等待取消生效
     _cancelRestartCommand6 = false; // 重置标志
     
-    setState(() {
+    _safeSetState(() {
       _isAutoTesting6 = true;
       _currentStep6 = 0;
       _initializeSteps6();
@@ -4042,6 +4054,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   SN: ${_scannedSN6 ?? "MAC直连"}');
     logState.info('   蓝牙: ${_productInfo6!.bluetoothAddress}');
     logState.info('   连接方案: ${_getMethodName(_selectedMethod6)}');
+    logState.info('   治具指令: ${_enableJigCommands6 ? "开启" : "关闭（跳过所有治具步骤）"}');
     if (_skipRightTouchTest6) {
       logState.info('   右Touch测试: 已跳过');
     }
@@ -4050,12 +4063,29 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     bool hasFailure = false;
     String? failItem;
     String? failValue;
+    bool reachedMesPhase = false;
 
+    if (_enableJigCommands6) {
+      if (!await _connectJigSerial6(logState)) {
+        _safeSetState(() => _isAutoTesting6 = false);
+        return;
+      }
+    } else {
+      logState.info('⏭️ 治具指令已关闭，跳过治具串口连接');
+    }
+
+    _jigFixtureClosed6 = false;
+
+    try {
     for (int i = 0; i < _stepResults6.length; i++) {
-      if (!_isAutoTesting6) break;
+      if (!mounted || !_isAutoTesting6) break;
 
-      setState(() {
-        _currentStep6 = i;
+      if (i >= 3) {
+        reachedMesPhase = true;
+      }
+
+      _safeSetState(() {
+        _currentStep6 = i + 1;
         _stepResults6[i].status = TestStepStatus.running;
       });
 
@@ -4065,12 +4095,34 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       try {
         switch (i) {
           case 0:
-            logState.info('步骤1: 蓝牙连接');
+            logState.info('步骤1: 夹爪夹紧');
+            success = await _runJigStep6(
+              JigCommands.clawClamp,
+              logState,
+              description: '夹爪夹紧',
+            );
+            message = success
+                ? (_enableJigCommands6 ? '夹爪夹紧成功' : '治具指令已关闭，已跳过')
+                : '治具 CLAW_CLAMP 指令失败';
+            break;
+          case 1:
+            logState.info('步骤2: 治具上电');
+            success = await _runJigStep6(
+              JigCommands.powerIn,
+              logState,
+              description: '治具上电',
+            );
+            message = success
+                ? (_enableJigCommands6 ? '治具上电成功' : '治具指令已关闭，已跳过')
+                : '治具 POWER_IN 指令失败';
+            break;
+          case 2:
+            logState.info('步骤3: 蓝牙连接');
             success = await _testBluetoothConnection6(state, logState);
             message = success ? '蓝牙连接正常' : '蓝牙连接失败';
             break;
-          case 1:
-            logState.info('步骤2: BYD MES 开始');
+          case 3:
+            logState.info('步骤4: BYD MES 开始');
             if (_scannedSN6 != null && _scannedSN6!.isNotEmpty) {
               final mesResult = await _mesService6.start(_scannedSN6!);
               success = mesResult['success'] == true;
@@ -4081,51 +4133,62 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = 'MAC直连模式，跳过 MES';
             }
             break;
-          case 2:
-            logState.info('步骤3: 产测开始');
+          case 4:
+            logState.info('步骤5: 治具关闭');
+            success = await _runJigStep6(
+              JigCommands.close,
+              logState,
+              description: '治具关闭',
+            );
+            message = success
+                ? (_enableJigCommands6 ? '治具关闭成功' : '治具指令已关闭，已跳过')
+                : '治具 CLOSE 指令失败';
+            break;
+          case 5:
+            logState.info('步骤6: 产测开始');
             success = await _testProductionStart(state, logState);
             message = success ? '产测开始命令发送成功' : '产测开始命令失败';
             break;
-          case 3:
-            logState.info('步骤4: 电池电压测试(>2.5V)');
+          case 6:
+            logState.info('步骤7: 电池电压测试(>2.5V)');
             final voltageResult = await _testBatteryVoltage6(state, logState);
             success = voltageResult['success'] == true;
             message = voltageResult['message'] as String?;
             break;
-          case 4:
-            logState.info('步骤5: 电量检测(0~100%)');
+          case 7:
+            logState.info('步骤8: 电量检测(0~100%)');
             final batteryResult = await _testBattery6(state, logState);
             success = batteryResult['success'] == true;
             message = batteryResult['message'] as String?;
             break;
-          case 5:
-            logState.info('步骤6: 充电状态(充电中)');
+          case 8:
+            logState.info('步骤9: 充电状态(充电中)');
             final chargeResult = await _testChargeStatus6(state, logState);
             success = chargeResult['success'] == true;
             message = chargeResult['message'] as String?;
             break;
-          case 6:
-            logState.info('步骤7: LED外侧亮');
+          case 9:
+            logState.info('步骤10: LED外侧亮');
             success = await _testLED6(state, logState, isOuter: true, turnOn: true);
             message = success ? 'LED外侧亮测试通过' : 'LED外侧亮测试失败';
             break;
-          case 7:
-            logState.info('步骤8: LED外侧关');
+          case 10:
+            logState.info('步骤11: LED外侧关');
             success = await _testLED6(state, logState, isOuter: true, turnOn: false);
             message = success ? 'LED外侧关测试通过' : 'LED外侧关测试失败';
             break;
-          case 8:
-            logState.info('步骤9: LED内侧亮');
+          case 11:
+            logState.info('步骤12: LED内侧亮');
             success = await _testLED6(state, logState, isOuter: false, turnOn: true);
             message = success ? 'LED内侧亮测试通过' : 'LED内侧亮测试失败';
             break;
-          case 9:
-            logState.info('步骤10: LED内侧关');
+          case 12:
+            logState.info('步骤13: LED内侧关');
             success = await _testLED6(state, logState, isOuter: false, turnOn: false);
             message = success ? 'LED内侧关测试通过' : 'LED内侧关测试失败';
             break;
-          case 10:
-            logState.info('步骤11: 右Touch-TK1校准');
+          case 13:
+            logState.info('步骤14: 右Touch-TK1校准');
             if (_skipRightTouchTest6) {
               logState.warning('⚠️ 已跳过右Touch-TK1校准，默认标记为通过');
               success = true;
@@ -4135,8 +4198,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'TK1校准通过' : 'TK1校准失败';
             }
             break;
-          case 11:
-            logState.info('步骤12: 右Touch-TK2校准');
+          case 14:
+            logState.info('步骤15: 右Touch-TK2校准');
             if (_skipRightTouchTest6) {
               logState.warning('⚠️ 已跳过右Touch-TK2校准，默认标记为通过');
               success = true;
@@ -4146,8 +4209,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'TK2校准通过' : 'TK2校准失败';
             }
             break;
-          case 12:
-            logState.info('步骤13: 右Touch-TK3校准');
+          case 15:
+            logState.info('步骤16: 右Touch-TK3校准');
             if (_skipRightTouchTest6) {
               logState.warning('⚠️ 已跳过右Touch-TK3校准，默认标记为通过');
               success = true;
@@ -4157,8 +4220,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'TK3校准通过' : 'TK3校准失败';
             }
             break;
-          case 13:
-            logState.info('步骤14: 右Touch-TK1(>500)');
+          case 16:
+            logState.info('步骤17: 右Touch-TK1(>500)');
             if (_skipRightTouchTest6) {
               logState.warning('⚠️ 已跳过右Touch-TK1测试，默认标记为通过');
               success = true;
@@ -4168,8 +4231,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'TK1测试通过' : 'TK1测试失败';
             }
             break;
-          case 14:
-            logState.info('步骤15: 右Touch-TK2(>500)');
+          case 17:
+            logState.info('步骤18: 右Touch-TK2(>500)');
             if (_skipRightTouchTest6) {
               logState.warning('⚠️ 已跳过右Touch-TK2测试，默认标记为通过');
               success = true;
@@ -4179,8 +4242,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'TK2测试通过' : 'TK2测试失败';
             }
             break;
-          case 15:
-            logState.info('步骤16: 右Touch-TK3(>500)');
+          case 18:
+            logState.info('步骤19: 右Touch-TK3(>500)');
             if (_skipRightTouchTest6) {
               logState.warning('⚠️ 已跳过右Touch-TK3测试，默认标记为通过');
               success = true;
@@ -4190,28 +4253,50 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               message = success ? 'TK3测试通过' : 'TK3测试失败';
             }
             break;
-          case 16:
-            logState.info('步骤17: 佩戴检测');
+          case 19:
+            logState.info('步骤20: 佩戴检测');
             success = await _testWearDetection6(state, logState);
             message = success ? '佩戴检测通过' : '佩戴检测失败';
             break;
-          case 17:
-            logState.info('步骤18: 左触控-点击');
+          case 20:
+            logState.info('步骤21: 左触控-点击');
             success = await _testLeftTouch6(state, logState, touchType: '点击');
             message = success ? '左触控点击测试通过' : '左触控点击测试失败';
             break;
-          case 18:
-            logState.info('步骤19: 左触控-双击');
+          case 21:
+            logState.info('步骤22: 左触控-双击');
             success = await _testLeftTouch6(state, logState, touchType: '双击');
             message = success ? '左触控双击测试通过' : '左触控双击测试失败';
             break;
-          case 19:
-            logState.info('步骤20: 左触控-长按');
+          case 22:
+            logState.info('步骤23: 左触控-长按');
             success = await _testLeftTouch6(state, logState, touchType: '长按');
             message = success ? '左触控长按测试通过' : '左触控长按测试失败';
             break;
-          case 20:
-            logState.info('步骤21: 产测结束');
+          case 23:
+            logState.info('步骤24: 治具打开');
+            success = await _runJigStep6(
+              JigCommands.open,
+              logState,
+              description: '治具打开',
+            );
+            message = success
+                ? (_enableJigCommands6 ? '治具打开成功' : '治具指令已关闭，已跳过')
+                : '治具 OPEN 指令失败';
+            break;
+          case 24:
+            logState.info('步骤25: 治具断电');
+            success = await _runJigStep6(
+              JigCommands.powerOut,
+              logState,
+              description: '治具断电',
+            );
+            message = success
+                ? (_enableJigCommands6 ? '治具断电成功' : '治具指令已关闭，已跳过')
+                : '治具 POWER_OUT 指令失败';
+            break;
+          case 25:
+            logState.info('步骤26: 产测结束');
             success = await _testProductionEnd6(state, logState);
             message = success ? '产测结束命令发送成功' : '产测结束命令失败';
             break;
@@ -4222,9 +4307,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         logState.error('步骤${i + 1}异常: $e');
       }
 
-      if (!_isAutoTesting6) break;
+      if (!mounted || !_isAutoTesting6) break;
 
-      setState(() {
+      _safeSetState(() {
         _stepResults6[i].status = success ? TestStepStatus.passed : TestStepStatus.failed;
         _stepResults6[i].message = message;
       });
@@ -4235,6 +4320,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           hasFailure = true;
           failItem = _stepResults6[i].name;
           failValue = message ?? '测试未通过';
+        }
+        if (i >= 4) {
+          await _openJigFixtureOnFailure6(logState);
         }
         logState.info('🔄 发送产测状态更新命令 (0xFF 0x01) - 测试失败...');
         try {
@@ -4255,9 +4343,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
       await Future.delayed(const Duration(milliseconds: 500));
     }
+    } catch (e, stackTrace) {
+      logState.error('❌ 工位6自动测试流程异常: $e');
+      logState.error('   $stackTrace', type: LogType.debug);
+    } finally {
+      await _releaseJigFixture6(logState);
+    }
 
-    setState(() => _isAutoTesting6 = false);
-
+    try {
     final passedCount = _stepResults6.where((s) => s.status == TestStepStatus.passed).length;
     final totalCount = _stepResults6.length;
     final allPassed = passedCount == totalCount;
@@ -4283,7 +4376,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         }
         
         logState.info('🎉 工位6测试全部通过！($passedCount/$totalCount)');
-      } else {
+      } else if (reachedMesPhase) {
         logState.info('🏭 调用 BYD MES 不良品接口...');
         final mesResult = await _mesService6.ncComplete(_scannedSN6!, ncCode: 'NC006', ncContext: '超声后电源外设测试不良', failItem: failItem ?? '未知', failValue: failValue ?? '测试未通过');
         if (mesResult['success'] == true) {
@@ -4292,18 +4385,30 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           logState.error('❌ BYD MES 不良品上报失败: ${mesResult['error']}');
         }
         logState.warning('⚠️ 工位6测试完成，通过 $passedCount/$totalCount 项');
+      } else {
+        logState.warning('⚠️ 工位6测试在 BYD MES 开始前失败，跳过 MES 上报 ($passedCount/$totalCount)');
       }
     } else {
       if (allPassed) {
         logState.info('🎉 工位6测试全部通过！($passedCount/$totalCount)（MAC直连模式，跳过MES上报）');
-      } else {
+      } else if (reachedMesPhase) {
         logState.warning('⚠️ 工位6测试完成，通过 $passedCount/$totalCount 项（MAC直连模式，跳过MES上报）');
+      } else {
+        logState.warning('⚠️ 工位6测试在 BYD MES 开始前失败（MAC直连模式，跳过MES上报）');
       }
     }
     
-    logState.info('🔄 发送设备重启命令...');
-    await _sendDeviceRestartCommand(state, logState);
+    if (allPassed || (hasFailure && reachedMesPhase)) {
+      logState.info('🔄 发送设备重启命令...');
+      await _sendDeviceRestartCommand(state, logState);
+    }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    } catch (e, stackTrace) {
+      logState.error('❌ 工位6收尾流程异常: $e');
+      logState.error('   $stackTrace', type: LogType.debug);
+    } finally {
+      _safeSetState(() => _isAutoTesting6 = false);
+    }
   }
 
   // ========== 工位4: 治具串口 ==========
@@ -4449,6 +4554,160 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
     if (_jigSerialService4.isConnected) {
       await _jigSerialService4.disconnect();
+      logState.info('ℹ️  治具串口已断开');
+    }
+  }
+
+  // ========== 工位6: 治具串口 ==========
+
+  Future<bool> _connectJigSerial6(LogState logState) async {
+    await _config.init();
+    final portName = _config.jigSerialPort.trim();
+
+    if (portName.isEmpty) {
+      logState.error('❌ 未配置治具串口，请在「产测通用配置」中设置');
+      if (!mounted) return false;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('治具串口未配置'),
+          content: const Text(
+            '未配置治具串口。\n\n'
+            '请在「产测通用配置」中设置治具串口名称（如 /dev/ttyUSB0）。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
+    logState.info('📡 正在连接治具串口: $portName');
+    final connected = await _jigSerialService6.connect(portName);
+    if (connected) {
+      logState.success('✅ 治具串口连接成功');
+      return true;
+    }
+
+    logState.error('❌ 治具串口连接失败: $portName');
+    if (!mounted) return false;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('治具串口连接失败'),
+        content: Text(
+          '无法连接治具串口: $portName\n\n'
+          '请检查串口名称是否正确、治具是否已上电。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
+  Future<bool> _sendJigCommand6(
+    String command,
+    LogState logState, {
+    String? description,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final label = description ?? command;
+    logState.info('📤 治具指令: $label ($command)');
+    final ok = await _jigSerialService6.sendCommand(command, timeout: timeout);
+    if (ok) {
+      logState.success('✅ 治具指令成功: $label');
+    } else {
+      logState.error('❌ 治具指令失败: $label');
+    }
+    return ok;
+  }
+
+  Future<bool> _runJigStep6(
+    String command,
+    LogState logState, {
+    String? description,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final label = description ?? command;
+    if (!_enableJigCommands6) {
+      logState.info('⏭️ 治具指令已关闭，跳过: $label');
+      return true;
+    }
+
+    const maxRetries = 3;
+    for (int retry = 0; retry < maxRetries; retry++) {
+      if (retry > 0) {
+        logState.info('   治具指令重试 ($retry/$maxRetries): $label');
+        await Future.delayed(const Duration(seconds: 1));
+      }
+
+      final ok = await _sendJigCommand6(
+        command,
+        logState,
+        description: description,
+        timeout: timeout,
+      );
+      if (ok) {
+        if (command == JigCommands.close) {
+          _jigFixtureClosed6 = true;
+        } else if (command == JigCommands.open) {
+          _jigFixtureClosed6 = false;
+        }
+        return true;
+      }
+    }
+
+    logState.error('❌ 治具指令 $maxRetries 次重试后仍失败: $label');
+    return false;
+  }
+
+  Future<bool> _runJigPress6(int tkIndex, int grams, LogState logState) async {
+    final command = JigCommands.pressTk(tkIndex, grams);
+    return _runJigStep6(
+      command,
+      logState,
+      description: 'Touch按压 TK$tkIndex ${grams}g',
+      timeout: const Duration(seconds: 15),
+    );
+  }
+
+  Future<void> _openJigFixtureOnFailure6(LogState logState) async {
+    if (!_enableJigCommands6 || !_jigFixtureClosed6) return;
+    if (!_jigSerialService6.isConnected) return;
+
+    logState.info('🔧 产测项失败，执行治具打开释放设备...');
+    await _runJigStep6(
+      JigCommands.open,
+      logState,
+      description: '治具打开（失败释放）',
+    );
+  }
+
+  Future<void> _releaseJigFixture6(LogState logState) async {
+    if (!_enableJigCommands6) {
+      if (_jigSerialService6.isConnected) {
+        await _jigSerialService6.disconnect();
+        logState.info('ℹ️  治具串口已断开');
+      }
+      return;
+    }
+
+    if (_jigFixtureClosed6 && _jigSerialService6.isConnected) {
+      logState.info('🔧 补偿执行治具 OPEN 指令...');
+      await _sendJigCommand6(JigCommands.open, logState, description: '治具打开');
+      _jigFixtureClosed6 = false;
+    }
+    if (_jigSerialService6.isConnected) {
+      await _jigSerialService6.disconnect();
       logState.info('ℹ️  治具串口已断开');
     }
   }
@@ -5656,7 +5915,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     StreamSubscription<Uint8List>? subscription;
     Timer? timeoutTimer;
     bool testPassed = false;
-    String statusInfo = '请佩戴设备...';
+    String statusInfo = '治具将自动按压佩戴检测区域...';
     
     // 用于从外部更新 dialog UI 的回调
     void Function(void Function())? _setDialogState;
@@ -5711,6 +5970,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     logState.info('✅ 命令已发送，开始监听佩戴检测推送...');
     logState.info('👂 等待佩戴检测响应 (0x07 0x00 0x04)...');
+
+    await _config.init();
+    final pressGrams = _config.jigWearDetectPressGrams;
+    logState.info('🔧 治具按压佩戴检测区域: PRESS_TK3_${pressGrams}G');
+    if (!await _runJigPress6(3, pressGrams, logState)) {
+      logState.error('❌ 佩戴检测治具按压指令失败');
+      subscription?.cancel();
+      return false;
+    }
+    statusInfo = '等待佩戴检测响应...';
     
     // 如果在发送命令期间已经收到推送并通过，直接返回
     if (testPassed) {
@@ -5739,7 +6008,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('请将设备佩戴到耳朵上', style: TextStyle(fontSize: 16)),
+                  Text('治具已按压佩戴检测区域 (${pressGrams}g)', style: const TextStyle(fontSize: 16)),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -5905,7 +6174,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     if (!mounted) return false;
     
-    // 弹窗提示：请按压
+    // 弹窗提示：请按压（治具自动按压）
     final pressedConfirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -5922,13 +6191,16 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '请按压 $tkName 区域',
+              '治具将自动按压 $tkName 区域',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            const Text('👆 请用手指按压 TK 区域'),
+            Text(
+              '按压力度: ${_config.jigRightTouchPressGrams}g (PRESS_TK1_${_config.jigRightTouchPressGrams}G)',
+              style: const TextStyle(fontSize: 14),
+            ),
             const SizedBox(height: 8),
-            const Text('保持按压状态，然后点击"开始校准"'),
+            const Text('点击"开始校准"后治具自动按压并执行校准'),
           ],
         ),
         actions: [
@@ -5947,6 +6219,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     if (pressedConfirmed != true) {
       logState.warning('⚠️ 用户取消校准');
+      return false;
+    }
+
+    await _config.init();
+    final pressGrams = _config.jigRightTouchPressGrams;
+    logState.info('🔧 治具按压右Touch: PRESS_TK1_${pressGrams}G');
+    if (!await _runJigPress6(1, pressGrams, logState)) {
+      logState.error('❌ 治具按压指令失败');
       return false;
     }
     
@@ -5991,61 +6271,170 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
   Future<bool> _testLeftTouch6(TestState state, LogState logState, {required String touchType}) async {
     logState.info('👈 左触控测试: $touchType');
-    
-    int expectedEventCode;
+
+    int expectedActionId;
     switch (touchType) {
-      case '单击':
-        expectedEventCode = 0x01;
+      case '点击':
+        expectedActionId = TouchTestConfig.leftActionSingleTap;
         break;
       case '双击':
-        expectedEventCode = 0x02;
+        expectedActionId = TouchTestConfig.leftActionDoubleTap;
         break;
       case '长按':
-        expectedEventCode = 0x03;
+        expectedActionId = TouchTestConfig.leftActionLongPress;
         break;
       default:
         logState.error('❌ 未知的触控类型: $touchType');
         return false;
     }
-    
-    final touchEventCommand = ProductionTestCommands.createTouchCommand(0x00, 0x00);
-    
-    for (int retry = 0; retry < 10; retry++) {
-      if (retry > 0) {
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-      
 
+    if (!mounted) return false;
+
+    final completer = Completer<bool>();
+    StreamSubscription<Uint8List>? subscription;
+    Timer? timeoutTimer;
+    bool testPassed = false;
+    String statusInfo = '治具将自动按压左Touch区域...';
+
+    void Function(void Function())? setDialogState;
+
+    subscription = state.linuxBluetoothPushPayloadStream.listen((payload) {
       try {
-        final response = await state.sendCommandViaLinuxBluetooth(
-          touchEventCommand,
-          timeout: const Duration(seconds: 2),
-          moduleId: ProductionTestCommands.moduleId,
-          messageId: ProductionTestCommands.messageId,
-        );
+        logState.info('📥 收到推送 payload [${payload.length} 字节]: ${payload.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ')}');
 
-        if (response == null || response.containsKey('error')) {
-          continue;
-        }
+        if (payload.length >= 3 &&
+            payload[0] == ProductionTestCommands.cmdTouch &&
+            payload[1] == TouchTestConfig.touchLeft &&
+            payload[2] == expectedActionId) {
+          if (!testPassed) {
+            testPassed = true;
+            statusInfo = '✅ 检测到: $touchType';
+            logState.info('✅ 左触控$touchType通过！');
 
-        final payload = response['payload'];
-        if (payload is List && payload.length >= 2) {
-          final eventCode = payload[1];
-          
-          logState.info('   触控事件: 0x${eventCode.toRadixString(16).toUpperCase().padLeft(2, '0')}');
-          
-          if (eventCode == expectedEventCode) {
-            logState.success('✅ 检测到$touchType事件 (0x${expectedEventCode.toRadixString(16).toUpperCase().padLeft(2, '0')})');
-            return true;
+            setDialogState?.call(() {});
+            timeoutTimer?.cancel();
+            subscription?.cancel();
+
+            Future.delayed(const Duration(seconds: 1), () {
+              if (mounted) Navigator.of(context, rootNavigator: true).pop();
+              if (!completer.isCompleted) completer.complete(true);
+            });
           }
         }
       } catch (e) {
-        logState.warning('⚠️ 左触控检测异常: $e');
+        logState.warning('⚠️ 解析推送数据出错: $e');
       }
+    });
+
+    final command = ProductionTestCommands.createTouchCommand(
+      TouchTestConfig.touchLeft, TouchTestConfig.leftActionUntouched,
+    );
+    logState.info('📤 发送左触控事件命令...');
+    final response = await state.sendCommandViaLinuxBluetooth(
+      command,
+      timeout: const Duration(seconds: 5),
+      moduleId: ProductionTestCommands.moduleId,
+      messageId: ProductionTestCommands.messageId,
+    );
+
+    if (response == null || response.containsKey('error')) {
+      logState.error('❌ 左触控事件命令发送失败');
+      subscription?.cancel();
+      return false;
     }
-    
-    logState.error('❌ 左触控$touchType测试失败');
-    return false;
+
+    logState.info('✅ 命令已发送，开始监听触控事件推送...');
+
+    await _config.init();
+    final pressGrams = _config.jigLeftTouchPressGrams;
+    logState.info('🔧 治具按压左Touch: PRESS_TK2_${pressGrams}G');
+    if (!await _runJigPress6(2, pressGrams, logState)) {
+      logState.error('❌ 左Touch治具按压指令失败');
+      subscription?.cancel();
+      return false;
+    }
+
+    statusInfo = '等待触控事件: $touchType...';
+    logState.info('👂 等待触控事件 $touchType (0x${expectedActionId.toRadixString(16).toUpperCase()})...');
+
+    if (testPassed) {
+      return true;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, updateDialog) {
+            setDialogState = updateDialog;
+
+            final statusColor = testPassed ? Colors.green : Colors.orange;
+
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.touch_app, color: statusColor),
+                  const SizedBox(width: 12),
+                  Text('左触控-$touchType测试'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('治具已按压左Touch区域 (${pressGrams}g)', style: const TextStyle(fontSize: 16)),
+                  const SizedBox(height: 8),
+                  Text('等待检测到$touchType事件', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor),
+                    ),
+                    child: Text(
+                      statusInfo,
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: statusColor),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                if (!testPassed)
+                  TextButton(
+                    onPressed: () {
+                      subscription?.cancel();
+                      timeoutTimer?.cancel();
+                      Navigator.of(dialogContext).pop();
+                      if (!completer.isCompleted) completer.complete(false);
+                    },
+                    child: const Text('取消测试'),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    timeoutTimer = Timer(const Duration(seconds: 60), () {
+      if (!completer.isCompleted) {
+        logState.error('❌ 左触控$touchType检测超时（60秒）');
+        subscription?.cancel();
+        statusInfo = '❌ 超时';
+        setDialogState?.call(() {});
+        Future.delayed(const Duration(seconds: 1), () {
+          if (mounted) Navigator.of(context, rootNavigator: true).pop();
+          if (!completer.isCompleted) completer.complete(false);
+        });
+      }
+    });
+
+    return completer.future;
   }
 
   Future<bool> _testProductionEnd6(TestState state, LogState logState) async {
@@ -6547,10 +6936,38 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
           const SizedBox(height: 16),
 
           // 跳过右Touch测试选项
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.precision_manufacturing,
+                    color: _enableJigCommands6 ? Colors.blue : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '启用治具指令',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _enableJigCommands6 ? Colors.blue : Colors.grey,
+                    ),
+                  ),
+                  Switch(
+                    value: _enableJigCommands6,
+                    onChanged: _isAutoTesting6
+                        ? null
+                        : (value) => setState(() => _enableJigCommands6 = value),
+                    activeColor: Colors.blue,
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.touch_app, color: _skipRightTouchTest6 ? Colors.orange : Colors.grey, size: 20),
                   const SizedBox(width: 4),

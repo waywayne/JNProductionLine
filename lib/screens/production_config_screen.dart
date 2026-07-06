@@ -43,6 +43,9 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
   late TextEditingController _chessboardGridYController;
   late TextEditingController _chessboardThresholdController;
   late TextEditingController _greyboardThresholdController;
+  late TextEditingController _jigRightTouchPressGramsController;
+  late TextEditingController _jigLeftTouchPressGramsController;
+  late TextEditingController _jigWearDetectPressGramsController;
 
   @override
   void initState() {
@@ -85,6 +88,12 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
         TextEditingController(text: _config.chessboardThreshold.toString());
     _greyboardThresholdController =
         TextEditingController(text: _config.greyboardThreshold.toString());
+    _jigRightTouchPressGramsController =
+        TextEditingController(text: _config.jigRightTouchPressGrams.toString());
+    _jigLeftTouchPressGramsController =
+        TextEditingController(text: _config.jigLeftTouchPressGrams.toString());
+    _jigWearDetectPressGramsController =
+        TextEditingController(text: _config.jigWearDetectPressGrams.toString());
   }
 
   @override
@@ -117,6 +126,9 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
     _chessboardGridYController.dispose();
     _chessboardThresholdController.dispose();
     _greyboardThresholdController.dispose();
+    _jigRightTouchPressGramsController.dispose();
+    _jigLeftTouchPressGramsController.dispose();
+    _jigWearDetectPressGramsController.dispose();
     super.dispose();
   }
 
@@ -161,6 +173,15 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
       );
       await _config.setGreyboardThreshold(
         double.parse(_greyboardThresholdController.text),
+      );
+      await _config.setJigRightTouchPressGrams(
+        int.parse(_jigRightTouchPressGramsController.text),
+      );
+      await _config.setJigLeftTouchPressGrams(
+        int.parse(_jigLeftTouchPressGramsController.text),
+      );
+      await _config.setJigWearDetectPressGrams(
+        int.parse(_jigWearDetectPressGramsController.text),
       );
 
       if (mounted) {
@@ -373,6 +394,39 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               validator: _validatePositiveNumber,
               helperText: '手按TK1/TK2/TK3时，阈值变化量需超过此值',
             ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _jigRightTouchPressGramsController,
+              label: '右Touch治具按压力度',
+              hint: '100',
+              suffix: 'g',
+              icon: Icons.precision_manufacturing,
+              inputType: TextInputType.number,
+              validator: _validatePositiveNumber,
+              helperText: '工位6右Touch校准按压指令 PRESS_TK1_xxG 中的压力克数',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _jigLeftTouchPressGramsController,
+              label: '左Touch治具按压力度',
+              hint: '100',
+              suffix: 'g',
+              icon: Icons.precision_manufacturing,
+              inputType: TextInputType.number,
+              validator: _validatePositiveNumber,
+              helperText: '工位6左Touch测试按压指令 PRESS_TK2_xxG 中的压力克数',
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              controller: _jigWearDetectPressGramsController,
+              label: '佩戴检测治具按压力度',
+              hint: '100',
+              suffix: 'g',
+              icon: Icons.precision_manufacturing,
+              inputType: TextInputType.number,
+              validator: _validatePositiveNumber,
+              helperText: '工位6佩戴检测按压指令 PRESS_TK3_xxG 中的压力克数',
+            ),
             const SizedBox(height: 24),
 
             // EMMC配置
@@ -453,12 +507,12 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
             const SizedBox(height: 12),
             _buildTextField(
               controller: _jigSerialPortController,
-              label: '治具串口（工位4）',
+              label: '治具串口（工位4/6）',
               hint: '例如: /dev/ttyUSB0 或 COM3',
               suffix: '',
               icon: Icons.usb,
               inputType: TextInputType.text,
-              helperText: '超声后射频图像测试工位治具串口名称',
+              helperText: '超声后射频图像测试、电源外设测试工位治具串口名称',
             ),
             const SizedBox(height: 12),
             _buildTextField(
