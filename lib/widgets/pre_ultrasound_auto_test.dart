@@ -4675,9 +4675,23 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return _runJigStep6(
       command,
       logState,
-      description: 'Touch按压 TK$tkIndex ${grams}g',
+      description: 'Touch按压 PRESS_TK${tkIndex}_${grams}G',
       timeout: const Duration(seconds: 15),
     );
+  }
+
+  /// 右Touch TK1/2/3 对应治具按压索引 1/2/3
+  int _rightTouchJigTkIndex6(String touchType) {
+    switch (touchType) {
+      case 'TK1':
+        return 1;
+      case 'TK2':
+        return 2;
+      case 'TK3':
+        return 3;
+      default:
+        return 1;
+    }
   }
 
   Future<void> _openJigFixtureOnFailure6(LogState logState) async {
@@ -5690,6 +5704,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
         logState.error('❌ 未知触控区域: $touchType');
         return false;
     }
+
+    final jigTkIndex = _rightTouchJigTkIndex6(touchType);
     
     final threshold = _config.touchThreshold;
     logState.info('   阈值: $threshold');
@@ -5723,10 +5739,18 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       return false;
     }
     
-    // 步骤2: 弹窗提示用户触摸，同时循环轮询CDC值
-    logState.info('👆 请触摸 $touchType 区域');
+    // 步骤2: 治具按压并轮询 CDC 值
+    logState.info('👆 治具按压 $touchType 区域');
     
     if (!mounted) return false;
+
+    await _config.init();
+    final pressGrams = _config.jigRightTouchPressGrams;
+    logState.info('🔧 治具按压右Touch: PRESS_TK${jigTkIndex}_${pressGrams}G');
+    if (!await _runJigPress6(jigTkIndex, pressGrams, logState)) {
+      logState.error('❌ 治具按压指令失败');
+      return false;
+    }
     
     final completer = Completer<bool>();
     int? latestCdc;
@@ -5752,7 +5776,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             final statusColor = testPassed ? Colors.green : (latestCdc != null ? Colors.blue : Colors.orange);
             final statusText = testPassed 
                 ? '✅ 测试通过!' 
-                : (latestCdc != null ? '轮询检测中... ($currentRetry/$maxRetries)' : '等待触摸...');
+                : (latestCdc != null ? '轮询检测中... ($currentRetry/$maxRetries)' : '等待检测...');
             
             return AlertDialog(
               title: Row(
@@ -5766,7 +5790,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('请触摸 $touchType 区域', style: const TextStyle(fontSize: 16)),
+                  Text('治具已按压 $touchType (${pressGrams}g, PRESS_TK$jigTkIndex)', style: const TextStyle(fontSize: 16)),
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -5973,8 +5997,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     await _config.init();
     final pressGrams = _config.jigWearDetectPressGrams;
-    logState.info('🔧 治具按压佩戴检测区域: PRESS_TK3_${pressGrams}G');
-    if (!await _runJigPress6(3, pressGrams, logState)) {
+    logState.info('🔧 治具按压佩戴检测区域: PRESS_TK5_${pressGrams}G');
+    if (!await _runJigPress6(5, pressGrams, logState)) {
       logState.error('❌ 佩戴检测治具按压指令失败');
       subscription?.cancel();
       return false;
@@ -6065,18 +6089,22 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     
     final int tkArea;
     final String tkName;
+    final int jigTkIndex;
     switch (touchType) {
       case 'TK1':
         tkArea = 0x01;
         tkName = 'TK1';
+        jigTkIndex = 1;
         break;
       case 'TK2':
         tkArea = 0x02;
         tkName = 'TK2';
+        jigTkIndex = 2;
         break;
       case 'TK3':
         tkArea = 0x03;
         tkName = 'TK3';
+        jigTkIndex = 3;
         break;
       default:
         logState.error('❌ 未知Touch区域: $touchType');
@@ -6196,7 +6224,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             ),
             const SizedBox(height: 16),
             Text(
-              '按压力度: ${_config.jigRightTouchPressGrams}g (PRESS_TK1_${_config.jigRightTouchPressGrams}G)',
+              '按压力度: ${_config.jigRightTouchPressGrams}g (PRESS_TK${jigTkIndex}_${_config.jigRightTouchPressGrams}G)',
               style: const TextStyle(fontSize: 14),
             ),
             const SizedBox(height: 8),
@@ -6224,8 +6252,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     await _config.init();
     final pressGrams = _config.jigRightTouchPressGrams;
-    logState.info('🔧 治具按压右Touch: PRESS_TK1_${pressGrams}G');
-    if (!await _runJigPress6(1, pressGrams, logState)) {
+    logState.info('🔧 治具按压右Touch: PRESS_TK${jigTkIndex}_${pressGrams}G');
+    if (!await _runJigPress6(jigTkIndex, pressGrams, logState)) {
       logState.error('❌ 治具按压指令失败');
       return false;
     }
@@ -6347,8 +6375,8 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     await _config.init();
     final pressGrams = _config.jigLeftTouchPressGrams;
-    logState.info('🔧 治具按压左Touch: PRESS_TK2_${pressGrams}G');
-    if (!await _runJigPress6(2, pressGrams, logState)) {
+    logState.info('🔧 治具按压左Touch: PRESS_TK4_${pressGrams}G');
+    if (!await _runJigPress6(4, pressGrams, logState)) {
       logState.error('❌ 左Touch治具按压指令失败');
       subscription?.cancel();
       return false;

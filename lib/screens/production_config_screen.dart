@@ -403,7 +403,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               icon: Icons.precision_manufacturing,
               inputType: TextInputType.number,
               validator: _validatePositiveNumber,
-              helperText: '工位6右Touch校准按压指令 PRESS_TK1_xxG 中的压力克数',
+              helperText: '工位6右Touch(TK1/2/3)按压指令 PRESS_TKx_xxG 中的压力克数，x 对应 1/2/3',
             ),
             const SizedBox(height: 12),
             _buildTextField(
@@ -414,7 +414,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               icon: Icons.precision_manufacturing,
               inputType: TextInputType.number,
               validator: _validatePositiveNumber,
-              helperText: '工位6左Touch测试按压指令 PRESS_TK2_xxG 中的压力克数',
+              helperText: '工位6左Touch测试按压指令 PRESS_TK4_xxG 中的压力克数',
             ),
             const SizedBox(height: 12),
             _buildTextField(
@@ -425,7 +425,7 @@ class _ProductionConfigScreenState extends State<ProductionConfigScreen> {
               icon: Icons.precision_manufacturing,
               inputType: TextInputType.number,
               validator: _validatePositiveNumber,
-              helperText: '工位6佩戴检测按压指令 PRESS_TK3_xxG 中的压力克数',
+              helperText: '工位6佩戴检测按压指令 PRESS_TK5_xxG 中的压力克数',
             ),
             const SizedBox(height: 24),
 
