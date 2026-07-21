@@ -36,6 +36,11 @@ class ProductionTestCommands {
   static const int cmdReadSN = 0xFD; // SN码读取
   static const int cmdWriteSN = 0xFE; // SN码写入
   static const int cmdEndTest = 0xFF; // 产测结束
+
+  // End test options (CMD 0xFF)
+  static const int endTestOptPass = 0x00; // 产测通过
+  static const int endTestOptFail = 0x01; // 产测失败
+  static const int endTestOptShippingMode = 0xFE; // 进入船运模式
   
   // LED control values
   static const int ledOuter = 0x00; // LED0(外侧)
@@ -570,7 +575,7 @@ class ProductionTestCommands {
   
   /// Create end test command (0xFF)
   /// 产测结束 - 结束产测状态
-  /// [opt] - 可选参数：0x00=产测通过, 0x01=产测失败
+  /// [opt] - 可选参数：0x00=产测通过, 0x01=产测失败, 0xFE=进入船运模式
   static Uint8List createEndTestCommand({int? opt}) {
     if (opt != null) {
       return Uint8List.fromList([cmdEndTest, opt]);

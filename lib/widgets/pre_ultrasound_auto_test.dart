@@ -4398,7 +4398,9 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
     
-    if (allPassed || (hasFailure && reachedMesPhase)) {
+    if (allPassed) {
+      await _sendShippingModeCommand6(state, logState);
+    } else if (hasFailure && reachedMesPhase) {
       logState.info('🔄 发送设备重启命令...');
       await _sendDeviceRestartCommand(state, logState);
     }
@@ -6463,6 +6465,44 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     });
 
     return completer.future;
+  }
+
+  Future<bool> _sendShippingModeCommand6(TestState state, LogState logState) async {
+    try {
+      logState.info('🚢 发送船运模式命令 (0xFF 0xFE)...');
+      final command = ProductionTestCommands.createEndTestCommand(
+        opt: ProductionTestCommands.endTestOptShippingMode,
+      );
+
+      for (int retry = 0; retry < 3; retry++) {
+        if (retry > 0) {
+          logState.info('   重试 ($retry/3)...');
+          await Future.delayed(const Duration(seconds: 2));
+        }
+
+        try {
+          final response = await state.sendCommandViaLinuxBluetooth(
+            command,
+            timeout: const Duration(seconds: 5),
+            moduleId: ProductionTestCommands.moduleId,
+            messageId: ProductionTestCommands.messageId,
+          );
+
+          if (response != null && !response.containsKey('error')) {
+            logState.success('✅ 船运模式命令发送成功');
+            return true;
+          }
+        } catch (e) {
+          logState.warning('⚠️ 发送船运模式命令异常: $e');
+        }
+      }
+
+      logState.error('❌ 3次重试后船运模式命令仍失败');
+      return false;
+    } catch (e) {
+      logState.error('船运模式命令异常: $e');
+      return false;
+    }
   }
 
   Future<bool> _testProductionEnd6(TestState state, LogState logState) async {
