@@ -78,6 +78,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
   bool _skipWiFiRangeTest4 = false; // 跳过WiFi拉距测试
   bool _skipCameraIMUCalibration4 = false; // 跳过步骤14: 摄像头位置与IMU位置标定(棋盘格)
   bool _skipGrayCardTest4 = false; // 跳过灰卡测试
+  bool _enableShippingMode4 = false; // 全部通过后进入船运模式（0xFF 0xFE），不重启
 
   // 工位5状态
   bool _isAutoTesting5 = false;
@@ -3536,6 +3537,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     logState.info('   WiFi拉距测试: ${_skipWiFiRangeTest4 ? "跳过" : "执行"}');
     logState.info('   摄像头IMU标定(棋盘格): ${_skipCameraIMUCalibration4 ? "跳过" : "执行"}');
     logState.info('   灰卡测试: ${_skipGrayCardTest4 ? "跳过" : "执行"}');
+    logState.info('   船运模式: ${_enableShippingMode4 ? "开启（全部通过后进入船运模式，不重启）" : "关闭（退出产测并重启）"}');
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     bool hasFailure = false;
@@ -3931,8 +3933,10 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
     
-    if (allPassed || (hasFailure && reachedMesPhase)) {
-      logState.info('🔄 发送设备重启命令...');
+    if (allPassed && _enableShippingMode4) {
+      await _sendShippingModeCommand(state, logState);
+    } else if (allPassed || (hasFailure && reachedMesPhase)) {
+      logState.info('🔄 退出产测，发送设备重启命令...');
       await _sendDeviceRestartCommand(state, logState);
     }
     logState.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -4399,7 +4403,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     }
     
     if (allPassed) {
-      await _sendShippingModeCommand6(state, logState);
+      await _sendShippingModeCommand(state, logState);
     } else if (hasFailure && reachedMesPhase) {
       logState.info('🔄 发送设备重启命令...');
       await _sendDeviceRestartCommand(state, logState);
@@ -6467,7 +6471,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
     return completer.future;
   }
 
-  Future<bool> _sendShippingModeCommand6(TestState state, LogState logState) async {
+  Future<bool> _sendShippingModeCommand(TestState state, LogState logState) async {
     try {
       logState.info('🚢 发送船运模式命令 (0xFF 0xFE)...');
       final command = ProductionTestCommands.createEndTestCommand(
@@ -6792,6 +6796,31 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
                         ? null
                         : (value) => setState(() => _skipGrayCardTest4 = value),
                     activeColor: Colors.orange,
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.local_shipping,
+                    color: _enableShippingMode4 ? Colors.teal : Colors.grey,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '进入船运模式',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _enableShippingMode4 ? Colors.teal : Colors.grey,
+                    ),
+                  ),
+                  Switch(
+                    value: _enableShippingMode4,
+                    onChanged: _isAutoTesting4
+                        ? null
+                        : (value) => setState(() => _enableShippingMode4 = value),
+                    activeColor: Colors.teal,
                   ),
                 ],
               ),
