@@ -161,6 +161,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       TestStepResult(stepNumber: 9, name: '蓝牙名称读取校验', status: TestStepStatus.pending),
       TestStepResult(stepNumber: 10, name: '产测结束', status: TestStepStatus.pending),
     ]);
+
   }
 
   void _initializeSteps3() {
@@ -3687,6 +3688,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 12:
             logState.info('步骤13: 治具棋盘格卡下降');
+            if (_enableJigCommands4) {
+              logState.info('执行电机复位');
+              success = await _runJigStep4(
+                JigCommands.motorReset,
+                logState,
+                description: '电机复位',
+                timeout: const Duration(seconds: 30),
+              );
+              if (!success) {
+                message = '电机复位失败';
+                break;
+              }
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
             success = await _runJigStep4(
               JigCommands.onlyCheckerCardDown,
               logState,
@@ -3718,6 +3733,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
               success = true;
               message = '已跳过灰卡测试';
             } else {
+              if (_enableJigCommands4) {
+                logState.info('执行电机复位');
+                success = await _runJigStep4(
+                  JigCommands.motorReset,
+                  logState,
+                  description: '电机复位',
+                  timeout: const Duration(seconds: 30),
+                );
+                if (!success) {
+                  message = '电机复位失败';
+                  break;
+                }
+                await Future.delayed(const Duration(milliseconds: 500));
+              }
               success = await _runJigStep4(
                 JigCommands.onlyGrayCardDown,
                 logState,
@@ -3755,6 +3784,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 18:
             logState.info('步骤19: 治具分辨率图卡下降');
+            if (_enableJigCommands4) {
+              logState.info('执行电机复位');
+              success = await _runJigStep4(
+                JigCommands.motorReset,
+                logState,
+                description: '电机复位',
+                timeout: const Duration(seconds: 30),
+              );
+              if (!success) {
+                message = '电机复位失败';
+                break;
+              }
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
             success = await _runJigStep4(
               JigCommands.onlyResolutionCardDown,
               logState,
@@ -3775,6 +3818,20 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
             break;
           case 20:
             logState.info('步骤21: 治具色卡下降');
+            if (_enableJigCommands4) {
+              logState.info('执行电机复位');
+              success = await _runJigStep4(
+                JigCommands.motorReset,
+                logState,
+                description: '电机复位',
+                timeout: const Duration(seconds: 30),
+              );
+              if (!success) {
+                message = '电机复位失败';
+                break;
+              }
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
             success = await _runJigStep4(
               JigCommands.onlyColorCardDown,
               logState,
@@ -7349,12 +7406,28 @@ class _SNScanDialog extends StatefulWidget {
 class _SNScanDialogState extends State<_SNScanDialog> {
   final TextEditingController _snController = TextEditingController();
   final TextEditingController _macController = TextEditingController();
+  final FocusNode _snFocusNode = FocusNode();
+  final FocusNode _macFocusNode = FocusNode();
   _InputMode _inputMode = _InputMode.sn;
+
+  @override
+  void initState() {
+    super.initState();
+    // 清空输入框，确保每次打开对话框时都是空白状态
+    _snController.clear();
+    _macController.clear();
+    // 延迟请求焦点，确保对话框完全渲染后再聚焦
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _snFocusNode.requestFocus();
+    });
+  }
 
   @override
   void dispose() {
     _snController.dispose();
     _macController.dispose();
+    _snFocusNode.dispose();
+    _macFocusNode.dispose();
     super.dispose();
   }
 
@@ -7396,13 +7469,24 @@ class _SNScanDialogState extends State<_SNScanDialog> {
               ],
               selected: {_inputMode},
               onSelectionChanged: (Set<_InputMode> newSelection) {
-                setState(() => _inputMode = newSelection.first);
+                setState(() {
+                  _inputMode = newSelection.first;
+                  // 切换模式时清空输入框并重新聚焦
+                  _snController.clear();
+                  _macController.clear();
+                  if (_inputMode == _InputMode.sn) {
+                    _snFocusNode.requestFocus();
+                  } else {
+                    _macFocusNode.requestFocus();
+                  }
+                });
               },
             ),
             const SizedBox(height: 16),
             if (_inputMode == _InputMode.sn)
               TextField(
                 controller: _snController,
+                focusNode: _snFocusNode,
                 decoration: const InputDecoration(
                   labelText: 'SN码',
                   hintText: '请扫描或输入SN码',
@@ -7414,6 +7498,7 @@ class _SNScanDialogState extends State<_SNScanDialog> {
             else
               TextField(
                 controller: _macController,
+                focusNode: _macFocusNode,
                 decoration: const InputDecoration(
                   labelText: '蓝牙MAC地址',
                   hintText: '例如: 00:11:22:33:44:55',

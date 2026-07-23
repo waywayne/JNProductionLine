@@ -33,6 +33,9 @@ class JigCommands {
   /// 仅灰卡下降
   static const String onlyGrayCardDown = 'ONLY_GRAY_CARD_DOWN';
 
+  /// 电机复位
+  static const String motorReset = 'MOTOR_RESET';
+
   /// 夹爪夹紧（测试开始前）
   static const String clawClamp = 'CLAW_CLAMP';
 
