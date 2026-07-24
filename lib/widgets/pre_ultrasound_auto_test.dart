@@ -7463,6 +7463,9 @@ class _SNScanDialogState extends State<_SNScanDialog> {
   final FocusNode _snFocusNode = FocusNode();
   final FocusNode _macFocusNode = FocusNode();
   _InputMode _inputMode = _InputMode.sn;
+  
+  String _lastSnInput = '';  // 记录上一次输入，用于检测异常回退
+  int _maxSnLength = 0;      // 记录最大输入长度
 
   @override
   void initState() {
@@ -7470,6 +7473,8 @@ class _SNScanDialogState extends State<_SNScanDialog> {
     // 清空输入框，确保每次打开对话框时都是空白状态
     _snController.clear();
     _macController.clear();
+    _lastSnInput = '';
+    _maxSnLength = 0;
     print('🔍 [DEBUG] _SNScanDialogState initState, 输入框已清空');
     // 延迟请求焦点，确保对话框完全渲染后再聚焦
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -7555,6 +7560,26 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                 autofocus: true,
                 onChanged: (value) {
                   print('🔍 [DEBUG] SN输入框内容变化: "$value" (长度: ${value.length})');
+                  
+                  // 检测异常回退：如果当前长度比最大长度小很多，且不是用户主动删除
+                  if (value.length > 0 && value.length < _maxSnLength - 2) {
+                    print('⚠️ [DEBUG] 检测到异常回退: 当前${value.length}位, 最大$_maxSnLength位');
+                    print('⚠️ [DEBUG] 恢复到最大长度输入: "$_lastSnInput"');
+                    // 恢复到最大长度的输入
+                    _snController.value = TextEditingValue(
+                      text: _lastSnInput,
+                      selection: TextSelection.fromPosition(
+                        TextPosition(offset: _lastSnInput.length),
+                      ),
+                    );
+                    return;
+                  }
+                  
+                  // 更新最大长度和上一次输入
+                  if (value.length > _maxSnLength) {
+                    _maxSnLength = value.length;
+                    _lastSnInput = value;
+                  }
                 },
                 onSubmitted: (value) {
                   print('🔍 [DEBUG] SN输入框onSubmitted触发: "$value"');
