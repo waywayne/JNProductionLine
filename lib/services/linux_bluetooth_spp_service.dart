@@ -67,6 +67,7 @@ class LinuxBluetoothSppService {
   String? _currentDeviceName;
   int? _currentChannel;
   bool _isConnected = false;
+  bool _isDisconnecting = false;  // 防止重复断开连接
   LogState? _logState;
   
   // 数据包缓冲区
@@ -595,11 +596,17 @@ echo "trust $deviceAddress" | bluetoothctl
         },
         onError: (error) {
           _logState?.error('❌ 数据接收错误: $error');
-          if (_isConnected) disconnect();
+          // 只在仍然连接时才断开，避免重复调用
+          if (_isConnected && !_isDisconnecting) {
+            disconnect();
+          }
         },
         onDone: () {
           _logState?.warning('⚠️ SPP 桥接数据流结束');
-          if (_isConnected) disconnect();
+          // 只在仍然连接时才断开，避免重复调用
+          if (_isConnected && !_isDisconnecting) {
+            disconnect();
+          }
         },
       );
       
@@ -609,7 +616,10 @@ echo "trust $deviceAddress" | bluetoothctl
         exitCode = code;
         processExited = true;
         _logState?.warning('⚠️ SPP 桥接进程退出 (退出码: $code)');
-        if (_isConnected) disconnect();
+        // 只在仍然连接时才断开，避免重复调用
+        if (_isConnected && !_isDisconnecting) {
+          disconnect();
+        }
       });
       
       // 等待连接建立（Python 端最多 3 轮重试，每轮 10s 超时 + 2s 间隔，共约 36s）
@@ -661,6 +671,14 @@ echo "trust $deviceAddress" | bluetoothctl
   
   /// 断开连接
   Future<void> disconnect() async {
+    // 防止重复断开连接
+    if (_isDisconnecting) {
+      _logState?.debug('⚠️ 已经在断开连接中，跳过重复调用');
+      return;
+    }
+    
+    _isDisconnecting = true;
+    
     try {
       if (_isConnected || _socketProcess != null) {
         _logState?.info('🔌 断开 SPP 连接...');
@@ -675,17 +693,31 @@ echo "trust $deviceAddress" | bluetoothctl
         // 正常终止 Python 进程（SIGTERM 让 Python 关闭 socket，释放内核 RFCOMM 资源）
         if (_socketProcess != null) {
           try {
-            _socketProcess!.stdin.close();  // 关闭 stdin
+            // 先关闭 stdin，避免写入已关闭的管道
+            _socketProcess!.stdin.close();
           } catch (_) {}
+          
           try {
-            _socketProcess!.kill(ProcessSignal.sigterm);  // SIGTERM 正常退出
+            // 发送 SIGTERM 信号让进程正常退出
+            _socketProcess!.kill(ProcessSignal.sigterm);
           } catch (_) {}
+          
           try {
+            // 等待进程退出，最多3秒
             await _socketProcess!.exitCode.timeout(const Duration(seconds: 3), onTimeout: () {
-              _socketProcess?.kill(ProcessSignal.sigkill);
+              // 如果超时，强制杀死进程
+              try {
+                _socketProcess?.kill(ProcessSignal.sigkill);
+              } catch (_) {}
               return -1;
             });
-          } catch (_) {}
+          } catch (_) {
+            // 如果等待退出码失败，确保进程被清理
+            try {
+              _socketProcess?.kill(ProcessSignal.sigkill);
+            } catch (_) {}
+          }
+          
           _socketProcess = null;
           _logState?.debug('   Python 进程已终止');
           await Future.delayed(const Duration(milliseconds: 500));
@@ -710,6 +742,8 @@ echo "trust $deviceAddress" | bluetoothctl
       }
     } catch (e) {
       _logState?.error('❌ 断开连接时出错: $e');
+    } finally {
+      _isDisconnecting = false;
     }
   }
   

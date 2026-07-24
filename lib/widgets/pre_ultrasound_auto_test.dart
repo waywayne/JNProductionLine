@@ -4919,6 +4919,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     if (result1 == null) {
       logState.error('❌ 第一轮测试失败');
+      // iperf3 失败时，执行 ping 测试判断 IP 是否可达
+      logState.info('🔍 执行 ping 测试判断 IP 可达性...');
+      final pingResult = await _pingDevice(_deviceIP4!, logState);
+      if (!pingResult) {
+        logState.error('❌ IP $_deviceIP4 无法 ping 通，网络连接异常');
+      } else {
+        logState.warning('⚠️ IP $_deviceIP4 可以 ping 通，但 iperf3 测试失败，可能是 iperf3 服务异常');
+      }
       return false;
     }
 
@@ -4941,6 +4949,14 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
 
     if (result2 == null) {
       logState.error('❌ 第二轮测试失败');
+      // iperf3 失败时，执行 ping 测试判断 IP 是否可达
+      logState.info('🔍 执行 ping 测试判断 IP 可达性...');
+      final pingResult = await _pingDevice(_deviceIP4!, logState);
+      if (!pingResult) {
+        logState.error('❌ IP $_deviceIP4 无法 ping 通，网络连接异常');
+      } else {
+        logState.warning('⚠️ IP $_deviceIP4 可以 ping 通，但 iperf3 测试失败，可能是 iperf3 服务异常');
+      }
       return false;
     }
 
@@ -4980,6 +4996,36 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       }
     }
     logState.warning('⚠️ 设备 ping 不通，仍尝试 iperf3 连接');
+  }
+
+  /// 执行 ping 测试判断 IP 是否可达
+  Future<bool> _pingDevice(String ip, LogState logState, {int count = 3}) async {
+    try {
+      logState.info('🔍 ping $ip (发送$count个数据包)...');
+      final result = await Process.run('ping', ['-c', count.toString(), '-W', '2', ip]);
+      
+      if (result.exitCode == 0) {
+        final output = result.stdout.toString();
+        logState.success('✅ ping 成功');
+        logState.info('   输出: ${output.split('\n').take(count + 2).join('\n')}');
+        return true;
+      } else {
+        final error = result.stderr.toString();
+        final output = result.stdout.toString();
+        logState.error('❌ ping 失败');
+        logState.error('   退出码: ${result.exitCode}');
+        if (output.isNotEmpty) {
+          logState.error('   输出: $output');
+        }
+        if (error.isNotEmpty) {
+          logState.error('   错误: $error');
+        }
+        return false;
+      }
+    } catch (e) {
+      logState.error('❌ ping 执行异常: $e');
+      return false;
+    }
   }
 
   /// 带重试的 iperf3 测试
