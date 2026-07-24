@@ -5,25 +5,25 @@ using namespace std;
 
 int main(int argc, char** argv) {
     int ret = 0;
-    double output;
+    double output, output2;
     
     printf("version: %s\n", imagetest_getversion());
 
-    ret = imagetest_chessboard("samples/chessboard.png", 17, 29, 1.0, &output);
-    cout << "Chessboard Output: " << output << endl;
+    ret = imagetest_chessboard("samples/chessboard.png", 17, 29, 2090.0, 1075.0, 1.0, 300.0, &output, &output2);
+    cout << "Chessboard Output: " << output << ", " << output2 << endl;
     if (ret == 0)
         cout << "Chessboard: PASS" << endl;
     else
         cout << "Chessboard: FAIL" << endl;
 
-    ret = imagetest_color_chart("samples/colorchart.png", 10.8, &output);
+    ret = imagetest_color_chart("samples/colorchart.png", 16.0, &output);
     cout << "Color Chart Output: " << output << endl;
     if (ret == 0)
         cout << "Color Chart: PASS" << endl;
     else
         cout << "Color Chart: FAIL" << endl;
 
-    ret = imagetest_resolution_chart("samples/resolutionchart.png", 2000.0, &output);
+    ret = imagetest_resolution_chart("samples/resolutionchart.png", 3900.0, &output);
     cout << "Resolution Chart Output: " << output << endl;
     if (ret == 0)
         cout << "Resolution Chart: PASS" << endl;

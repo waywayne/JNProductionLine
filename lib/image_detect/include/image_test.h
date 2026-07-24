@@ -14,11 +14,15 @@ const char* imagetest_getversion();
  * image_path               [in]   the input path of JPEG image
  * grid_x					[in]   the grid cells in x direction, default: 17
  * grid_y					[in]   the grid cells in y direction, default: 29
- * threshold                [in]   the threshold value, default: 1.0
- * output					[out]  the output value
+ * cx						[in]   the center of grid cells in x direction
+ * cy						[in]   the center of grid cells in y direction
+ * threshold_angle          [in]   the threshold value of angle, default: 1.0
+ * threshold_center         [in]   the threshold value of center offset, default: 200.0
+ * output_angle				[out]  the output value of angle
+ * output_offset			[out]  the output value of center offset
  * @return                          0: PASS, otherwise: FAIL
  */
-int imagetest_chessboard(const char* image_path, int grid_x, int grid_y, double threshold, double* output);
+int imagetest_chessboard(const char* image_path, int grid_x, int grid_y, int cx, int cy, double threshold_angle, double threshold_center, double* output_angle, double* output_offset);
 
 /*
  * Test one image with color chart
