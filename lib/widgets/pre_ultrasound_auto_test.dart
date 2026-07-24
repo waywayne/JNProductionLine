@@ -3478,6 +3478,13 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       builder: (context) => _SNScanDialog(title: '工位4: 超声后射频图像测试'),
     );
 
+    print('🔍 [DEBUG] showDialog返回, scanResult: $scanResult');
+    if (scanResult != null) {
+      print('🔍 [DEBUG] scanResult.isMacMode: ${scanResult.isMacMode}');
+      print('🔍 [DEBUG] scanResult.sn: ${scanResult.sn}');
+      print('🔍 [DEBUG] scanResult.bluetoothAddress: ${scanResult.bluetoothAddress}');
+    }
+
     if (scanResult == null) {
       logState.warning('用户取消输入');
       return;
@@ -3494,6 +3501,7 @@ class _PreUltrasoundAutoTestState extends State<PreUltrasoundAutoTest> with Sing
       );
     } else {
       _scannedSN4 = scanResult.sn;
+      print('🔍 [DEBUG] 设置_scannedSN4: $_scannedSN4');
       logState.info('📋 扫码SN: $_scannedSN4');
       logState.info('📡 查询SN信息获取蓝牙MAC...');
       try {
@@ -7416,8 +7424,10 @@ class _SNScanDialogState extends State<_SNScanDialog> {
     // 清空输入框，确保每次打开对话框时都是空白状态
     _snController.clear();
     _macController.clear();
+    print('🔍 [DEBUG] _SNScanDialogState initState, 输入框已清空');
     // 延迟请求焦点，确保对话框完全渲染后再聚焦
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      print('🔍 [DEBUG] 请求SN输入框焦点');
       _snFocusNode.requestFocus();
     });
   }
@@ -7434,21 +7444,25 @@ class _SNScanDialogState extends State<_SNScanDialog> {
   void _handleConfirm() {
     if (_inputMode == _InputMode.sn) {
       final sn = _snController.text.trim();
+      print('🔍 [DEBUG] _handleConfirm SN模式, 输入框内容: "${_snController.text}", trim后: "$sn"');
       if (sn.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('请输入SN码')),
         );
         return;
       }
+      print('🔍 [DEBUG] 提交SN: "$sn"');
       Navigator.of(context).pop(_SNScanResult.fromSN(sn));
     } else {
       final mac = _macController.text.trim();
+      print('🔍 [DEBUG] _handleConfirm MAC模式, 输入框内容: "${_macController.text}", trim后: "$mac"');
       if (mac.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('请输入蓝牙MAC地址')),
         );
         return;
       }
+      print('🔍 [DEBUG] 提交MAC: "$mac"');
       Navigator.of(context).pop(_SNScanResult.fromMAC(mac));
     }
   }
@@ -7493,7 +7507,13 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                   border: OutlineInputBorder(),
                 ),
                 autofocus: true,
-                onSubmitted: (_) => _handleConfirm(),
+                onChanged: (value) {
+                  print('🔍 [DEBUG] SN输入框内容变化: "$value" (长度: ${value.length})');
+                },
+                onSubmitted: (value) {
+                  print('🔍 [DEBUG] SN输入框onSubmitted触发: "$value"');
+                  _handleConfirm();
+                },
               )
             else
               TextField(
@@ -7505,7 +7525,13 @@ class _SNScanDialogState extends State<_SNScanDialog> {
                   border: OutlineInputBorder(),
                 ),
                 autofocus: true,
-                onSubmitted: (_) => _handleConfirm(),
+                onChanged: (value) {
+                  print('🔍 [DEBUG] MAC输入框内容变化: "$value" (长度: ${value.length})');
+                },
+                onSubmitted: (value) {
+                  print('🔍 [DEBUG] MAC输入框onSubmitted触发: "$value"');
+                  _handleConfirm();
+                },
               ),
           ],
         ),
